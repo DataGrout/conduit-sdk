@@ -2,6 +2,7 @@
 
 from .client import Client, GuidedSession
 from .types import Receipt, DiscoverResult, PerformResult
+from .transports import Transport, MCPTransport, JSONRPCTransport
 
 __version__ = "0.1.0"
 
@@ -11,4 +12,7 @@ __all__ = [
     "Receipt",
     "DiscoverResult",
     "PerformResult",
+    "Transport",
+    "MCPTransport",
+    "JSONRPCTransport",
 ]

@@ -64,6 +64,57 @@ const results = await client.discover({query: 'find unpaid invoices', limit: 10}
 const session = await client.guide({goal: 'create invoice from lead'});
 ```
 
+## Transport Options
+
+Conduit supports multiple transport protocols:
+
+### MCP Transport (Official SDK)
+
+Uses Anthropic's official `mcp` package for standards-compliant communication.
+
+```python
+from datagrout.conduit import Client
+
+# SSE/HTTP transport (DataGrout Gateway)
+client = Client(
+    url="https://gateway.datagrout.ai/servers/{uuid}/mcp",
+    transport="mcp",  # Use official MCP SDK
+    auth={"bearer": "your-token"}
+)
+
+# Stdio transport (local MCP server)
+client = Client(
+    url="stdio://python -m my_mcp_server",
+    transport="mcp"
+)
+```
+
+**Supports:**
+- SSE over HTTP/HTTPS
+- Stdio (local processes)
+- Full MCP protocol compliance
+
+### JSONRPC Transport (Lightweight)
+
+Simple HTTP-based transport for lightweight scenarios:
+
+```python
+client = Client(
+    url="https://api.example.com/rpc",
+    transport="jsonrpc",  # Default, simpler
+    auth={"api_key": "your-key"}
+)
+```
+
+**Use when:**
+- HTTP-only environment
+- Lower overhead needed
+- Custom JSONRPC APIs
+
+See [docs/TRANSPORTS.md](docs/TRANSPORTS.md) for details.
+
+---
+
 ## Why Conduit?
 
 ### The N×M Problem
