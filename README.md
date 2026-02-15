@@ -145,13 +145,15 @@ Cognitive Trust Certificates (CTCs) provide cryptographic proof that workflows a
 
 - **Python** - `pip install datagrout-conduit`
 - **TypeScript** - `npm install @datagrout/conduit`
+- **Rust** - `cargo add datagrout-conduit`
 
-Additional languages coming soon: Rust, Elixir, Go, Ruby
+Additional languages coming soon: Elixir, Go, Ruby
 
 ## Documentation
 
 - [Python Documentation](./python/README.md)
 - [TypeScript Documentation](./typescript/README.md)
+- [Rust Documentation](./rust/README.md)
 - [Concepts](./docs/concepts/)
 - [API Reference](./docs/api/)
 

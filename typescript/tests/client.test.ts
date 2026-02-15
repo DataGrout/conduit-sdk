@@ -35,10 +35,10 @@ describe('Client', () => {
 
   it('should track receipts from operations', async () => {
     const mockTransport = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      listTools: vi.fn().resolves([]),
-      callTool: vi.fn().resolves({
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn().mockResolvedValue({
         result: 'success',
         _receipt: {
           receipt_id: 'rcp_123',
@@ -48,10 +48,10 @@ describe('Client', () => {
           savings: 0.5,
         },
       }),
-      listResources: vi.fn().resolves([]),
-      readResource: vi.fn().resolves({}),
-      listPrompts: vi.fn().resolves([]),
-      getPrompt: vi.fn().resolves({}),
+      listResources: vi.fn().mockResolvedValue([]),
+      readResource: vi.fn().mockResolvedValue({}),
+      listPrompts: vi.fn().mockResolvedValue([]),
+      getPrompt: vi.fn().mockResolvedValue({}),
     };
 
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
@@ -68,10 +68,10 @@ describe('Client', () => {
 
   it('should normalize snake_case to camelCase for receipts', async () => {
     const mockTransport = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      listTools: vi.fn().resolves([]),
-      callTool: vi.fn().resolves({
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn().mockResolvedValue({
         result: 'success',
         _receipt: {
           receipt_id: 'rcp_456',
@@ -81,10 +81,10 @@ describe('Client', () => {
           savings_bonus: 0.5,
         },
       }),
-      listResources: vi.fn().resolves([]),
-      readResource: vi.fn().resolves({}),
-      listPrompts: vi.fn().resolves([]),
-      getPrompt: vi.fn().resolves({}),
+      listResources: vi.fn().mockResolvedValue([]),
+      readResource: vi.fn().mockResolvedValue({}),
+      listPrompts: vi.fn().mockResolvedValue([]),
+      getPrompt: vi.fn().mockResolvedValue({}),
     };
 
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
@@ -100,10 +100,10 @@ describe('Client', () => {
 
   it('should handle discover results', async () => {
     const mockTransport = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      listTools: vi.fn().resolves([]),
-      callTool: vi.fn().resolves({
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn().mockResolvedValue({
         query_used: 'test query',
         results: [
           {
@@ -115,10 +115,10 @@ describe('Client', () => {
         total: 1,
         limit: 10,
       }),
-      listResources: vi.fn().resolves([]),
-      readResource: vi.fn().resolves({}),
-      listPrompts: vi.fn().resolves([]),
-      getPrompt: vi.fn().resolves({}),
+      listResources: vi.fn().mockResolvedValue([]),
+      readResource: vi.fn().mockResolvedValue({}),
+      listPrompts: vi.fn().mockResolvedValue([]),
+      getPrompt: vi.fn().mockResolvedValue({}),
     };
 
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
@@ -134,10 +134,10 @@ describe('Client', () => {
 
   it('should create guided session', async () => {
     const mockTransport = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      listTools: vi.fn().resolves([]),
-      callTool: vi.fn().resolves({
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn().mockResolvedValue({
         session_id: 'guide_abc',
         step: '1',
         message: 'Choose a path',
@@ -146,10 +146,10 @@ describe('Client', () => {
         path_taken: [],
         total_cost: 0.0,
       }),
-      listResources: vi.fn().resolves([]),
-      readResource: vi.fn().resolves({}),
-      listPrompts: vi.fn().resolves([]),
-      getPrompt: vi.fn().resolves({}),
+      listResources: vi.fn().mockResolvedValue([]),
+      readResource: vi.fn().mockResolvedValue({}),
+      listPrompts: vi.fn().mockResolvedValue([]),
+      getPrompt: vi.fn().mockResolvedValue({}),
     };
 
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');

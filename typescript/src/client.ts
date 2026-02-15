@@ -81,18 +81,6 @@ export class Client {
   private transport: Transport;
   private lastReceipt?: Receipt;
 
-  // DataGrout first-party tools
-  private static readonly DATAGROUT_TOOLS = [
-    'data-grout/discovery.discover',
-    'data-grout/discovery.perform',
-    'data-grout/discovery.guide',
-    'data-grout/flow.into',
-    'data-grout/flow.request-approval',
-    'data-grout/flow.request-feedback',
-    'data-grout/prism.focus',
-    'data-grout/prism.refract',
-  ];
-
   constructor(options: ClientOptions | string) {
     // Allow simple string URL or full options object
     if (typeof options === 'string') {

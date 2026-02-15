@@ -1,0 +1,87 @@
+[package]
+name = "datagrout-conduit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["DataGrout <hello@datagrout.ai>"]
+license = "MIT"
+description = "Production-ready MCP client with enterprise features for Rust"
+homepage = "https://conduit.datagrout.dev"
+repository = "https://github.com/datagrout/conduit"
+keywords = ["mcp", "agents", "ai", "datagrout", "llm"]
+categories = ["api-bindings", "development-tools"]
+readme = "README.md"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# JSON-RPC and serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# UUIDs
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", optional = true }
+
+# URL parsing
+url = "2.5"
+
+# SSE (Server-Sent Events) support
+eventsource-stream = "0.2"
+futures = "0.3"
+
+# Base64 for basic auth
+base64 = "0.21"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.2"
+tracing-subscriber = "0.3"
+criterion = "0.5"
+
+[features]
+default = []
+full = ["tracing-subscriber"]
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[example]]
+name = "discovery"
+path = "examples/discovery.rs"
+
+[[example]]
+name = "guided_workflow"
+path = "examples/guided_workflow.rs"
+
+[[example]]
+name = "flow_orchestration"
+path = "examples/flow_orchestration.rs"
+
+[[example]]
+name = "type_transformation"
+path = "examples/type_transformation.rs"
+
+[[example]]
+name = "cost_tracking"
+path = "examples/cost_tracking.rs"
+
+[[example]]
+name = "batch_operations"
+path = "examples/batch_operations.rs"
