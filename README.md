@@ -166,7 +166,3 @@ DataGrout Conduit is powered by [DataGrout](https://datagrout.ai) - The Cognitiv
 - 🎯 **Hub** - Connect to real systems
 - 🧠 **Intelligence** - Neurosymbolic execution
 - 💾 **Memory** - Curated context (coming soon)
-
-## License
-
-MIT (or your preferred license)
