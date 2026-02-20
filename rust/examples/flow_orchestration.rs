@@ -69,17 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nFinal result:");
     println!("{}", serde_json::to_string_pretty(&result)?);
 
-    // Check receipt
-    if let Some(receipt) = client.last_receipt().await {
-        println!("\n📄 Receipt:");
-        println!("  ID: {}", receipt.id);
-        println!("  Total cost: {} credits", receipt.total_cost);
-        println!("  Steps executed: {}", receipt.tool_calls.len());
-
-        println!("\n  Breakdown:");
-        for call in &receipt.tool_calls {
-            println!("    • {} - {} credits", call.name, call.cost);
-        }
+    if let Some(meta) = datagrout_conduit::extract_meta(&result) {
+        let r = &meta.receipt;
+        println!("\n📄 Receipt: {} — estimated {:.4} / actual {:.4} / net {:.4} credits",
+            r.receipt_id, r.estimated_credits, r.actual_credits, r.net_credits);
     }
 
     // Example 2: Save as reusable skill

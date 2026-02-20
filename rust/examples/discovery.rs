@@ -73,12 +73,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Result: {}", serde_json::to_string_pretty(&result)?);
 
-        // Check receipt
-        if let Some(receipt) = client.last_receipt().await {
-            println!("\n📄 Receipt:");
-            println!("  ID: {}", receipt.id);
-            println!("  Total cost: {} credits", receipt.total_cost);
-            println!("  Tool calls: {}", receipt.tool_calls.len());
+        if let Some(meta) = datagrout_conduit::extract_meta(&result) {
+            println!(
+                "\n📄 Receipt: {} — {:.4} credits",
+                meta.receipt.receipt_id, meta.receipt.net_credits
+            );
         }
     }
 

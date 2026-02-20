@@ -205,12 +205,12 @@ let client = ClientBuilder::new()
     .build()?;
 ```
 
-### Hide Third-Party Tools
+### Intelligent Interface (semantic discovery only)
 
 ```rust
 let client = ClientBuilder::new()
     .url("...")
-    .hide_third_party_tools(true)  // Only show DataGrout tools
+    .use_intelligent_interface(true)  // Expose only semantic discovery tools
     .build()?;
 ```
 

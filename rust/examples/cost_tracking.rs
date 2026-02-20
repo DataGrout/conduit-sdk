@@ -1,6 +1,9 @@
-//! Cost tracking and credit management example
+//! Cost tracking and credit management example.
+//!
+//! Demonstrates how to read the `_meta` block that DataGrout embeds in every
+//! tool-call result using [`extract_meta`].
 
-use datagrout_conduit::{ClientBuilder, Transport};
+use datagrout_conduit::{extract_meta, ClientBuilder, Transport};
 use serde_json::json;
 
 #[tokio::main]
@@ -9,7 +12,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== DataGrout Conduit - Cost Tracking Example ===\n");
 
-    // Create and connect client
     let client = ClientBuilder::new()
         .url("https://gateway.datagrout.ai/servers/{your-uuid}/mcp")
         .transport(Transport::Mcp)
@@ -19,23 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.connect().await?;
     println!("✓ Connected\n");
 
-    // Example 1: Estimate cost before execution
-    println!("--- Cost Estimation ---");
+    // ── Example 1: Execute and inspect the receipt ────────────────────────────
 
-    let estimate = client
-        .estimate_cost(
-            "salesforce@1/get_lead@1",
-            json!({"id": "lead_123"}),
-        )
-        .await?;
-
-    println!("Estimated cost: {} credits", estimate.get("estimated_credits")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0)
-    );
-
-    // Example 2: Execute and track actual cost
-    println!("\n--- Execute with Tracking ---");
+    println!("--- Execute with Cost Tracking ---");
 
     let result = client
         .perform("salesforce@1/get_lead@1")
@@ -45,23 +33,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Result: {}", serde_json::to_string_pretty(&result)?);
 
-    // Check receipt
-    if let Some(receipt) = client.last_receipt().await {
+    if let Some(meta) = extract_meta(&result) {
+        let r = &meta.receipt;
         println!("\n📄 Receipt:");
-        println!("  ID: {}", receipt.id);
-        println!("  Estimated: {} credits", 
-            receipt.tool_calls.iter().map(|c| c.cost).sum::<u64>()
-        );
-        println!("  Actual: {} credits", receipt.total_cost);
-        println!("  Timestamp: {}", receipt.timestamp);
-
-        println!("\n  Tool calls:");
-        for call in &receipt.tool_calls {
-            println!("    • {} - {} credits", call.name, call.cost);
+        println!("  ID:               {}", r.receipt_id);
+        println!("  Timestamp:        {}", r.timestamp);
+        println!("  Estimated:        {} credits", r.estimated_credits);
+        println!("  Actual:           {} credits", r.actual_credits);
+        println!("  Net (after BYOK): {} credits", r.net_credits);
+        println!("  Savings:          {} credits", r.savings);
+        if let Some(before) = r.balance_before {
+            println!("  Balance before:   {:.2}", before);
+        }
+        if let Some(after) = r.balance_after {
+            println!("  Balance after:    {:.2}", after);
+        }
+        if r.byok.enabled {
+            println!("  BYOK discount:    {:.0}%", r.byok.discount_rate * 100.0);
         }
     }
 
-    // Example 3: Batch operations with aggregated costs
+    // ── Example 2: Batch operations with per-call cost display ────────────────
+
     println!("\n--- Batch Operations ---");
 
     let tools = vec![
@@ -70,63 +63,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("salesforce@1/get_lead@1", json!({"id": "lead_3"})),
     ];
 
-    println!("Executing {} operations in parallel...", tools.len());
+    let mut total_net: f64 = 0.0;
 
-    for (tool, args) in tools {
-        let _ = client
-            .perform(tool)
-            .args(args)
-            .execute()
-            .await?;
-    }
+    for (tool, args) in tools.clone() {
+        let res = client.perform(tool).args(args).execute().await?;
 
-    // Check aggregated receipt
-    if let Some(receipt) = client.last_receipt().await {
-        println!("\n📄 Aggregated Receipt:");
-        println!("  Total operations: {}", receipt.tool_calls.len());
-        println!("  Total cost: {} credits", receipt.total_cost);
-
-        let avg_cost = if !receipt.tool_calls.is_empty() {
-            receipt.total_cost / receipt.tool_calls.len() as u64
+        if let Some(meta) = extract_meta(&res) {
+            let net = meta.receipt.net_credits;
+            total_net += net;
+            println!("  ✓ {} — {:.4} credits", tool, net);
         } else {
-            0
-        };
-        println!("  Average cost per operation: {} credits", avg_cost);
+            println!("  ✓ {} (no receipt in response)", tool);
+        }
     }
 
-    // Example 4: Budget-aware execution
+    println!("  Total net credits: {:.4}", total_net);
+
+    // ── Example 3: Budget-aware execution ────────────────────────────────────
+
     println!("\n--- Budget-Aware Execution ---");
 
-    let max_budget = 1000; // credits
-    let mut spent = 0u64;
+    let max_budget: f64 = 10.0;
+    let mut spent: f64 = 0.0;
 
     let tasks = vec![
-        ("salesforce@1/get_lead@1", json!({"id": "lead_1"})),
-        ("salesforce@1/get_lead@1", json!({"id": "lead_2"})),
-        ("salesforce@1/get_lead@1", json!({"id": "lead_3"})),
+        ("salesforce@1/get_lead@1", json!({"id": "lead_a"})),
+        ("salesforce@1/get_lead@1", json!({"id": "lead_b"})),
+        ("salesforce@1/get_lead@1", json!({"id": "lead_c"})),
     ];
 
     for (tool, args) in tasks {
-        // Estimate first
-        let estimate = client.estimate_cost(tool, args.clone()).await?;
-        let estimated_cost = estimate
-            .get("estimated_credits")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0) as u64;
-
-        if spent + estimated_cost > max_budget {
-            println!("⚠️  Budget exceeded! Stopping.");
-            println!("   Spent: {} credits", spent);
-            println!("   Budget: {} credits", max_budget);
+        if spent >= max_budget {
+            println!("⚠️  Budget exhausted ({:.2}/{:.2}). Stopping.", spent, max_budget);
             break;
         }
 
-        // Execute
-        let _ = client.perform(tool).args(args).execute().await?;
+        let res = client.perform(tool).args(args).execute().await?;
 
-        if let Some(receipt) = client.last_receipt().await {
-            spent = receipt.total_cost;
-            println!("✓ Executed {} (spent: {}/{} credits)", tool, spent, max_budget);
+        if let Some(meta) = extract_meta(&res) {
+            spent += meta.receipt.net_credits;
+            println!("  ✓ {} (spent so far: {:.4}/{:.2})", tool, spent, max_budget);
         }
     }
 

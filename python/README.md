@@ -73,11 +73,11 @@ print(f"Breakdown: {receipt['breakdown']}")
 ### Dual Transport Modes
 
 ```python
-# Mode 1: MCP-backed (default, uses official mcp package)
-client = Client(url, transport="mcp")
-
-# Mode 2: Pure JSONRPC (no mcp dependency)
+# Mode 1: Pure JSONRPC (default — no extra dependencies)
 client = Client(url, transport="jsonrpc")
+
+# Mode 2: MCP-backed (uses the official mcp package)
+client = Client(url, transport="mcp")
 ```
 
 ## API Reference
@@ -88,8 +88,8 @@ client = Client(url, transport="jsonrpc")
 Client(
     url: str,
     auth: dict = None,
-    hide_3rd_party_tools: bool = True,
-    transport: str = "mcp",
+    use_intelligent_interface: bool = False,
+    transport: str = "jsonrpc",
     **kwargs
 )
 ```

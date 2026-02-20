@@ -5,9 +5,9 @@
 import { Transport } from './transports/base';
 import { MCPTransport } from './transports/mcp';
 import { JSONRPCTransport } from './transports/jsonrpc';
+import { ConduitIdentity } from './identity';
 import type {
   ClientOptions,
-  Receipt,
   DiscoverResult,
   DiscoverOptions,
   PerformOptions,
@@ -71,15 +71,21 @@ export class GuidedSession {
   }
 }
 
+/** Returns `true` when `url` points at a DataGrout-managed endpoint. */
+export function isDgUrl(url: string): boolean {
+  return url.includes('datagrout.ai') || url.includes('datagrout.dev');
+}
+
 /**
  * DataGrout Conduit client - drop-in replacement for MCP clients
  */
 export class Client {
   private url: string;
   private auth?: ClientOptions['auth'];
-  private hide3rdPartyTools: boolean;
+  private useIntelligentInterface: boolean;
   private transport: Transport;
-  private lastReceipt?: Receipt;
+  private readonly isDg: boolean;
+  private dgWarned = false;
 
   constructor(options: ClientOptions | string) {
     // Allow simple string URL or full options object
@@ -89,14 +95,24 @@ export class Client {
 
     this.url = options.url;
     this.auth = options.auth;
-    this.hide3rdPartyTools = options.hide3rdPartyTools ?? true;
+    this.useIntelligentInterface = options.useIntelligentInterface ?? false;
+    this.isDg = isDgUrl(this.url);
+
+    // Resolve identity: explicit > identityAuto flag > DG URL auto-discover.
+    // For DG URLs, silently try auto-discovery unless disable_mtls is set.
+    let identity =
+      options.identity ??
+      (options.identityAuto ? ConduitIdentity.tryDefault() ?? undefined : undefined);
+    if (identity === undefined && this.isDg && !options.disableMtls) {
+      identity = ConduitIdentity.tryDefault() ?? undefined;
+    }
 
     // Initialize transport
     const transportType = options.transport || 'jsonrpc';
     if (transportType === 'mcp') {
       this.transport = new MCPTransport(this.url, this.auth);
     } else {
-      this.transport = new JSONRPCTransport(this.url, this.auth, options.timeout);
+      this.transport = new JSONRPCTransport(this.url, this.auth, options.timeout, identity);
     }
   }
 
@@ -111,10 +127,13 @@ export class Client {
   // ===== Standard MCP API (Drop-in Compatible) =====
 
   async listTools(options?: any): Promise<MCPTool[]> {
-    if (this.hide3rdPartyTools) {
-      return this.getDatagroutTools();
+    const tools = await this.transport.listTools(options);
+    if (this.useIntelligentInterface) {
+      // Third-party integration tools use the integration@version/tool@version
+      // naming scheme. DG's own tools (arbiter_*, governor_*) do not contain "@".
+      return tools.filter(t => !t.name.includes('@'));
     }
-    return await this.transport.listTools(options);
+    return tools;
   }
 
   async callTool(name: string, args: Record<string, any>, options?: any): Promise<any> {
@@ -137,9 +156,23 @@ export class Client {
     return await this.transport.getPrompt(name, args, options);
   }
 
+  // ===== DG-awareness helpers =====
+
+  private warnIfNotDg(method: string): void {
+    if (!this.isDg && !this.dgWarned) {
+      this.dgWarned = true;
+      console.warn(
+        `[conduit] \`${method}\` is a DataGrout-specific extension. ` +
+        `The connected server may not support it. ` +
+        `Standard MCP methods (listTools, callTool, …) work on any server.`
+      );
+    }
+  }
+
   // ===== DataGrout Extensions =====
 
   async discover(options: DiscoverOptions): Promise<DiscoverResult> {
+    this.warnIfNotDg('discover');
     const params: Record<string, any> = {
       limit: options.limit ?? 10,
       minScore: options.minScore ?? 0.0,
@@ -171,6 +204,7 @@ export class Client {
   }
 
   async perform(options: PerformOptions): Promise<any> {
+    this.warnIfNotDg('perform');
     return await this.performWithTracking(
       options.tool,
       options.args,
@@ -179,21 +213,12 @@ export class Client {
   }
 
   async performBatch(calls: Array<{ tool: string; args: Record<string, any> }>): Promise<any[]> {
-    const result = await this.transport.callTool('data-grout/discovery.perform', calls);
-
-    // Extract receipts if present
-    if (Array.isArray(result)) {
-      for (const item of result) {
-        if (item && typeof item === 'object' && '_receipt' in item) {
-          this.lastReceipt = this.normalizeReceipt(item._receipt);
-        }
-      }
-    }
-
-    return result;
+    this.warnIfNotDg('performBatch');
+    return await this.transport.callTool('data-grout/discovery.perform', calls);
   }
 
   async guide(options: GuideRequestOptions): Promise<GuidedSession> {
+    this.warnIfNotDg('guide');
     const params: Record<string, any> = {};
 
     if (options.goal) params.goal = options.goal;
@@ -225,6 +250,7 @@ export class Client {
   }
 
   async flowInto(options: FlowOptions): Promise<any> {
+    this.warnIfNotDg('flowInto');
     const params: Record<string, any> = {
       plan: options.plan,
       validate_ctc: options.validateCtc ?? true,
@@ -235,17 +261,11 @@ export class Client {
       params.input_data = options.inputData;
     }
 
-    const result = await this.transport.callTool('data-grout/flow.into', params);
-
-    // Extract receipt
-    if (result && typeof result === 'object' && '_receipt' in result) {
-      this.lastReceipt = this.normalizeReceipt(result._receipt);
-    }
-
-    return result;
+    return await this.transport.callTool('data-grout/flow.into', params);
   }
 
   async prismFocus(options: PrismFocusOptions): Promise<any> {
+    this.warnIfNotDg('prismFocus');
     const params = {
       data: options.data,
       source_type: options.sourceType,
@@ -255,10 +275,113 @@ export class Client {
     return await this.transport.callTool('data-grout/prism.focus', params);
   }
 
-  // ===== Receipt & Credit Management =====
+  // ===== Logic Cell Extensions =====
 
-  getLastReceipt(): Receipt | undefined {
-    return this.lastReceipt;
+  /**
+   * Store facts in the agent's persistent logic cell.
+   *
+   * Converts natural language to symbolic Prolog facts and stores them
+   * durably across sessions.
+   *
+   * @param statement - Natural language statement to remember
+   * @param options.tag - Tag/namespace for grouping facts
+   * @param options.facts - Optional pre-structured fact list
+   */
+  async remember(
+    statement: string,
+    options?: { tag?: string; facts?: Record<string, any>[] }
+  ): Promise<{ handles: string[]; facts: any[]; count: number; message: string }> {
+    const params: Record<string, any> = {
+      tag: options?.tag ?? 'default',
+    };
+
+    if (options?.facts) {
+      params.facts = options.facts;
+    } else {
+      params.statement = statement;
+    }
+
+    return await this.transport.callTool('data-grout/logic.remember', params);
+  }
+
+  /**
+   * Query the agent's logic cell with natural language.
+   *
+   * Translates question to Prolog patterns and retrieves matching facts.
+   * Zero-token retrieval after the NL→pattern translation step.
+   *
+   * @param question - Natural language question
+   * @param options.limit - Maximum results (default: 50)
+   * @param options.patterns - Optional pre-built pattern list
+   */
+  async queryCell(
+    question: string,
+    options?: { limit?: number; patterns?: Record<string, any>[] }
+  ): Promise<{ results: any[]; total: number; description: string; message: string }> {
+    const params: Record<string, any> = {
+      limit: options?.limit ?? 50,
+    };
+
+    if (options?.patterns) {
+      params.patterns = options.patterns;
+    } else {
+      params.question = question;
+    }
+
+    return await this.transport.callTool('data-grout/logic.query', params);
+  }
+
+  /**
+   * Retract facts from the agent's logic cell.
+   *
+   * @param options.handles - Specific fact handles to retract
+   * @param options.pattern - NL pattern — retract all facts mentioning this text
+   */
+  async forget(
+    options: { handles?: string[]; pattern?: string }
+  ): Promise<{ retracted: number; handles: string[]; message: string }> {
+    const params: Record<string, any> = {};
+
+    if (options.handles) params.handles = options.handles;
+    if (options.pattern) params.pattern = options.pattern;
+
+    return await this.transport.callTool('data-grout/logic.forget', params);
+  }
+
+  /**
+   * Reflect on the agent's logic cell — full snapshot or per-entity view.
+   *
+   * @param options.entity - Optional entity name to scope reflection
+   * @param options.summaryOnly - If true, return only counts
+   */
+  async reflect(
+    options?: { entity?: string; summaryOnly?: boolean }
+  ): Promise<{ total: number; summary?: any; entity?: string; facts?: any[]; message: string }> {
+    const params: Record<string, any> = {
+      summary_only: options?.summaryOnly ?? false,
+    };
+
+    if (options?.entity) params.entity = options.entity;
+
+    return await this.transport.callTool('data-grout/logic.reflect', params);
+  }
+
+  /**
+   * Store a logical rule or policy in the agent's logic cell.
+   *
+   * @param rule - Natural language rule (e.g. 'VIP customers have ARR > $500K')
+   * @param options.tag - Tag/namespace for this constraint
+   */
+  async constrain(
+    rule: string,
+    options?: { tag?: string }
+  ): Promise<{ handle: string; name: string; rule: string; message: string }> {
+    const params: Record<string, any> = {
+      rule,
+      tag: options?.tag ?? 'constraint',
+    };
+
+    return await this.transport.callTool('data-grout/logic.constrain', params);
   }
 
   async estimateCost(tool: string, args: Record<string, any>): Promise<any> {
@@ -274,104 +397,9 @@ export class Client {
     options?: any
   ): Promise<any> {
     const params = { tool, args, ...options };
-
-    const result = await this.transport.callTool('data-grout/discovery.perform', params);
-
-    // Extract receipt
-    if (result && typeof result === 'object') {
-      if ('_receipt' in result) {
-        this.lastReceipt = this.normalizeReceipt(result._receipt);
-        const { _receipt, ...cleanResult } = result;
-        return cleanResult;
-      }
-      if ('structured_content' in result && result.structured_content?._receipt) {
-        this.lastReceipt = this.normalizeReceipt(result.structured_content._receipt);
-        return result.structured_content.result ?? result;
-      }
-    }
-
-    return result;
+    // Receipt is embedded in result["_meta"]["receipt"] — callers can use
+    // extractMeta(result) to access it without any client-side state.
+    return await this.transport.callTool('data-grout/discovery.perform', params);
   }
 
-  private normalizeReceipt(receipt: any): Receipt {
-    return {
-      receiptId: receipt.receipt_id || receipt.receiptId,
-      estimatedCredits: receipt.estimated_credits || receipt.estimatedCredits,
-      actualCredits: receipt.actual_credits || receipt.actualCredits,
-      netCredits: receipt.net_credits || receipt.netCredits,
-      savings: receipt.savings,
-      savingsBonus: receipt.savings_bonus || receipt.savingsBonus,
-      breakdown: receipt.breakdown,
-      byok: receipt.byok,
-    };
-  }
-
-  private getDatagroutTools(): MCPTool[] {
-    return [
-      {
-        name: 'data-grout/discovery.discover',
-        description: 'Semantic tool discovery with natural language queries',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string' },
-            goal: { type: 'string' },
-            limit: { type: 'integer', default: 10 },
-          },
-        },
-      },
-      {
-        name: 'data-grout/discovery.perform',
-        description: 'Direct tool execution with credit tracking',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            tool: { type: 'string' },
-            args: { type: 'object' },
-            demux: { type: 'boolean', default: false },
-          },
-          required: ['tool', 'args'],
-        },
-      },
-      {
-        name: 'data-grout/discovery.guide',
-        description: 'Guided workflow navigation (MUD-style)',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            goal: { type: 'string' },
-            policy: { type: 'object' },
-            session_id: { type: 'string' },
-            choice: { type: 'string' },
-          },
-        },
-      },
-      {
-        name: 'data-grout/flow.into',
-        description: 'Multi-step workflow orchestration with CTCs',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            plan: { type: 'array' },
-            validate_ctc: { type: 'boolean', default: true },
-            save_as_skill: { type: 'boolean', default: false },
-          },
-          required: ['plan'],
-        },
-      },
-      {
-        name: 'data-grout/prism.focus',
-        description: 'Semantic type transformation',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            data: { type: 'object' },
-            source_type: { type: 'string' },
-            target_type: { type: 'string' },
-          },
-          required: ['data', 'source_type', 'target_type'],
-        },
-      },
-    ];
-  }
 }

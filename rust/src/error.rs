@@ -3,6 +3,27 @@
 /// Result type alias for Conduit operations
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Rate limit cap — either a fixed calls-per-hour number or truly unlimited.
+///
+/// Authenticated DataGrout users always receive `Unlimited`. Anonymous visitors
+/// (using inspectors without a DG account) receive `PerHour(n)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RateLimit {
+    /// No cap — authenticated DataGrout users.
+    Unlimited,
+    /// Maximum calls allowed per hour — anonymous visitors.
+    PerHour(u32),
+}
+
+impl std::fmt::Display for RateLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RateLimit::Unlimited => write!(f, "unlimited"),
+            RateLimit::PerHour(n) => write!(f, "{}/hour", n),
+        }
+    }
+}
+
 /// Conduit error types
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -23,6 +44,19 @@ pub enum Error {
         message: String,
         /// Additional error data
         data: Option<serde_json::Value>,
+    },
+
+    /// Rate limit exceeded.
+    ///
+    /// Authenticated DataGrout users are never rate-limited (`limit` =
+    /// [`RateLimit::Unlimited`]). Anonymous visitors hitting the inspector
+    /// receive this error once the per-hour cap is reached.
+    #[error("Rate limit exceeded ({used} / {limit} calls this hour)")]
+    RateLimited {
+        /// Calls made in the current window
+        used: u32,
+        /// Total allowed calls in the window
+        limit: RateLimit,
     },
 
     /// Connection error
@@ -88,6 +122,14 @@ impl Error {
         }
     }
 
+    /// Create a rate-limited error for anonymous visitors.
+    pub fn rate_limited(used: u32, per_hour_limit: u32) -> Self {
+        Self::RateLimited {
+            used,
+            limit: RateLimit::PerHour(per_hour_limit),
+        }
+    }
+
     /// Create a connection error
     pub fn connection(message: impl Into<String>) -> Self {
         Self::Connection(message.into())
@@ -132,6 +174,11 @@ impl Error {
             }
             _ => false,
         }
+    }
+
+    /// Check if the caller has been rate-limited.
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Error::RateLimited { .. })
     }
 }
 

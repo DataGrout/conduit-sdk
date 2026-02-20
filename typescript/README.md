@@ -48,7 +48,7 @@ import { Client } from '@datagrout/conduit';
 
 ### Automatic Discovery
 
-When `hide3rdPartyTools=true` (default), `listTools()` returns only DataGrout gateway tools. Your agent automatically uses semantic discovery:
+When `useIntelligentInterface=true`, `listTools()` returns only DataGrout's semantic tools. Your agent automatically uses discovery instead of enumerating raw integrations:
 
 ```typescript
 // Agent calls standard MCP
@@ -92,7 +92,7 @@ const client = new Client({url, transport: 'jsonrpc'});
 new Client(options: {
   url: string;
   auth?: AuthConfig;
-  hide3rdPartyTools?: boolean;
+  useIntelligentInterface?: boolean;
   transport?: 'mcp' | 'jsonrpc';
 });
 ```

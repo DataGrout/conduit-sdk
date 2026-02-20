@@ -2,15 +2,128 @@
  * Type definitions for DataGrout Conduit
  */
 
+// ─── Rate limiting ───────────────────────────────────────────────────────────
+
+/**
+ * Rate limit cap returned in `X-RateLimit-Limit` response headers.
+ *
+ * - `"unlimited"` — authenticated DataGrout users; the gateway never blocks them.
+ * - `{ perHour: number }` — unauthenticated callers hitting a per-hour cap.
+ */
+export type RateLimit = 'unlimited' | { perHour: number };
+
+/**
+ * Parsed rate limit state from a gateway response.
+ *
+ * Surfaced via `RateLimitError.status` when the client receives HTTP 429.
+ */
+export interface RateLimitStatus {
+  /** Calls made in the current 1-hour window. */
+  used: number;
+  /** Total allowed calls (or `"unlimited"`). */
+  limit: RateLimit;
+  /** `true` when the caller has been throttled. */
+  isLimited: boolean;
+  /** Remaining calls this window, or `null` when unlimited. */
+  remaining: number | null;
+}
+
+/** BYOK discount details embedded in a receipt. */
+export interface Byok {
+  enabled: boolean;
+  discountApplied: number;
+  discountRate: number;
+}
+
+/**
+ * Cost receipt attached to every DG tool-call result under `result._meta.receipt`.
+ *
+ * Use `extractMeta(result)` to pull this out cleanly.
+ */
 export interface Receipt {
+  /** DG-internal receipt identifier (`rcp_…`). */
   receiptId: string;
+  /** DB transaction ID (set only when a user account was charged). */
+  transactionId?: string;
+  timestamp: string;
   estimatedCredits: number;
   actualCredits: number;
   netCredits: number;
-  savings?: number;
-  savingsBonus?: number;
-  breakdown?: Record<string, any>;
-  byok?: Record<string, any>;
+  savings: number;
+  savingsBonus: number;
+  /** Account balance before the charge. */
+  balanceBefore?: number;
+  /** Account balance after the charge. */
+  balanceAfter?: number;
+  /** Per-component credit breakdown. */
+  breakdown: Record<string, any>;
+  byok: Byok;
+}
+
+/** Pre-execution credit estimate under `result._meta.credit_estimate`. */
+export interface CreditEstimate {
+  estimatedTotal: number;
+  actualTotal: number;
+  netTotal: number;
+  breakdown: Record<string, any>;
+}
+
+/**
+ * The `_meta` block that DataGrout appends to every tool-call result.
+ *
+ * @example
+ * ```ts
+ * const result = await client.callTool('salesforce@v1/get_lead@v1', { id: '123' });
+ * const meta = extractMeta(result);
+ * if (meta) console.log(`Charged ${meta.receipt.netCredits} credits`);
+ * ```
+ */
+export interface ToolMeta {
+  receipt: Receipt;
+  creditEstimate?: CreditEstimate;
+}
+
+/**
+ * Extract the `_meta` block from a DataGrout tool-call result.
+ *
+ * Returns `null` when the result does not contain `_meta` (e.g. upstream
+ * servers not routed through the DG gateway).
+ */
+export function extractMeta(result: Record<string, any>): ToolMeta | null {
+  const raw = result?._meta;
+  if (!raw?.receipt) return null;
+
+  const r = raw.receipt;
+  const receipt: Receipt = {
+    receiptId: r.receipt_id ?? '',
+    transactionId: r.transaction_id,
+    timestamp: r.timestamp ?? '',
+    estimatedCredits: r.estimated_credits ?? 0,
+    actualCredits: r.actual_credits ?? 0,
+    netCredits: r.net_credits ?? 0,
+    savings: r.savings ?? 0,
+    savingsBonus: r.savings_bonus ?? 0,
+    balanceBefore: r.balance_before,
+    balanceAfter: r.balance_after,
+    breakdown: r.breakdown ?? {},
+    byok: {
+      enabled: r.byok?.enabled ?? false,
+      discountApplied: r.byok?.discount_applied ?? 0,
+      discountRate: r.byok?.discount_rate ?? 0,
+    },
+  };
+
+  const e = raw.credit_estimate;
+  const creditEstimate: CreditEstimate | undefined = e
+    ? {
+        estimatedTotal: e.estimated_total ?? 0,
+        actualTotal: e.actual_total ?? 0,
+        netTotal: e.net_total ?? 0,
+        breakdown: e.breakdown ?? {},
+      }
+    : undefined;
+
+  return { receipt, creditEstimate };
 }
 
 export interface ToolInfo {
@@ -66,13 +179,63 @@ export interface AuthConfig {
     username: string;
     password: string;
   };
+  /**
+   * OAuth 2.1 `client_credentials` grant.
+   *
+   * When set, the SDK automatically fetches and caches a short-lived JWT from
+   * the DataGrout token endpoint.  No token management needed in application code.
+   *
+   * The `tokenEndpoint` is derived from the client URL automatically if omitted.
+   */
+  clientCredentials?: {
+    clientId: string;
+    clientSecret: string;
+    /** Optional explicit token endpoint URL. Derived from the client URL if omitted. */
+    tokenEndpoint?: string;
+    /** Optional space-separated scope string (e.g. `"mcp tools"`). */
+    scope?: string;
+  };
   custom?: Record<string, string>;
 }
 
 export interface ClientOptions {
   url: string;
   auth?: AuthConfig;
-  hide3rdPartyTools?: boolean;
+  /**
+   * mTLS client identity.  When set, every connection presents this
+   * certificate during the TLS handshake (Node.js only).
+   *
+   * Can be set explicitly or discovered automatically via
+   * `ConduitIdentity.tryDefault()`.
+   */
+  identity?: import('./identity').ConduitIdentity;
+  /**
+   * When `true`, auto-discover an mTLS identity from env vars or
+   * `~/.conduit/` before falling back to token auth.  Equivalent to
+   * calling `ConduitIdentity.tryDefault()` and passing the result as
+   * `identity`.
+   */
+  identityAuto?: boolean;
+  /**
+   * Enable the intelligent interface (DataGrout `discover` / `perform` only).
+   *
+   * When `true`, `listTools()` returns only the DataGrout semantic discovery
+   * and execution tools instead of the raw tool list from the MCP server.
+   * This mirrors the `use_intelligent_interface` setting on the server.
+   *
+   * @default false
+   */
+  useIntelligentInterface?: boolean;
+  /**
+   * Disable automatic mTLS even for DataGrout URLs.
+   *
+   * By default, DG URLs (`*.datagrout.ai`) silently attempt to discover an
+   * mTLS identity from env vars or `~/.conduit/`.  Set to `true` to opt out
+   * and use token-only auth.
+   *
+   * @default false
+   */
+  disableMtls?: boolean;
   transport?: 'mcp' | 'jsonrpc';
   timeout?: number;
 }

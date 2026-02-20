@@ -77,16 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n❌ Workflow ended with status: {}", session.status());
     }
 
-    // Check receipt
-    if let Some(receipt) = client.last_receipt().await {
-        println!("\n📄 Receipt:");
-        println!("  ID: {}", receipt.id);
-        println!("  Total cost: {} credits", receipt.total_cost);
-        println!("  Steps executed: {}", receipt.tool_calls.len());
-        for call in &receipt.tool_calls {
-            println!("    • {} ({} credits)", call.name, call.cost);
-        }
-    }
+    // Guide sessions don't return a per-step receipt directly; check the last
+    // flow_into/execute result for _meta if available.
 
     client.disconnect().await?;
     println!("\n✓ Done");

@@ -134,3 +134,33 @@ fn test_error_types() {
     let err = Error::invalid_config("Bad config");
     assert!(!err.is_retriable());
 }
+
+#[test]
+fn test_rate_limited_error() {
+    use datagrout_conduit::error::{Error, RateLimit};
+
+    // Anonymous visitor hitting the cap
+    let err = Error::rate_limited(50, 50);
+    assert!(err.is_rate_limited());
+    assert!(!err.is_retriable());
+    assert!(!err.is_not_initialized());
+    assert!(err.to_string().contains("50"));
+
+    // Unlimited variant (authenticated DG users never hit this in practice,
+    // but the type should be expressible)
+    let err = Error::RateLimited {
+        used: 0,
+        limit: RateLimit::Unlimited,
+    };
+    assert!(err.is_rate_limited());
+    assert!(err.to_string().contains("unlimited"));
+}
+
+#[test]
+fn test_rate_limit_enum() {
+    use datagrout_conduit::error::RateLimit;
+
+    assert_eq!(RateLimit::Unlimited.to_string(), "unlimited");
+    assert_eq!(RateLimit::PerHour(50).to_string(), "50/hour");
+    assert_eq!(RateLimit::PerHour(1000).to_string(), "1000/hour");
+}

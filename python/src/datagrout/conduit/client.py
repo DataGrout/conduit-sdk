@@ -1,9 +1,20 @@
 """DataGrout Conduit client implementation."""
 
+import logging
+import warnings
 from typing import Any, Dict, List, Optional, Union
 
+from .identity import ConduitIdentity
 from .transports import Transport, MCPTransport, JSONRPCTransport
-from .types import Receipt, DiscoverResult, PerformResult, GuideState, GuideOptions
+from .types import DiscoverResult, PerformResult, GuideState, GuideOptions
+from .registration import Receipt
+
+logger = logging.getLogger(__name__)
+
+
+def is_dg_url(url: str) -> bool:
+    """Return ``True`` when *url* points at a DataGrout-managed endpoint."""
+    return "datagrout.ai" in url or "datagrout.dev" in url
 
 
 class GuidedSession:
@@ -71,36 +82,87 @@ class Client:
         "data-grout/flow.request-feedback",
         "data-grout/prism.focus",
         "data-grout/prism.refract",
+        # Logic Cell — symbolic persistent memory
+        "data-grout/logic.remember",
+        "data-grout/logic.query",
+        "data-grout/logic.forget",
+        "data-grout/logic.constrain",
+        "data-grout/logic.reflect",
     ]
 
     def __init__(
         self,
         url: str,
         auth: Optional[Dict[str, Any]] = None,
-        hide_3rd_party_tools: bool = True,
+        use_intelligent_interface: bool = False,
         transport: str = "jsonrpc",  # Default to jsonrpc since it's simpler
+        identity: Optional[ConduitIdentity] = None,
+        identity_auto: bool = False,
+        disable_mtls: bool = False,
+        # Convenience shorthand for OAuth 2.1 client_credentials auth.
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        oauth_scope: Optional[str] = None,
+        token_endpoint: Optional[str] = None,
         **kwargs: Any,
     ):
-        """
-        Initialize DataGrout Conduit client.
+        """Initialize DataGrout Conduit client.
 
         Args:
             url: Server URL (e.g., https://gateway.datagrout.ai/servers/{uuid}/mcp)
-            auth: Authentication config (e.g., {"bearer": "token"})
-            hide_3rd_party_tools: If True, list_tools() returns only DataGrout tools
-            transport: Transport mode ("mcp" or "jsonrpc")
-            **kwargs: Additional transport-specific options
+            auth: Authentication config dict.  Supported keys:
+                - ``{"bearer": "token"}`` — static Bearer token.
+                - ``{"basic": {"username": "...", "password": "..."}}`` — Basic auth.
+                - ``{"client_credentials": {"client_id": "...", "client_secret": "..."}}``
+                  — OAuth 2.1 client credentials (see also *client_id* / *client_secret*).
+            use_intelligent_interface: When ``True``, ``list_tools()`` returns only the
+                DataGrout semantic discovery / execution tools instead of the raw MCP tool
+                list.  Mirrors ``use_intelligent_interface`` on the server side.
+            transport: Transport mode ("mcp" or "jsonrpc").
+            identity: Explicit mTLS identity (client certificate + key).
+            identity_auto: Auto-discover an mTLS identity from env vars / ~/.conduit/.
+            disable_mtls: Opt out of automatic mTLS even for DataGrout URLs.
+                Normally, DG URLs silently attempt auto-discovery of an mTLS identity.
+                Set this to ``True`` to use token-only auth.
+            client_id: Shorthand for OAuth ``client_credentials`` auth — client ID.
+            client_secret: Shorthand for OAuth ``client_credentials`` auth — secret.
+            oauth_scope: Optional scope for OAuth token requests.
+            token_endpoint: Override the derived token endpoint URL.
+            **kwargs: Additional transport-specific options.
         """
         self.url = url
+        self.use_intelligent_interface = use_intelligent_interface
+        self._is_dg = is_dg_url(url)
+        self._dg_warned = False
+
+        # Merge convenience client_id/client_secret kwargs into auth dict.
+        if client_id and client_secret:
+            cc: Dict[str, Any] = {
+                "client_id": client_id,
+                "client_secret": client_secret,
+            }
+            if oauth_scope:
+                cc["scope"] = oauth_scope
+            if token_endpoint:
+                cc["token_endpoint"] = token_endpoint
+            auth = dict(auth or {})
+            auth["client_credentials"] = cc
+
         self.auth = auth
-        self.hide_3rd_party_tools = hide_3rd_party_tools
-        self._last_receipt: Optional[Receipt] = None
+
+        # Resolve identity: explicit > identity_auto flag > DG URL auto-discover.
+        # For DG URLs, silently try auto-discovery unless disabled or already set.
+        resolved_identity = identity
+        if resolved_identity is None and identity_auto:
+            resolved_identity = ConduitIdentity.try_default()
+        if resolved_identity is None and self._is_dg and not disable_mtls:
+            resolved_identity = ConduitIdentity.try_default()
 
         # Initialize transport
         if transport == "mcp":
             self._transport: Transport = MCPTransport(url, auth=auth, **kwargs)
         elif transport == "jsonrpc":
-            self._transport = JSONRPCTransport(url, auth=auth, **kwargs)
+            self._transport = JSONRPCTransport(url, auth=auth, identity=resolved_identity, **kwargs)
         else:
             raise ValueError(f"Unknown transport: {transport}")
 
@@ -113,26 +175,91 @@ class Client:
         """Async context manager exit."""
         await self._transport.disconnect()
 
+    # ===== Bootstrap / seamless mTLS =====
+
+    @classmethod
+    async def bootstrap_identity(
+        cls,
+        url: str,
+        api_key: str,
+        name: str,
+        substrate_endpoint: str,
+        **client_kwargs: Any,
+    ) -> "Client":
+        """Create a :class:`Client` with an mTLS identity bootstrapped automatically.
+
+        Checks the auto-discovery chain first (env vars → ``~/.conduit/``).
+        If an existing identity is found and not within 7 days of expiry it is
+        reused.  Otherwise a new keypair is generated, registered with DataGrout,
+        and saved to ``~/.conduit/`` for future runs.
+
+        This is the zero-friction path — call it once with the Arbiter API key
+        and the client handles certificate management on every subsequent run.
+
+        Args:
+            url: MCP server URL.
+            api_key: Arbiter API key (used only for the first registration).
+            name: Human-readable label for this Substrate instance.
+            substrate_endpoint: DataGrout identity API base URL,
+                e.g. ``https://app.datagrout.ai/api/v1/substrate/identity``.
+            **client_kwargs: Additional keyword arguments passed to :class:`Client`.
+
+        Returns:
+            A :class:`Client` configured with the bootstrapped mTLS identity.
+
+        Example::
+
+            client = await Client.bootstrap_identity(
+                url="https://app.datagrout.ai/servers/{uuid}/mcp",
+                api_key=os.environ["ARBITER_API_KEY"],
+                name="my-agent",
+                substrate_endpoint="https://app.datagrout.ai/api/v1/substrate/identity",
+            )
+        """
+        from .registration import (
+            ConduitIdentity,
+            DEFAULT_IDENTITY_DIR,
+            generate_keypair,
+            register_identity,
+            save_identity,
+        )
+
+        # Fast path: existing valid identity.
+        existing = ConduitIdentity.try_default()
+        if existing is not None and not existing.needs_rotation(7):
+            return cls(url, identity=existing, **client_kwargs)
+
+        # Slow path: generate, register, persist.
+        keypair = generate_keypair(name)
+        identity, _resp = await register_identity(
+            keypair,
+            endpoint=substrate_endpoint,
+            api_key=api_key,
+            name=name,
+        )
+        save_identity(identity, DEFAULT_IDENTITY_DIR)
+        return cls(url, identity=identity, **client_kwargs)
+
     # ===== Standard MCP API (Drop-in Compatible) =====
 
     async def list_tools(self, **kwargs: Any) -> List[Dict[str, Any]]:
-        """
-        List available tools.
+        """List available tools.
 
-        With hide_3rd_party_tools=True (default), returns only DataGrout tools.
-        Agent naturally uses discovery to find specific tools.
+        When ``use_intelligent_interface=True``, filters out third-party
+        integration tools (those whose name contains ``@``) and returns only
+        DataGrout's own meta-tools (arbiter, governor, etc.).  Agents using the
+        intelligent interface call :meth:`discover` instead of enumerating raw
+        integrations.
 
         Returns:
-            List of tool definitions
+            List of tool definitions.
         """
-        if self.hide_3rd_party_tools:
-            # Return only DataGrout gateway tools
-            # In a real implementation, we'd fetch these from the server
-            # For now, return a minimal set
-            return await self._get_datagrout_tools()
-        else:
-            # Return full tool list from server
-            return await self._transport.list_tools(**kwargs)
+        tools = await self._transport.list_tools(**kwargs)
+        if self.use_intelligent_interface:
+            # Third-party integration tools use the integration@version/tool@version
+            # naming scheme. DG's own tools (arbiter_*, governor_*) do not contain "@".
+            tools = [t for t in tools if "@" not in t.get("name", "")]
+        return tools
 
     async def call_tool(
         self, name: str, arguments: Dict[str, Any], **kwargs: Any
@@ -170,6 +297,144 @@ class Client:
         """Get a prompt (standard MCP method)."""
         return await self._transport.get_prompt(name, arguments, **kwargs)
 
+    # ===== Logic Cell Extensions =====
+
+    async def remember(
+        self,
+        statement: str,
+        tag: str = "default",
+        facts: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Store facts in the agent's persistent logic cell.
+
+        Converts natural language to symbolic Prolog facts and stores them
+        durably. Facts persist across sessions and can be queried zero-token.
+
+        Args:
+            statement: Natural language statement to remember
+            tag: Tag/namespace for grouping facts (e.g. 'crm', 'project')
+            facts: Optional pre-structured fact list instead of NL statement
+
+        Returns:
+            Dict with handles, facts, and count
+        """
+        params: Dict[str, Any] = {"tag": tag, **kwargs}
+        if facts is not None:
+            params["facts"] = facts
+        else:
+            params["statement"] = statement
+
+        return await self._transport.call_tool("data-grout/logic.remember", params)
+
+    async def query_cell(
+        self,
+        question: str,
+        limit: int = 50,
+        patterns: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Query the agent's logic cell with natural language.
+
+        Translates question to Prolog patterns and queries the cell.
+        Retrieval itself uses zero tokens.
+
+        Args:
+            question: Natural language question
+            limit: Maximum results
+            patterns: Optional pre-built pattern list
+
+        Returns:
+            Dict with results, total, and description
+        """
+        params: Dict[str, Any] = {"limit": limit, **kwargs}
+        if patterns is not None:
+            params["patterns"] = patterns
+        else:
+            params["question"] = question
+
+        return await self._transport.call_tool("data-grout/logic.query", params)
+
+    async def forget(
+        self,
+        handles: Optional[List[str]] = None,
+        pattern: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Retract facts from the agent's logic cell.
+
+        Args:
+            handles: Specific fact handles to retract
+            pattern: NL pattern — retract all facts mentioning this text
+
+        Returns:
+            Dict with retracted count and handles
+        """
+        params: Dict[str, Any] = {**kwargs}
+        if handles:
+            params["handles"] = handles
+        if pattern:
+            params["pattern"] = pattern
+
+        return await self._transport.call_tool("data-grout/logic.forget", params)
+
+    async def reflect(
+        self,
+        entity: Optional[str] = None,
+        summary_only: bool = False,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Reflect on the agent's logic cell — full snapshot or per-entity view.
+
+        Args:
+            entity: Optional entity name to scope reflection
+            summary_only: If True, return only counts
+
+        Returns:
+            Dict with full cell summary or entity-scoped facts
+        """
+        params: Dict[str, Any] = {"summary_only": summary_only, **kwargs}
+        if entity:
+            params["entity"] = entity
+
+        return await self._transport.call_tool("data-grout/logic.reflect", params)
+
+    async def constrain(
+        self,
+        rule: str,
+        tag: str = "constraint",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Store a logical rule or policy in the agent's logic cell.
+
+        Args:
+            rule: Natural language rule (e.g. 'VIP customers have ARR > $500K')
+            tag: Tag/namespace for this constraint
+
+        Returns:
+            Dict with handle, name, and Prolog rule text
+        """
+        params: Dict[str, Any] = {"rule": rule, "tag": tag, **kwargs}
+        return await self._transport.call_tool("data-grout/logic.constrain", params)
+
+    # ===== DG-awareness helpers =====
+
+    def _warn_if_not_dg(self, method: str) -> None:
+        """Emit a one-time warning when a DG-specific method is used on a non-DG server."""
+        if not self._is_dg and not self._dg_warned:
+            self._dg_warned = True
+            warnings.warn(
+                f"`{method}` is a DataGrout-specific extension. "
+                f"The connected server may not support it. "
+                f"Standard MCP methods (list_tools, call_tool, …) work on any server.",
+                stacklevel=3,
+            )
+
     # ===== DataGrout Extensions =====
 
     async def discover(
@@ -196,6 +461,7 @@ class Client:
         Returns:
             Discovery results with matching tools
         """
+        self._warn_if_not_dg("discover")
         params = {
             "limit": limit,
             "min_score": min_score,
@@ -237,6 +503,7 @@ class Client:
         Returns:
             Tool execution result
         """
+        self._warn_if_not_dg("perform")
         return await self._perform_with_tracking(
             tool, args, demux=demux, demux_mode=demux_mode, **kwargs
         )
@@ -256,13 +523,6 @@ class Client:
         result = await self._transport.call_tool(
             "data-grout/discovery.perform", calls, **kwargs
         )
-
-        # Extract receipts if present
-        if isinstance(result, list):
-            for item in result:
-                if isinstance(item, dict) and "_receipt" in item:
-                    # Store last receipt (could track all in future)
-                    self._last_receipt = Receipt(**item["_receipt"])
 
         return result
 
@@ -286,6 +546,7 @@ class Client:
         Returns:
             GuidedSession instance
         """
+        self._warn_if_not_dg("guide")
         params = {**kwargs}
 
         if goal:
@@ -323,6 +584,7 @@ class Client:
         Returns:
             Workflow execution result
         """
+        self._warn_if_not_dg("flow_into")
         params = {
             "plan": plan,
             "validate_ctc": validate_ctc,
@@ -334,10 +596,6 @@ class Client:
             params["input_data"] = input_data
 
         result = await self._transport.call_tool("data-grout/flow.into", params)
-
-        # Extract receipt if present
-        if isinstance(result, dict) and "_receipt" in result:
-            self._last_receipt = Receipt(**result["_receipt"])
 
         return result
 
@@ -359,6 +617,7 @@ class Client:
         Returns:
             Transformed data
         """
+        self._warn_if_not_dg("prism_focus")
         params = {
             "data": data,
             "source_type": source_type,
@@ -367,17 +626,6 @@ class Client:
         }
 
         return await self._transport.call_tool("data-grout/prism.focus", params)
-
-    # ===== Receipt & Credit Management =====
-
-    def get_last_receipt(self) -> Optional[Receipt]:
-        """
-        Get receipt from last operation.
-
-        Returns:
-            Receipt object or None
-        """
-        return self._last_receipt
 
     async def estimate_cost(self, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -408,29 +656,12 @@ class Client:
         result = await self._transport.call_tool(
             "data-grout/discovery.perform", params
         )
-
-        # Extract receipt if present in structured_content
-        if isinstance(result, dict):
-            # Check for receipt in various possible locations
-            if "_receipt" in result:
-                self._last_receipt = Receipt(**result["_receipt"])
-                # Return result without receipt
-                return {k: v for k, v in result.items() if k != "_receipt"}
-            elif "structured_content" in result and "_receipt" in result["structured_content"]:
-                self._last_receipt = Receipt(**result["structured_content"]["_receipt"])
-                # Return the actual result
-                return result["structured_content"].get("result", result)
-
+        # Receipt is embedded in result["_meta"]["receipt"] — callers can use
+        # extract_meta(result) to access it without any client-side state.
         return result
 
-    async def _get_datagrout_tools(self) -> List[Dict[str, Any]]:
-        """
-        Get DataGrout first-party tools only.
-
-        This is returned when hide_3rd_party_tools=True.
-        """
-        # In a real implementation, these would be fetched from the server
-        # For now, return minimal definitions
+    async def _get_datagrout_tools_stub(self) -> List[Dict[str, Any]]:
+        """Stub — not called. List is fetched from server and filtered."""
         return [
             {
                 "name": "data-grout/discovery.discover",
@@ -494,6 +725,64 @@ class Client:
                         "target_type": {"type": "string"},
                     },
                     "required": ["data", "source_type", "target_type"],
+                },
+            },
+            {
+                "name": "data-grout/logic.remember",
+                "description": "Store facts in the agent's persistent logic cell using natural language",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "statement": {"type": "string"},
+                        "tag": {"type": "string", "default": "default"},
+                        "facts": {"type": "array"},
+                    },
+                },
+            },
+            {
+                "name": "data-grout/logic.query",
+                "description": "Query the agent's logic cell with natural language",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "limit": {"type": "integer", "default": 50},
+                        "patterns": {"type": "array"},
+                    },
+                },
+            },
+            {
+                "name": "data-grout/logic.forget",
+                "description": "Retract facts from the agent's logic cell",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "handles": {"type": "array", "items": {"type": "string"}},
+                        "pattern": {"type": "string"},
+                    },
+                },
+            },
+            {
+                "name": "data-grout/logic.constrain",
+                "description": "Store a logical rule or policy in the agent's logic cell",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "rule": {"type": "string"},
+                        "tag": {"type": "string", "default": "constraint"},
+                    },
+                    "required": ["rule"],
+                },
+            },
+            {
+                "name": "data-grout/logic.reflect",
+                "description": "Reflect on the agent's logic cell — full snapshot or per-entity view",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "entity": {"type": "string"},
+                        "summary_only": {"type": "boolean", "default": False},
+                    },
                 },
             },
         ]

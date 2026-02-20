@@ -1,6 +1,6 @@
-//! Batch operations and parallel execution example
+//! Batch operations and parallel execution example.
 
-use datagrout_conduit::{ClientBuilder, Transport};
+use datagrout_conduit::{extract_meta, ClientBuilder, Transport};
 use serde_json::json;
 use tokio::task::JoinSet;
 
@@ -10,7 +10,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== DataGrout Conduit - Batch Operations Example ===\n");
 
-    // Create and connect client
     let client = ClientBuilder::new()
         .url("https://gateway.datagrout.ai/servers/{your-uuid}/mcp")
         .transport(Transport::Mcp)
@@ -20,7 +19,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.connect().await?;
     println!("✓ Connected\n");
 
-    // Example 1: Sequential execution
+    // ── Sequential execution ──────────────────────────────────────────────────
+
     println!("--- Sequential Execution ---");
 
     let leads = vec!["lead_1", "lead_2", "lead_3"];
@@ -32,10 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .execute()
             .await?;
 
-        println!("✓ Fetched lead: {}", lead_id);
+        println!("  ✓ Fetched lead: {}", lead_id);
     }
 
-    // Example 2: Parallel execution with JoinSet
+    // ── Parallel execution with JoinSet ───────────────────────────────────────
+
     println!("\n--- Parallel Execution ---");
 
     let mut tasks = JoinSet::new();
@@ -56,17 +57,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match result? {
             Ok(data) => {
                 results.push(data);
-                println!("✓ Lead fetched");
+                println!("  ✓ Lead fetched");
             }
             Err(e) => {
-                eprintln!("✗ Error: {}", e);
+                eprintln!("  ✗ Error: {}", e);
             }
         }
     }
 
     println!("Fetched {} leads in parallel", results.len());
 
-    // Example 3: Batch with cost tracking
+    // ── Batch with per-call cost tracking ────────────────────────────────────
+
     println!("\n--- Batch with Cost Tracking ---");
 
     let operations = vec![
@@ -75,24 +77,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("stripe@1/get_charge@1", json!({"id": "ch_123"})),
     ];
 
-    for (tool, args) in operations {
-        let _ = client.perform(tool).args(args).execute().await?;
+    let mut total_net: f64 = 0.0;
 
-        if let Some(receipt) = client.last_receipt().await {
-            println!(
-                "✓ {} - {} credits",
-                tool,
-                receipt.tool_calls.last().map(|c| c.cost).unwrap_or(0)
-            );
+    for (tool, args) in operations {
+        let res = client.perform(tool).args(args).execute().await?;
+
+        if let Some(meta) = extract_meta(&res) {
+            let net = meta.receipt.net_credits;
+            total_net += net;
+            println!("  ✓ {} — {:.4} credits", tool, net);
+        } else {
+            println!("  ✓ {} (no receipt)", tool);
         }
     }
 
-    // Check final aggregated receipt
-    if let Some(receipt) = client.last_receipt().await {
-        println!("\n📄 Total Receipt:");
-        println!("  Operations: {}", receipt.tool_calls.len());
-        println!("  Total cost: {} credits", receipt.total_cost);
-    }
+    println!("\n📄 Total net credits: {:.4}", total_net);
 
     client.disconnect().await?;
     println!("\n✓ Done");

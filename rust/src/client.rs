@@ -1,6 +1,8 @@
 //! Main client implementation
 
 use crate::error::{Error, Result};
+use crate::identity::ConduitIdentity;
+use crate::oauth::OAuthTokenProvider;
 use crate::protocol::*;
 use crate::transport::{AuthConfig, JsonRpcTransport, McpTransport, Transport, TransportTrait};
 use crate::types::*;
@@ -9,6 +11,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Returns `true` when `url` points at a DataGrout-managed endpoint.
+///
+/// Used to decide whether to auto-enable mTLS discovery and whether to warn
+/// when DG-specific methods (discover, guide, flow.into, …) are called against
+/// a non-DG server.
+pub fn is_dg_url(url: &str) -> bool {
+    url.contains("datagrout.ai") || url.contains("datagrout.dev")
+}
+
 /// Conduit client
 #[derive(Clone)]
 pub struct Client {
@@ -16,9 +27,13 @@ pub struct Client {
     next_id: Arc<AtomicU64>,
     initialized: Arc<RwLock<bool>>,
     server_info: Arc<RwLock<Option<ServerInfo>>>,
-    last_receipt: Arc<RwLock<Option<Receipt>>>,
-    hide_third_party_tools: bool,
+    use_intelligent_interface: bool,
     max_retries: usize,
+    /// Whether this client is connected to a DataGrout-managed endpoint.
+    /// When `false`, calling DG-specific methods logs a one-time warning.
+    is_dg: bool,
+    /// Whether DG-specific method warnings have already been emitted.
+    dg_warned: Arc<std::sync::atomic::AtomicBool>,
 }
 
 // Manual Debug implementation since TransportTrait doesn't implement Debug
@@ -27,7 +42,8 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("next_id", &self.next_id)
             .field("initialized", &self.initialized)
-            .field("hide_third_party_tools", &self.hide_third_party_tools)
+            .field("use_intelligent_interface", &self.use_intelligent_interface)
+            .field("is_dg", &self.is_dg)
             .field("max_retries", &self.max_retries)
             .finish_non_exhaustive()
     }
@@ -159,6 +175,16 @@ impl Client {
             }
         }
 
+        // When the intelligent interface is active, keep only DataGrout's own semantic
+        // tools (discover, perform, guide) and drop all third-party integration tools.
+        // Third-party tools use the "integration@version/tool@version" naming scheme; DG's
+        // own tools do not contain "@".
+        let all_tools = if self.use_intelligent_interface {
+            all_tools.into_iter().filter(|t| !t.name.contains('@')).collect()
+        } else {
+            all_tools
+        };
+
         Ok(all_tools)
     }
 
@@ -286,26 +312,31 @@ impl Client {
 
     /// Create a discovery builder
     pub fn discover(&self) -> DiscoverBuilder<'_> {
+        self.warn_if_not_dg("discover");
         DiscoverBuilder::new(self)
     }
 
     /// Create a perform builder
     pub fn perform(&self, tool: impl Into<String>) -> PerformBuilder<'_> {
+        self.warn_if_not_dg("perform");
         PerformBuilder::new(self, tool.into())
     }
 
     /// Create a guide builder
     pub fn guide(&self) -> GuideBuilder<'_> {
+        self.warn_if_not_dg("guide");
         GuideBuilder::new(self)
     }
 
     /// Execute multi-step workflow
     pub fn flow_into(&self, plan: Vec<Value>) -> FlowIntoBuilder<'_> {
+        self.warn_if_not_dg("flow_into");
         FlowIntoBuilder::new(self, plan)
     }
 
     /// Semantic type transformation
     pub fn prism_focus(&self) -> PrismFocusBuilder<'_> {
+        self.warn_if_not_dg("prism_focus");
         PrismFocusBuilder::new(self)
     }
 
@@ -332,9 +363,26 @@ impl Client {
         }
     }
 
-    /// Get last receipt
-    pub async fn last_receipt(&self) -> Option<Receipt> {
-        self.last_receipt.read().await.clone()
+    // ========================================================================
+    // DG-awareness helpers
+    // ========================================================================
+
+    /// Emit a one-time warning when a DG-specific method is called against a
+    /// non-DataGrout server.  Safe to call from every DG-specific method — the
+    /// warning fires at most once per `Client` instance.
+    fn warn_if_not_dg(&self, method: &str) {
+        if !self.is_dg
+            && !self
+                .dg_warned
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            eprintln!(
+                "[conduit] warning: `{}` is a DataGrout-specific extension. \
+                 The connected server ({}) may not support it. \
+                 Standard MCP methods (list_tools, call_tool, …) work on any server.",
+                method, "non-DG endpoint"
+            );
+        }
     }
 
     // ========================================================================
@@ -378,22 +426,39 @@ impl Client {
 }
 
 /// Client builder
-#[derive(Default)]
 pub struct ClientBuilder {
     url: Option<String>,
     transport: Option<Transport>,
     auth: Option<AuthConfig>,
-    hide_third_party_tools: bool,
+    identity: Option<ConduitIdentity>,
+    use_intelligent_interface: bool,
     max_retries: usize,
+    /// When `true`, never attempt mTLS even on DG URLs.
+    disable_mtls: bool,
+    /// Pending OAuth credentials resolved into `AuthConfig::ClientCredentials`
+    /// during `build()` once the URL is known.
+    _pending_oauth_creds: Option<(String, String, Option<String>, Option<String>)>,
+}
+
+impl Default for ClientBuilder {
+    fn default() -> Self {
+        Self {
+            url: None,
+            transport: None,
+            auth: None,
+            identity: None,
+            use_intelligent_interface: false,
+            max_retries: 3,
+            disable_mtls: false,
+            _pending_oauth_creds: None,
+        }
+    }
 }
 
 impl ClientBuilder {
     /// Create a new builder
     pub fn new() -> Self {
-        Self {
-            max_retries: 3,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Set the server URL
@@ -429,9 +494,80 @@ impl ClientBuilder {
         self
     }
 
+    /// Authenticate using OAuth 2.1 `client_credentials`.
+    ///
+    /// The SDK automatically fetches a short-lived JWT from the DataGrout
+    /// token endpoint on the first request and refreshes it before it expires.
+    /// Application code never handles tokens directly.
+    ///
+    /// The `token_endpoint` URL is derived from `url` automatically if not
+    /// provided — pass `None` for the standard DataGrout endpoint.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// let client = ClientBuilder::new()
+    ///     .url("https://app.datagrout.ai/servers/{uuid}/mcp")
+    ///     .auth_client_credentials("my_client_id", "my_client_secret")
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn auth_client_credentials(
+        mut self,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+    ) -> Self {
+        self._pending_oauth_creds =
+            Some((client_id.into(), client_secret.into(), None, None));
+        self
+    }
+
+    /// Like [`auth_client_credentials`](Self::auth_client_credentials) but
+    /// with an explicit `token_endpoint` URL and optional `scope`.
+    pub fn auth_client_credentials_with_opts(
+        mut self,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        token_endpoint: impl Into<String>,
+        scope: Option<String>,
+    ) -> Self {
+        self._pending_oauth_creds = Some((
+            client_id.into(),
+            client_secret.into(),
+            Some(token_endpoint.into()),
+            scope,
+        ));
+        self
+    }
+
+    /// Provide an explicit mTLS identity (client certificate + key).
+    ///
+    /// When set, every connection will present this certificate during the TLS
+    /// handshake.  You can still layer a bearer token or API key on top — it
+    /// will be included as a request header as usual.
+    pub fn with_identity(mut self, identity: ConduitIdentity) -> Self {
+        self.identity = Some(identity);
+        self
+    }
+
+    /// Try to load an mTLS identity using the auto-discovery chain.
+    ///
+    /// Checks env vars → `~/.conduit/` → `.conduit/` in the cwd.  If nothing
+    /// is found this is a no-op: the client falls back to token auth silently.
+    pub fn with_identity_auto(mut self) -> Self {
+        self.identity = ConduitIdentity::try_default();
+        self
+    }
+
     /// Hide third-party tools (only show DataGrout tools)
-    pub fn hide_third_party_tools(mut self, hide: bool) -> Self {
-        self.hide_third_party_tools = hide;
+    /// Enable the intelligent interface (DataGrout `discover` / `perform` only).
+    ///
+    /// When `true`, `list_tools()` returns only the DataGrout semantic discovery
+    /// and execution tools instead of the raw tool list from the MCP server.
+    /// This mirrors the `use_intelligent_interface` setting on the server.
+    pub fn use_intelligent_interface(mut self, enabled: bool) -> Self {
+        self.use_intelligent_interface = enabled;
         self
     }
 
@@ -441,16 +577,125 @@ impl ClientBuilder {
         self
     }
 
+    /// Disable mTLS even when connecting to a DataGrout URL.
+    ///
+    /// By default, DG URLs (`*.datagrout.ai`) automatically attempt to discover
+    /// an mTLS identity via the auto-discovery chain.  Call this to opt out —
+    /// useful in environments where you cannot persist certificates to disk or
+    /// where you are intentionally using token-only auth.
+    pub fn no_mtls(mut self) -> Self {
+        self.disable_mtls = true;
+        self.identity = None;
+        self
+    }
+
+    /// Bootstrap an mTLS identity seamlessly.
+    ///
+    /// Checks the auto-discovery chain first (`~/.conduit/`, env vars).  If an
+    /// existing identity is found and not near expiry it is used as-is.  If not
+    /// found (or near expiry), a new keypair is generated, registered with
+    /// DataGrout via the Arbiter API key, saved to `~/.conduit/`, and loaded
+    /// as the active identity.
+    ///
+    /// This is the zero-friction path — call it once with the API key and the
+    /// client handles everything automatically on every subsequent run.
+    ///
+    /// Requires the `registration` feature flag.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://app.datagrout.ai/servers/{uuid}/mcp")
+    ///     .bootstrap_identity(
+    ///         std::env::var("ARBITER_API_KEY")?,
+    ///         "my-agent",
+    ///         "https://app.datagrout.ai/api/v1/substrate/identity",
+    ///     )
+    ///     .await?
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "registration")]
+    pub async fn bootstrap_identity(
+        mut self,
+        api_key: impl Into<String>,
+        name: impl Into<String>,
+        substrate_endpoint: impl Into<String>,
+    ) -> crate::error::Result<Self> {
+        use crate::registration::{
+            default_identity_dir, generate_keypair, register_identity,
+            save_identity_to_dir, RegistrationOptions,
+        };
+
+        // Fast path: existing identity that doesn't need rotation.
+        if let Some(existing) = ConduitIdentity::try_default() {
+            if !existing.needs_rotation(7) {
+                self.identity = Some(existing);
+                return Ok(self);
+            }
+        }
+
+        // Slow path: generate and register a new identity.
+        let name_str = name.into();
+        let keypair = generate_keypair(&name_str)?;
+        let opts = RegistrationOptions {
+            endpoint: substrate_endpoint.into(),
+            api_key: api_key.into(),
+            name: name_str,
+        };
+        let (identity, _resp) = register_identity(&keypair, &opts).await?;
+
+        // Persist so future runs skip registration.
+        if let Some(dir) = default_identity_dir() {
+            let _ = save_identity_to_dir(&identity, &dir);
+        }
+
+        self.identity = Some(identity);
+        Ok(self)
+    }
+
     /// Build the client
     pub fn build(self) -> Result<Client> {
         let url = self.url.ok_or_else(|| Error::invalid_config("URL is required"))?;
+        let dg = is_dg_url(&url);
 
         let transport_mode = self.transport.unwrap_or(Transport::JsonRpc);
-        let auth = self.auth.unwrap_or(AuthConfig::None);
+
+        // Resolve OAuth credentials now that the URL is known.
+        let auth = if let Some((client_id, client_secret, endpoint, scope)) =
+            self._pending_oauth_creds
+        {
+            let token_endpoint = endpoint
+                .unwrap_or_else(|| OAuthTokenProvider::derive_token_endpoint(&url));
+            AuthConfig::ClientCredentials(OAuthTokenProvider::new(
+                client_id,
+                client_secret,
+                token_endpoint,
+                scope,
+            ))
+        } else {
+            self.auth.unwrap_or(AuthConfig::None)
+        };
+
+        // For DG URLs, silently try auto-discovering an mTLS identity if none was
+        // explicitly set and mTLS wasn't disabled. Non-DG URLs never auto-discover.
+        let identity = if dg && !self.disable_mtls && self.identity.is_none() {
+            ConduitIdentity::try_default()
+        } else {
+            self.identity
+        };
+
+        let identity_ref = identity.as_ref();
 
         let transport: Box<dyn TransportTrait> = match transport_mode {
-            Transport::Mcp => Box::new(McpTransport::new(url, auth)?),
-            Transport::JsonRpc => Box::new(JsonRpcTransport::new(url, auth)?),
+            Transport::Mcp => Box::new(McpTransport::with_identity(url, auth, identity_ref)?),
+            Transport::JsonRpc => {
+                Box::new(JsonRpcTransport::with_identity(url, auth, identity_ref)?)
+            }
         };
 
         Ok(Client {
@@ -458,9 +703,10 @@ impl ClientBuilder {
             next_id: Arc::new(AtomicU64::new(1)),
             initialized: Arc::new(RwLock::new(false)),
             server_info: Arc::new(RwLock::new(None)),
-            last_receipt: Arc::new(RwLock::new(None)),
-            hide_third_party_tools: self.hide_third_party_tools,
+            use_intelligent_interface: self.use_intelligent_interface,
             max_retries: self.max_retries,
+            is_dg: dg,
+            dg_warned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 }
@@ -806,15 +1052,8 @@ impl<'a> FlowIntoBuilder<'a> {
         let response = self.client.send_with_retry(request).await?;
 
         if let Some(result) = response.result {
-            // Extract receipt if present
-            if let Some(obj) = result.as_object() {
-                if let Some(receipt) = obj.get("_receipt") {
-                    let receipt: Receipt = serde_json::from_value(receipt.clone())?;
-                    let mut last_receipt = self.client.last_receipt.write().await;
-                    *last_receipt = Some(receipt);
-                }
-            }
-
+            // Receipt is embedded in result["_meta"]["receipt"] — callers can use
+            // extract_meta(&result) to access it without any client-side state.
             Ok(result)
         } else {
             Err(Error::Other("Flow.into returned no result".to_string()))
