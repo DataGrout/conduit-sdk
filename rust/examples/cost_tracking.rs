@@ -1,6 +1,6 @@
 //! Cost tracking and credit management example.
 //!
-//! Demonstrates how to read the `_meta` block that DataGrout embeds in every
+//! Demonstrates how to read the `_datagrout` block that DataGrout embeds in every
 //! tool-call result using [`extract_meta`].
 
 use datagrout_conduit::{extract_meta, ClientBuilder, Transport};

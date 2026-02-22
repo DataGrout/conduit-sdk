@@ -564,7 +564,7 @@ class TestClientWithIdentity:
             mock_transport = AsyncMock()
             mock_transport.call_tool = AsyncMock(return_value={
                 "result": "ok",
-                "_meta": {
+                "_datagrout": {
                     "receipt": {
                         "receipt_id": "rcp_mtls_test",
                         "timestamp": "2026-02-13T00:00:00Z",

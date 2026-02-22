@@ -1,0 +1,4 @@
+[test]
+# Run integration tests single-threaded to prevent env-var races.
+# (env vars are process-global; parallel tests that set/remove the same vars interfere.)
+test-threads = 1

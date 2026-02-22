@@ -27,9 +27,9 @@ pub struct Byok {
     pub discount_rate: f64,
 }
 
-/// Cost receipt attached to every tool-call result under `result["_meta"]["receipt"]`.
+/// Cost receipt attached to every tool-call result under `result["_datagrout"]["receipt"]`.
 ///
-/// DG embeds this in the `_meta` sibling key of the tool result JSON.
+/// DG embeds this in the `_datagrout` sibling key of the tool result JSON.
 /// Use [`extract_meta`] to pull it out cleanly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt {
@@ -56,7 +56,7 @@ pub struct Receipt {
     pub byok: Byok,
 }
 
-/// Pre-execution credit estimate embedded under `result["_meta"]["credit_estimate"]`.
+/// Pre-execution credit estimate embedded under `result["_datagrout"]["credit_estimate"]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreditEstimate {
     pub estimated_total: f64,
@@ -65,14 +65,14 @@ pub struct CreditEstimate {
     pub breakdown: Value,
 }
 
-/// The `_meta` block that DataGrout appends to every tool-call result.
+/// The `_datagrout` block that DataGrout appends to every tool-call result.
 ///
 /// # Example
 ///
 /// ```rust,no_run
 /// use datagrout_conduit::extract_meta;
 /// # use serde_json::json;
-/// # let result = json!({"value": 42, "_meta": {"receipt": {"receipt_id": "rcp_abc", "timestamp": "2026-01-01T00:00:00Z", "estimated_credits": 1.0, "actual_credits": 1.0, "net_credits": 1.0, "savings": 0.0, "savings_bonus": 0.0, "breakdown": {}, "byok": {"enabled": false, "discount_applied": 0.0, "discount_rate": 0.0}}, "credit_estimate": {"estimated_total": 1.0, "actual_total": 1.0, "net_total": 1.0, "breakdown": {}}}});
+/// # let result = json!({"value": 42, "_datagrout": {"receipt": {"receipt_id": "rcp_abc", "timestamp": "2026-01-01T00:00:00Z", "estimated_credits": 1.0, "actual_credits": 1.0, "net_credits": 1.0, "savings": 0.0, "savings_bonus": 0.0, "breakdown": {}, "byok": {"enabled": false, "discount_applied": 0.0, "discount_rate": 0.0}}, "credit_estimate": {"estimated_total": 1.0, "actual_total": 1.0, "net_total": 1.0, "breakdown": {}}}});
 /// if let Some(meta) = extract_meta(&result) {
 ///     println!("Charged {} credits", meta.receipt.net_credits);
 ///     println!("Remaining balance: {:?}", meta.receipt.balance_after);
@@ -85,12 +85,18 @@ pub struct ToolMeta {
     pub credit_estimate: Option<CreditEstimate>,
 }
 
-/// Extract the `_meta` block from a DataGrout tool-call result.
+/// Extract the DataGrout metadata block from a tool-call result.
 ///
-/// Returns `None` when the result does not contain a `_meta` key (e.g. upstream
+/// Checks `_datagrout` first (current format), then falls back to `_meta`
+/// for backward compatibility with older gateway responses.
+///
+/// Returns `None` when the result contains neither key (e.g. upstream
 /// servers that don't go through the DG gateway).
 pub fn extract_meta(result: &Value) -> Option<ToolMeta> {
-    result.get("_meta").and_then(|m| serde_json::from_value(m.clone()).ok())
+    result
+        .get("_datagrout")
+        .or_else(|| result.get("_meta"))
+        .and_then(|m| serde_json::from_value(m.clone()).ok())
 }
 
 /// Discovery options

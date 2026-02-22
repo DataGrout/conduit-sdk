@@ -656,7 +656,7 @@ class Client:
         result = await self._transport.call_tool(
             "data-grout/discovery.perform", params
         )
-        # Receipt is embedded in result["_meta"]["receipt"] — callers can use
+        # Receipt is embedded in result["_datagrout"]["receipt"] — callers can use
         # extract_meta(result) to access it without any client-side state.
         return result
 

@@ -7,10 +7,10 @@ import { Client } from '../src/client';
 import { extractMeta } from '../src/types';
 import { RateLimitError } from '../src/transports/jsonrpc';
 
-// ─── Real DG _meta receipt fixture (matches gateway output) ──────────────────
+// ─── Real DG _datagrout receipt fixture (matches gateway output) ─────────────
 
 const RECEIPT_META = {
-  _meta: {
+  _datagrout: {
     receipt: {
       receipt_id: 'rcp_123',
       timestamp: '2026-02-13T00:00:00Z',
@@ -155,7 +155,7 @@ describe('Client', () => {
 
   // ─── Receipt via extractMeta ──────────────────────────────────────────────
 
-  it('should parse receipt from _meta block using extractMeta', async () => {
+  it('should parse receipt from _datagrout block using extractMeta', async () => {
     const mockTransport = {
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
@@ -182,7 +182,7 @@ describe('Client', () => {
     expect(meta!.receipt.balanceAfter).toBe(995.5);
   });
 
-  it('should parse credit estimate from _meta block using extractMeta', async () => {
+  it('should parse credit estimate from _datagrout block using extractMeta', async () => {
     const mockTransport = {
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
@@ -206,7 +206,7 @@ describe('Client', () => {
     expect(meta!.creditEstimate!.netTotal).toBe(4.5);
   });
 
-  it('extractMeta returns null when no _meta in result', () => {
+  it('extractMeta returns null when no _datagrout/_meta in result', () => {
     expect(extractMeta({ result: 'ok' })).toBeNull();
     expect(extractMeta({})).toBeNull();
     expect(extractMeta(null as any)).toBeNull();

@@ -14,10 +14,10 @@ from datagrout.conduit.types import (
     RateLimitStatus,
 )
 
-# ─── Real server _meta receipt fixture (matches DG gateway output) ─────────────
+# ─── Real server _datagrout receipt fixture (matches DG gateway output) ─────────
 
 RECEIPT_META = {
-    "_meta": {
+    "_datagrout": {
         "receipt": {
             "receipt_id": "rcp_123",
             "timestamp": "2026-02-13T00:00:00Z",

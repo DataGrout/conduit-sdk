@@ -36,7 +36,7 @@ export interface Byok {
 }
 
 /**
- * Cost receipt attached to every DG tool-call result under `result._meta.receipt`.
+ * Cost receipt attached to every DG tool-call result under `result._datagrout.receipt`.
  *
  * Use `extractMeta(result)` to pull this out cleanly.
  */
@@ -60,7 +60,7 @@ export interface Receipt {
   byok: Byok;
 }
 
-/** Pre-execution credit estimate under `result._meta.credit_estimate`. */
+/** Pre-execution credit estimate under `result._datagrout.credit_estimate`. */
 export interface CreditEstimate {
   estimatedTotal: number;
   actualTotal: number;
@@ -69,7 +69,7 @@ export interface CreditEstimate {
 }
 
 /**
- * The `_meta` block that DataGrout appends to every tool-call result.
+ * The `_datagrout` block that DataGrout appends to every tool-call result.
  *
  * @example
  * ```ts
@@ -84,13 +84,16 @@ export interface ToolMeta {
 }
 
 /**
- * Extract the `_meta` block from a DataGrout tool-call result.
+ * Extract the DataGrout metadata block from a tool-call result.
  *
- * Returns `null` when the result does not contain `_meta` (e.g. upstream
+ * Checks `_datagrout` first (current format), then falls back to `_meta`
+ * for backward compatibility with older gateway responses.
+ *
+ * Returns `null` when the result contains neither key (e.g. upstream
  * servers not routed through the DG gateway).
  */
 export function extractMeta(result: Record<string, any>): ToolMeta | null {
-  const raw = result?._meta;
+  const raw = result?._datagrout ?? result?._meta;
   if (!raw?.receipt) return null;
 
   const r = raw.receipt;

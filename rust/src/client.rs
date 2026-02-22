@@ -1052,7 +1052,7 @@ impl<'a> FlowIntoBuilder<'a> {
         let response = self.client.send_with_retry(request).await?;
 
         if let Some(result) = response.result {
-            // Receipt is embedded in result["_meta"]["receipt"] — callers can use
+            // Receipt is embedded in result["_datagrout"]["receipt"] — callers can use
             // extract_meta(&result) to access it without any client-side state.
             Ok(result)
         } else {
