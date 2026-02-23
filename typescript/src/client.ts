@@ -397,7 +397,7 @@ export class Client {
     options?: any
   ): Promise<any> {
     const params = { tool, args, ...options };
-    // Receipt is embedded in result["_datagrout"]["receipt"] — callers can use
+    // Receipt is embedded in result["_meta"]["datagrout"]["receipt"] — callers can use
     // extractMeta(result) to access it without any client-side state.
     return await this.transport.callTool('data-grout/discovery.perform', params);
   }

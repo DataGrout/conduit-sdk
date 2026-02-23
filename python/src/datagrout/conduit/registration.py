@@ -101,15 +101,21 @@ class ToolMeta:
 def extract_meta(result: dict) -> Optional[ToolMeta]:
     """Extract the DataGrout metadata block from a tool-call result dict.
 
-    Checks ``_datagrout`` first (current format), then falls back to ``_meta``
+    Checks ``_meta.datagrout`` first (current format — MCP spec extension
+    point), then falls back to top-level ``_datagrout``, then bare ``_meta``,
     for backward compatibility with older gateway responses.
 
-    Returns ``None`` when the result contains neither key (e.g. upstream
-    servers not routed through the DG gateway).
+    Returns ``None`` when no recognized key is found (e.g. upstream servers
+    not routed through the DG gateway).
     """
     raw_meta = None
     if isinstance(result, dict):
-        raw_meta = result.get("_datagrout") or result.get("_meta")
+        _meta = result.get("_meta")
+        raw_meta = (
+            (_meta.get("datagrout") if isinstance(_meta, dict) else None)
+            or result.get("_datagrout")
+            or _meta
+        )
     if not raw_meta:
         return None
 
