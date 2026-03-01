@@ -196,9 +196,11 @@ Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, 
 - [DataGrout Library](https://library.datagrout.ai)
 - [Security](https://app.datagrout.ai/security)
 
-### Free Tools
+### Free Web Tools
 
-- [MCP Inspector](https://inspectors.datagrout.ai/mcp) — debug any MCP server in the browser with full auth support
+These run entirely in your browser — no account required, no data stored. Provided as a public service for the MCP and AI tooling community.
+
+- [MCP Inspector](https://inspectors.datagrout.ai/mcp) — debug any MCP server with full auth support
 - [JSONRPC Inspector](https://inspectors.datagrout.ai/jsonrpc) — test any JSON-RPC 2.0 endpoint with Bearer, OAuth 2.1, and mTLS
 
 ### Labs
