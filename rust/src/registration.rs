@@ -9,8 +9,8 @@
 //! 1. Generate an ECDSA P-256 keypair with [`generate_keypair`].
 //!    The private key never leaves the client.
 //! 2. Send the **public key** to the DataGrout CA via [`register_identity`]
-//!    (authenticated with the Arbiter API key for the initial bootstrap).
-//!    DataGrout signs the cert and returns it.
+//!    (authenticated with any valid bearer token — a user access token or
+//!    API key).  DataGrout signs the cert and returns it.
 //! 3. Persist the returned identity to `~/.conduit/` via [`save_identity_to_dir`]
 //!    for auto-discovery by future sessions.
 //! 4. On renewal (cert within ~7 days of expiry), call [`rotate_identity`] which
@@ -38,8 +38,8 @@ use std::path::{Path, PathBuf};
 pub struct RegistrationOptions {
     /// DataGrout API endpoint base (e.g. `https://app.datagrout.ai/api/v1/substrate/identity`).
     pub endpoint: String,
-    /// Arbiter API key used for the bootstrap Bearer token.
-    pub api_key: String,
+    /// Bearer token for authentication — any valid DG access token or API key.
+    pub auth_token: String,
     /// Human-readable label for this Substrate instance (e.g. `"nick-macbook"`).
     pub name: String,
 }
@@ -203,7 +203,7 @@ pub async fn register_identity(
 
     let resp = client
         .post(&url)
-        .bearer_auth(&opts.api_key)
+        .bearer_auth(&opts.auth_token)
         .json(&RegisterPayload {
             public_key_pem: &public_key_pem,
             name: &opts.name,
@@ -329,6 +329,10 @@ pub async fn rotate_identity(
 /// The canonical URL for the DataGrout CA certificate.
 pub const DG_CA_URL: &str = "https://ca.datagrout.ai/ca.pem";
 
+/// Default endpoint for Substrate identity registration.
+pub const DG_SUBSTRATE_ENDPOINT: &str =
+    "https://app.datagrout.ai/api/v1/substrate/identity";
+
 /// Fetch the current DataGrout CA certificate from `ca.datagrout.ai`.
 ///
 /// This uses the system trust store for TLS (not the DG CA itself), so there
@@ -347,7 +351,7 @@ pub async fn fetch_dg_ca_cert(url: Option<&str>) -> Result<String> {
 
     let resp = client
         .get(url)
-        .header("Accept", "application/x-pem-file, text/plain")
+        .header("Accept", "application/x-pem-file, text/plain, */*")
         .send()
         .await
         .map_err(|e| Error::Connection(format!("CA cert fetch failed: {e}")))?;

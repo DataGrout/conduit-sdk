@@ -12,9 +12,12 @@
 //!
 //! 1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` (+ optional `CONDUIT_MTLS_CA`)
 //!    environment variables (PEM strings).
-//! 2. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+//! 2. `CONDUIT_IDENTITY_DIR` environment variable — a directory containing
+//!    `identity.pem` and `identity_key.pem`.  Useful for running multiple
+//!    agents on the same machine with distinct identities.
+//! 3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
 //!    (+ optional `~/.conduit/ca.pem`).
-//! 3. `.conduit/identity.pem` relative to the current working directory.
+//! 4. `.conduit/identity.pem` relative to the current working directory.
 //!
 //! If none of the above locations exist the function returns `None` and the
 //! transport falls back to bearer token / API key auth as before — nothing
@@ -158,13 +161,45 @@ impl ConduitIdentity {
     /// Try to locate an identity using the auto-discovery chain described in
     /// the module docs.  Returns `None` if nothing is found (not an error).
     pub fn try_default() -> Option<Self> {
-        // 1. Environment variables
+        Self::try_discover(None)
+    }
+
+    /// Like [`try_default`](Self::try_default) but checks `override_dir` first.
+    ///
+    /// Discovery order:
+    /// 1. `override_dir` (if `Some`)
+    /// 2. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` env vars
+    /// 3. `CONDUIT_IDENTITY_DIR` env var
+    /// 4. `~/.conduit/`
+    /// 5. `.conduit/` relative to cwd
+    pub fn try_discover(override_dir: Option<&Path>) -> Option<Self> {
+        // 0. Explicit override directory
+        if let Some(dir) = override_dir {
+            if let Some(id) = Self::try_load_from_dir(dir) {
+                tracing::debug!("conduit: loaded mTLS identity from {}", dir.display());
+                return Some(id);
+            }
+        }
+
+        // 1. Environment variables (individual cert/key PEMs)
         if let Ok(Some(id)) = Self::from_env() {
             tracing::debug!("conduit: loaded mTLS identity from environment variables");
             return Some(id);
         }
 
-        // 2. ~/.conduit/
+        // 2. CONDUIT_IDENTITY_DIR env var
+        if let Ok(dir_str) = std::env::var("CONDUIT_IDENTITY_DIR") {
+            let dir = PathBuf::from(&dir_str);
+            if let Some(id) = Self::try_load_from_dir(&dir) {
+                tracing::debug!(
+                    "conduit: loaded mTLS identity from CONDUIT_IDENTITY_DIR={}",
+                    dir.display()
+                );
+                return Some(id);
+            }
+        }
+
+        // 3. ~/.conduit/
         if let Some(home_dir) = dirs_next() {
             let dir = home_dir.join(".conduit");
             if let Some(id) = Self::try_load_from_dir(&dir) {
@@ -176,7 +211,7 @@ impl ConduitIdentity {
             }
         }
 
-        // 3. .conduit/ relative to cwd
+        // 4. .conduit/ relative to cwd
         if let Ok(cwd) = std::env::current_dir() {
             let dir = cwd.join(".conduit");
             if let Some(id) = Self::try_load_from_dir(&dir) {

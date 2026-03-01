@@ -81,13 +81,20 @@
 //! use datagrout_conduit::{ClientBuilder, ConduitIdentity, Transport};
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Option A: auto-discover from env vars or ~/.conduit/
+//! // Option A: auto-discover from env vars, CONDUIT_IDENTITY_DIR, or ~/.conduit/
 //! let client = ClientBuilder::new()
 //!     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
 //!     .with_identity_auto()
 //!     .build()?;
 //!
-//! // Option B: explicit certificate files
+//! // Option B: custom identity dir (multiple agents per machine)
+//! let client = ClientBuilder::new()
+//!     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+//!     .identity_dir("/opt/agents/agent-a/.conduit")
+//!     .with_identity_auto()
+//!     .build()?;
+//!
+//! // Option C: explicit certificate files
 //! let identity = ConduitIdentity::from_paths(
 //!     "certs/client.pem",
 //!     "certs/client_key.pem",
@@ -98,7 +105,7 @@
 //!     .with_identity(identity)
 //!     .build()?;
 //!
-//! // Option C: from PEM strings (e.g. pulled from a secret store)
+//! // Option D: from PEM strings (e.g. pulled from a secret store)
 //! # let cert_pem = b"-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n" as &[u8];
 //! # let key_pem = b"-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n" as &[u8];
 //! let identity = ConduitIdentity::from_pem(cert_pem, key_pem, None::<Vec<u8>>)?;
@@ -110,30 +117,26 @@
 //!
 //! On first run, a Substrate instance generates an ECDSA P-256 keypair locally,
 //! sends only the public key to DataGrout, and receives a DG-CA-signed certificate.
-//! Subsequent connections authenticate via mTLS — no API key needed.
+//! Subsequent connections authenticate via mTLS — no token needed.
+//!
+//! The simplest path is `bootstrap_identity` on the builder:
 //!
 //! ```rust,no_run
-//! # #[cfg(feature = "registration")]
+//! # use datagrout_conduit::ClientBuilder;
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use datagrout_conduit::registration::{
-//!     generate_keypair, register_identity, save_identity_to_dir,
-//!     RegistrationOptions, default_identity_dir,
-//! };
+//! // First run: provide a valid access token and a name for this identity.
+//! // The SDK generates keys, registers with the DG CA, and saves certs to
+//! // ~/.conduit/ (or the configured identity_dir).
+//! let client = ClientBuilder::new()
+//!     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+//!     .bootstrap_identity("my-access-token", "my-laptop")
+//!     .await?
+//!     .build()?;
 //!
-//! // Step 1 – generate a fresh ECDSA P-256 keypair (private key stays local)
-//! let keypair = generate_keypair("my-substrate")?;
-//!
-//! // Step 2 – register with DataGrout; only the public key is sent
-//! let (identity, _resp) = register_identity(&keypair, &RegistrationOptions {
-//!     endpoint: "https://app.datagrout.ai/api/v1/substrate/identity".into(),
-//!     api_key: std::env::var("ARBITER_API_KEY")?,
-//!     name: "my-substrate".into(),
-//! }).await?;
-//!
-//! // Step 3 – persist the DG-signed cert so try_default() finds it on next run
-//! if let Some(dir) = default_identity_dir() {
-//!     save_identity_to_dir(&identity, dir)?;
-//! }
+//! // Every subsequent run: certs auto-discovered, no token needed.
+//! let client = ClientBuilder::new()
+//!     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+//!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -156,8 +159,8 @@ pub use identity::ConduitIdentity;
 pub use oauth::OAuthTokenProvider;
 pub use registration::{
     fetch_dg_ca_cert, generate_keypair, refresh_ca_cert, register_identity, rotate_identity,
-    save_identity_to_dir, DG_CA_URL, RegistrationOptions, RenewalOptions, RegistrationResponse,
-    SavedIdentityPaths,
+    save_identity_to_dir, DG_CA_URL, DG_SUBSTRATE_ENDPOINT, RegistrationOptions, RenewalOptions,
+    RegistrationResponse, SavedIdentityPaths,
 };
 pub use transport::Transport;
 pub use types::{

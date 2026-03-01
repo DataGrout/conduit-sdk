@@ -2,6 +2,7 @@
 
 import logging
 import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .identity import ConduitIdentity
@@ -95,11 +96,11 @@ class Client:
         url: str,
         auth: Optional[Dict[str, Any]] = None,
         use_intelligent_interface: bool = False,
-        transport: str = "jsonrpc",  # Default to jsonrpc since it's simpler
+        transport: str = "jsonrpc",
         identity: Optional[ConduitIdentity] = None,
         identity_auto: bool = False,
+        identity_dir: Optional[str] = None,
         disable_mtls: bool = False,
-        # Convenience shorthand for OAuth 2.1 client_credentials auth.
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
         oauth_scope: Optional[str] = None,
@@ -121,6 +122,9 @@ class Client:
             transport: Transport mode ("mcp" or "jsonrpc").
             identity: Explicit mTLS identity (client certificate + key).
             identity_auto: Auto-discover an mTLS identity from env vars / ~/.conduit/.
+            identity_dir: Custom directory for identity storage/discovery.  Overrides
+                the default ``~/.conduit/``.  Useful for running multiple agents on
+                the same machine with distinct identities.
             disable_mtls: Opt out of automatic mTLS even for DataGrout URLs.
                 Normally, DG URLs silently attempt auto-discovery of an mTLS identity.
                 Set this to ``True`` to use token-only auth.
@@ -152,11 +156,12 @@ class Client:
 
         # Resolve identity: explicit > identity_auto flag > DG URL auto-discover.
         # For DG URLs, silently try auto-discovery unless disabled or already set.
+        _id_dir = Path(identity_dir) if identity_dir else None
         resolved_identity = identity
         if resolved_identity is None and identity_auto:
-            resolved_identity = ConduitIdentity.try_default()
+            resolved_identity = ConduitIdentity.try_discover(_id_dir)
         if resolved_identity is None and self._is_dg and not disable_mtls:
-            resolved_identity = ConduitIdentity.try_default()
+            resolved_identity = ConduitIdentity.try_discover(_id_dir)
 
         # Initialize transport
         if transport == "mcp":
@@ -181,27 +186,31 @@ class Client:
     async def bootstrap_identity(
         cls,
         url: str,
-        api_key: str,
+        auth_token: str,
         name: str,
-        substrate_endpoint: str,
+        substrate_endpoint: str = "https://app.datagrout.ai/api/v1/substrate/identity",
+        identity_dir: Optional[str] = None,
         **client_kwargs: Any,
     ) -> "Client":
         """Create a :class:`Client` with an mTLS identity bootstrapped automatically.
 
-        Checks the auto-discovery chain first (env vars → ``~/.conduit/``).
-        If an existing identity is found and not within 7 days of expiry it is
-        reused.  Otherwise a new keypair is generated, registered with DataGrout,
-        and saved to ``~/.conduit/`` for future runs.
+        Checks the auto-discovery chain first (``identity_dir`` → env vars →
+        ``CONDUIT_IDENTITY_DIR`` → ``~/.conduit/``).  If an existing identity
+        is found and not within 7 days of expiry it is reused.  Otherwise a new
+        keypair is generated, registered with DataGrout using the provided
+        access token, and saved locally for future runs.
 
-        This is the zero-friction path — call it once with the Arbiter API key
-        and the client handles certificate management on every subsequent run.
+        After the first successful bootstrap the token is no longer needed —
+        mTLS handles authentication on every subsequent run.
 
         Args:
             url: MCP server URL.
-            api_key: Arbiter API key (used only for the first registration).
+            auth_token: Any valid DG access token (used only for the first
+                registration).
             name: Human-readable label for this Substrate instance.
-            substrate_endpoint: DataGrout identity API base URL,
-                e.g. ``https://app.datagrout.ai/api/v1/substrate/identity``.
+            substrate_endpoint: DataGrout identity API base URL.
+            identity_dir: Custom directory for identity persistence.  Overrides
+                the default ``~/.conduit/``.
             **client_kwargs: Additional keyword arguments passed to :class:`Client`.
 
         Returns:
@@ -209,12 +218,15 @@ class Client:
 
         Example::
 
+            # First run: token needed for registration
             client = await Client.bootstrap_identity(
-                url="https://app.datagrout.ai/servers/{uuid}/mcp",
-                api_key=os.environ["ARBITER_API_KEY"],
-                name="my-agent",
-                substrate_endpoint="https://app.datagrout.ai/api/v1/substrate/identity",
+                url="https://gateway.datagrout.ai/servers/{uuid}/mcp",
+                auth_token="my-access-token",
+                name="my-laptop",
             )
+
+            # Subsequent runs: no token needed, mTLS auto-discovered
+            client = Client("https://gateway.datagrout.ai/servers/{uuid}/mcp")
         """
         from .registration import (
             ConduitIdentity,
@@ -224,21 +236,65 @@ class Client:
             save_identity,
         )
 
+        _id_dir = Path(identity_dir) if identity_dir else None
+
         # Fast path: existing valid identity.
-        existing = ConduitIdentity.try_default()
+        existing = ConduitIdentity.try_discover(_id_dir)
         if existing is not None and not existing.needs_rotation(7):
-            return cls(url, identity=existing, **client_kwargs)
+            return cls(url, identity=existing, identity_dir=identity_dir, **client_kwargs)
 
         # Slow path: generate, register, persist.
         keypair = generate_keypair(name)
         identity, _resp = await register_identity(
             keypair,
             endpoint=substrate_endpoint,
-            api_key=api_key,
+            auth_token=auth_token,
             name=name,
         )
-        save_identity(identity, DEFAULT_IDENTITY_DIR)
-        return cls(url, identity=identity, **client_kwargs)
+        save_dir = _id_dir or DEFAULT_IDENTITY_DIR
+        save_identity(identity, save_dir)
+        return cls(url, identity=identity, identity_dir=identity_dir, **client_kwargs)
+
+    @classmethod
+    async def bootstrap_identity_oauth(
+        cls,
+        url: str,
+        client_id: str,
+        client_secret: str,
+        name: str,
+        identity_dir: Optional[str] = None,
+        **client_kwargs: Any,
+    ) -> "Client":
+        """Bootstrap mTLS identity using OAuth 2.1 ``client_credentials``.
+
+        Like :meth:`bootstrap_identity` but performs the OAuth token exchange
+        inline — no pre-obtained token needed.
+
+        Args:
+            url: MCP server URL.
+            client_id: OAuth client ID.
+            client_secret: OAuth client secret.
+            name: Human-readable label for this Substrate instance.
+            identity_dir: Custom directory for identity persistence.
+            **client_kwargs: Additional keyword arguments passed to :class:`Client`.
+
+        Example::
+
+            client = await Client.bootstrap_identity_oauth(
+                url="https://gateway.datagrout.ai/servers/{uuid}/mcp",
+                client_id="my_id",
+                client_secret="my_secret",
+                name="my-laptop",
+            )
+        """
+        from .oauth import OAuthTokenProvider, derive_token_endpoint
+
+        token_endpoint = derive_token_endpoint(url)
+        provider = OAuthTokenProvider(client_id, client_secret, token_endpoint)
+        token = await provider.get_token()
+        return await cls.bootstrap_identity(
+            url, token, name, identity_dir=identity_dir, **client_kwargs
+        )
 
     # ===== Standard MCP API (Drop-in Compatible) =====
 

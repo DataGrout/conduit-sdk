@@ -3,7 +3,7 @@
  */
 
 export { Client, GuidedSession, isDgUrl } from './client';
-export { ConduitIdentity } from './identity';
+export { ConduitIdentity, fetchWithIdentity } from './identity';
 export type { MtlsConfig } from './identity';
 export { OAuthTokenProvider, deriveTokenEndpoint } from './oauth';
 export {

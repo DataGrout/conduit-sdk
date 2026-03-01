@@ -1,168 +1,170 @@
 # DataGrout Conduit
 
-**Production-Ready MCP Client**
+**Production-Ready MCP Client with mTLS, OAuth 2.1, and Semantic Discovery**
 
-Drop-in replacement for standard MCP clients with enterprise features built-in.
+Drop-in replacement for standard MCP clients. Swap one import line and your agent gains semantic discovery, cost tracking, mTLS identity management, and OAuth 2.1 — without changing any other code.
 
-## What is Conduit?
+## Available Languages
 
-Conduit is an intelligent MCP client that provides:
-- 🧠 **10-100x token efficiency** via neurosymbolic runtime
-- 💰 **Built-in cost tracking** with itemized receipts
-- 🔍 **Semantic discovery** (solves the N×M problem for 1000+ tools)
-- 🔒 **Formal verification** with Cognitive Trust Certificates (CTCs)
-- 🛡️ **Runtime policy enforcement** (PII redaction, side effects)
-- ✅ **Drop-in compatible** with standard MCP
+| Language | Package | Install |
+|----------|---------|---------|
+| **Python** | `datagrout-conduit` | `pip install datagrout-conduit` |
+| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit` |
+| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit` |
 
 ## Quick Start
 
 ### Python
 
-```bash
-pip install datagrout-conduit
-```
-
 ```python
-# Before: Standard MCP
-# from mcp import Client
-
-# After: DataGrout Conduit (zero code changes)
 from datagrout.conduit import Client
 
-client = Client("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+async with Client("https://gateway.datagrout.ai/servers/{uuid}/mcp") as client:
+    tools = await client.list_tools()
+    result = await client.call_tool("salesforce@1/get_lead@1", {"id": "123"})
 
-# Standard MCP methods work, but now enhanced
-tools = await client.list_tools()  # Automatically filtered via discovery
-result = await client.call_tool("salesforce@1/get_lead@1", {"id": "123"})
-
-# Plus DataGrout-specific features
-results = await client.discover(query="find unpaid invoices", limit=10)
-session = await client.guide(goal="create invoice from lead")
+    results = await client.discover(query="find unpaid invoices", limit=10)
+    session = await client.guide(goal="create invoice from lead")
 ```
 
 ### TypeScript
 
-```bash
-npm install @datagrout/conduit
-```
-
 ```typescript
-// Before: Standard MCP
-// import { Client } from '@modelcontextprotocol/sdk';
-
-// After: DataGrout Conduit (zero code changes)
 import { Client } from '@datagrout/conduit';
 
 const client = new Client('https://gateway.datagrout.ai/servers/{uuid}/mcp');
+await client.connect();
 
-// Standard MCP methods work, but now enhanced
-const tools = await client.listTools();  // Automatically filtered
-const result = await client.callTool('salesforce@1/get_lead@1', {id: '123'});
+const tools = await client.listTools();
+const result = await client.callTool('salesforce@1/get_lead@1', { id: '123' });
 
-// Plus DataGrout-specific features
-const results = await client.discover({query: 'find unpaid invoices', limit: 10});
-const session = await client.guide({goal: 'create invoice from lead'});
+await client.disconnect();
 ```
 
-## Transport Options
+### Rust
 
-Conduit supports multiple transport protocols:
+```rust
+use datagrout_conduit::ClientBuilder;
 
-### MCP Transport (Official SDK)
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .auth_bearer("your-token")
+    .build()?;
 
-Uses Anthropic's official `mcp` package for standards-compliant communication.
-
-```python
-from datagrout.conduit import Client
-
-# SSE/HTTP transport (DataGrout Gateway)
-client = Client(
-    url="https://gateway.datagrout.ai/servers/{uuid}/mcp",
-    transport="mcp",  # Use official MCP SDK
-    auth={"bearer": "your-token"}
-)
-
-# Stdio transport (local MCP server)
-client = Client(
-    url="stdio://python -m my_mcp_server",
-    transport="mcp"
-)
+client.connect().await?;
+let tools = client.list_tools().await?;
 ```
-
-**Supports:**
-- SSE over HTTP/HTTPS
-- Stdio (local processes)
-- Full MCP protocol compliance
-
-### JSONRPC Transport (Lightweight)
-
-Simple HTTP-based transport for lightweight scenarios:
-
-```python
-client = Client(
-    url="https://api.example.com/rpc",
-    transport="jsonrpc",  # Default, simpler
-    auth={"api_key": "your-key"}
-)
-```
-
-**Use when:**
-- HTTP-only environment
-- Lower overhead needed
-- Custom JSONRPC APIs
-
-See [docs/TRANSPORTS.md](docs/TRANSPORTS.md) for details.
 
 ---
 
-## Why Conduit?
+## Authentication
 
-### The N×M Problem
+All three SDKs support the same authentication methods:
 
-Standard MCP `tools/list` returns ALL tools. With enterprise integrations like Salesforce (1000+ tools) and QuickBooks (500+ tools), agents get overwhelmed.
+### Bearer Token
 
-**Solution**: Conduit automatically uses semantic discovery to return only relevant tools for your agent's task.
+```python
+client = Client("...", auth={"bearer": "your-token"})
+```
 
-### Token Efficiency
+### OAuth 2.1 (client_credentials)
 
-Traditional agents make 7+ LLM calls per multi-step workflow, burning 150k+ tokens.
+```python
+client = Client("...", client_id="id", client_secret="secret")
+```
 
-**Solution**: Conduit's server-side symbolic planning reduces this to 2 LLM calls and 3.5k tokens (92% reduction).
+The SDK fetches, caches, and auto-refreshes JWTs.
 
-### Cost Transparency
+### mTLS (Mutual TLS)
 
-Every operation returns an itemized receipt showing exactly what you spent and why.
+After a one-time bootstrap, the client certificate handles authentication — no tokens needed.
 
-### Formal Safety
+```python
+# First run: bootstrap identity with a one-time token
+client = await Client.bootstrap_identity(
+    url="https://gateway.datagrout.ai/servers/{uuid}/mcp",
+    auth_token="your-access-token",
+    name="my-agent",
+)
 
-Cognitive Trust Certificates (CTCs) provide cryptographic proof that workflows are:
-- Cycle-free (no infinite loops)
-- Type-safe (all transformations valid)
-- Policy-compliant (no unauthorized operations)
-- Budget-respecting (no cost overruns)
+# All subsequent runs: mTLS auto-discovered from ~/.conduit/
+client = Client("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+```
 
-## Available Languages
+Identity auto-discovery searches:
 
-- **Python** - `pip install datagrout-conduit`
-- **TypeScript** - `npm install @datagrout/conduit`
-- **Rust** - `cargo add datagrout-conduit`
+1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` env vars (inline PEM)
+2. `CONDUIT_IDENTITY_DIR` env var (directory path)
+3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+4. `.conduit/` relative to cwd
 
-Additional languages coming soon: Elixir, Go, Ruby
+For multiple agents on one machine, use `identity_dir` to give each its own certificate directory.
+
+---
+
+## Transport Modes
+
+| Transport | Protocol | Use When |
+|-----------|----------|----------|
+| `jsonrpc` (default) | JSON-RPC 2.0 over HTTP POST | Lightweight, supports mTLS |
+| `mcp` | MCP over Streamable HTTP / SSE | Full MCP protocol compliance |
+
+```python
+# JSONRPC (default)
+client = Client(url, transport="jsonrpc")
+
+# MCP
+client = Client(url, transport="mcp")
+```
+
+---
+
+## Key Features
+
+### Semantic Discovery
+
+Solve the N×M tool problem. Instead of listing thousands of raw tools, agents search by intent:
+
+```python
+results = await client.discover(query="find unpaid invoices", limit=5)
+```
+
+### Cost Tracking
+
+Every tool call returns a receipt with credit usage:
+
+```python
+from datagrout.conduit import extract_meta
+
+result = await client.call_tool("salesforce@1/get_lead@1", {"id": "123"})
+meta = extract_meta(result)
+if meta:
+    print(f"Credits: {meta.receipt.net_credits}")
+```
+
+### Guided Workflows
+
+Build multi-step workflows interactively:
+
+```python
+session = await client.guide(goal="create invoice from lead")
+```
+
+### Cognitive Trust Certificates
+
+Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, and budget-respecting.
+
+---
 
 ## Documentation
 
-- [Python Documentation](./python/README.md)
-- [TypeScript Documentation](./typescript/README.md)
-- [Rust Documentation](./rust/README.md)
-- [Concepts](./docs/concepts/)
-- [API Reference](./docs/api/)
+- [Python SDK](./python/README.md)
+- [TypeScript SDK](./typescript/README.md)
+- [Rust SDK](./rust/README.md)
+- [DataGrout Library](https://docs.datagrout.ai)
 
-## Powered By
+---
 
-DataGrout Conduit is powered by [DataGrout](https://datagrout.ai) - The Cognitive Integration Marketplace.
+## License
 
-**FHIM Stack:**
-- 🏗️ **Foundry** - Design tools and agents
-- 🎯 **Hub** - Connect to real systems
-- 🧠 **Intelligence** - Neurosymbolic execution
-- 💾 **Memory** - Curated context (coming soon)
+MIT

@@ -102,9 +102,11 @@ export class Client {
     // For DG URLs, silently try auto-discovery unless disable_mtls is set.
     let identity =
       options.identity ??
-      (options.identityAuto ? ConduitIdentity.tryDefault() ?? undefined : undefined);
+      (options.identityAuto
+        ? ConduitIdentity.tryDiscover(options.identityDir) ?? undefined
+        : undefined);
     if (identity === undefined && this.isDg && !options.disableMtls) {
-      identity = ConduitIdentity.tryDefault() ?? undefined;
+      identity = ConduitIdentity.tryDiscover(options.identityDir) ?? undefined;
     }
 
     // Initialize transport

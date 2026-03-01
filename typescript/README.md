@@ -1,15 +1,11 @@
-# DataGrout Conduit - TypeScript SDK
+# DataGrout Conduit — TypeScript SDK
 
-Production-ready MCP client for TypeScript/JavaScript with enterprise features built-in.
+Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, and cost tracking.
 
 ## Installation
 
 ```bash
 npm install @datagrout/conduit
-# or
-yarn add @datagrout/conduit
-# or
-pnpm add @datagrout/conduit
 ```
 
 ## Quick Start
@@ -17,118 +13,184 @@ pnpm add @datagrout/conduit
 ```typescript
 import { Client } from '@datagrout/conduit';
 
-// Connect to DataGrout gateway
-const client = new Client('https://gateway.datagrout.ai/servers/{your-server-uuid}/mcp');
+const client = new Client('https://gateway.datagrout.ai/servers/{uuid}/mcp');
+await client.connect();
 
-// Standard MCP methods (enhanced automatically)
 const tools = await client.listTools();
-const result = await client.callTool('salesforce@1/get_lead@1', {id: '123'});
+const result = await client.callTool('salesforce@1/get_lead@1', { id: '123' });
 
-// DataGrout-specific features
-const results = await client.discover({query: 'find unpaid invoices', limit: 10});
-const session = await client.guide({goal: 'create invoice from lead'});
-const receipt = client.getLastReceipt();
+await client.disconnect();
 ```
 
-## Features
+## Authentication
 
-### Drop-in Replacement
-
-Replace your MCP client import with Conduit:
+### Bearer Token
 
 ```typescript
-// Before
-import { Client } from '@modelcontextprotocol/sdk';
-
-// After
-import { Client } from '@datagrout/conduit';
-
-// Everything else stays the same
-```
-
-### Automatic Discovery
-
-When `useIntelligentInterface=true`, `listTools()` returns only DataGrout's semantic tools. Your agent automatically uses discovery instead of enumerating raw integrations:
-
-```typescript
-// Agent calls standard MCP
-const tools = await client.listTools();
-// Returns: [discover, perform, guide, flow.into, prism.focus, ...]
-
-// Agent naturally calls discover
-const results = await client.callTool('data-grout/discovery.discover', {
-  query: 'find unpaid invoices'
+const client = new Client({
+  url: 'https://gateway.datagrout.ai/servers/{uuid}/mcp',
+  auth: { bearer: 'your-access-token' },
 });
-// Gets filtered, relevant tools for its task
 ```
 
-### Cost Tracking
-
-Every operation tracks credits automatically:
+### OAuth 2.1 (client_credentials)
 
 ```typescript
-const result = await client.callTool('salesforce@1/get_lead@1', {id: '123'});
-
-const receipt = client.getLastReceipt();
-console.log(`Credits used: ${receipt.actualCredits}`);
-console.log(`Breakdown:`, receipt.breakdown);
+const client = new Client({
+  url: 'https://gateway.datagrout.ai/servers/{uuid}/mcp',
+  auth: {
+    clientCredentials: {
+      clientId: 'your-client-id',
+      clientSecret: 'your-client-secret',
+    },
+  },
+});
 ```
 
-### Dual Transport Modes
+The SDK automatically fetches, caches, and refreshes JWTs before they expire.
+
+### mTLS (Mutual TLS)
+
+After bootstrapping, the client certificate handles authentication at the TLS layer — no tokens needed.
 
 ```typescript
-// Mode 1: MCP-backed (uses @modelcontextprotocol/sdk)
-const client = new Client({url, transport: 'mcp'});
+import { Client, ConduitIdentity } from '@datagrout/conduit';
 
-// Mode 2: Pure JSONRPC (no MCP dependency)
-const client = new Client({url, transport: 'jsonrpc'});
+// Auto-discover from env vars, CONDUIT_IDENTITY_DIR, or ~/.conduit/
+const client = new Client({
+  url: 'https://gateway.datagrout.ai/servers/{uuid}/mcp',
+  identityAuto: true,
+});
+
+// Explicit identity from files
+const identity = ConduitIdentity.fromPaths('certs/client.pem', 'certs/client_key.pem');
+const client = new Client({ url: '...', identity });
+
+// Multiple agents on one machine
+const client = new Client({
+  url: '...',
+  identityDir: '/opt/agents/agent-a/.conduit',
+  identityAuto: true,
+});
+```
+
+#### Identity Auto-Discovery Order
+
+1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
+2. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
+3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+4. `.conduit/` relative to the current working directory
+
+For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently even without `identityAuto: true`.
+
+#### Bootstrapping an mTLS Identity
+
+First-run provisioning — generates a keypair, registers with the DataGrout CA, and saves certs locally. After this, the token is never needed again.
+
+```typescript
+import {
+  generateKeypair,
+  registerIdentity,
+  saveIdentity,
+} from '@datagrout/conduit';
+
+const keypair = generateKeypair();
+const { identity } = await registerIdentity(keypair, {
+  endpoint: 'https://app.datagrout.ai/api/v1/substrate/identity',
+  authToken: 'your-access-token',
+  name: 'my-laptop',
+});
+saveIdentity(identity);  // saves to ~/.conduit/
+```
+
+## Semantic Discovery
+
+When `useIntelligentInterface` is enabled, `listTools()` returns only DataGrout's meta-tools. Agents use semantic search instead of enumerating raw integrations:
+
+```typescript
+const client = new Client({
+  url: '...',
+  useIntelligentInterface: true,
+});
+
+// Semantic search across all connected integrations
+const results = await client.discover({ query: 'find unpaid invoices', limit: 5 });
+
+// Direct execution with cost tracking
+const result = await client.perform({
+  tool: 'salesforce@1/get_lead@1',
+  args: { id: '123' },
+});
+```
+
+## Cost Tracking
+
+Every tool call returns a receipt with credit usage:
+
+```typescript
+import { extractMeta } from '@datagrout/conduit';
+
+const result = await client.callTool('salesforce@1/get_lead@1', { id: '123' });
+const meta = extractMeta(result);
+
+if (meta) {
+  console.log(`Credits: ${meta.receipt.netCredits}`);
+  console.log(`Savings: ${meta.receipt.savings}`);
+}
+```
+
+## Transports
+
+```typescript
+// JSONRPC (default) — lightweight, supports mTLS
+const client = new Client({ url, transport: 'jsonrpc' });
+
+// MCP — full MCP protocol over Streamable HTTP
+const client = new Client({ url, transport: 'mcp' });
 ```
 
 ## API Reference
 
-### Client Configuration
+### Client Options
 
 ```typescript
 new Client(options: {
   url: string;
-  auth?: AuthConfig;
-  useIntelligentInterface?: boolean;
+  auth?: { bearer?: string; apiKey?: string; clientCredentials?: {...} };
   transport?: 'mcp' | 'jsonrpc';
+  useIntelligentInterface?: boolean;
+  identity?: ConduitIdentity;
+  identityAuto?: boolean;
+  identityDir?: string;
+  disableMtls?: boolean;
+  timeout?: number;
 });
 ```
 
 ### Standard MCP Methods
 
-- `listTools()` - List available tools (enhanced with discovery)
-- `callTool(name, arguments)` - Execute tool (enhanced with perform)
-- `listResources()` - List resources
-- `readResource(uri)` - Read resource
-- `listPrompts()` - List prompts
-- `getPrompt(name, arguments)` - Get prompt
+| Method | Description |
+|---|---|
+| `connect()` | Initialize connection |
+| `disconnect()` | Close connection |
+| `listTools()` | List available tools |
+| `callTool(name, args)` | Execute a tool |
+| `listResources()` | List resources |
+| `readResource(uri)` | Read a resource |
+| `listPrompts()` | List prompts |
+| `getPrompt(name, args)` | Get a prompt |
 
-### DataGrout Methods
+### DataGrout Extensions
 
-- `discover(options)` - Semantic tool search
-- `perform(options)` - Direct tool execution
-- `performBatch(calls)` - Batch execution
-- `guide(options)` - Guided workflow
-- `flowInto(options)` - Workflow orchestration
-- `prismFocus(options)` - Type transformation
-
-### Receipt Methods
-
-- `getLastReceipt()` - Get receipt from last operation
-- `estimateCost(tool, args)` - Estimate credits before execution
-
-## Examples
-
-See [examples/](./examples/) directory for complete working examples:
-
-- `basicUsage.ts` - Getting started
-- `discoveryDemo.ts` - Semantic tool discovery
-- `guidedWorkflow.ts` - Stateful workflow navigation
-- `batchOperations.ts` - Parallel tool execution
-- `costTracking.ts` - Credit management
+| Method | Description |
+|---|---|
+| `discover(options)` | Semantic tool search |
+| `perform(options)` | Direct tool execution with tracking |
+| `performBatch(calls)` | Parallel tool execution |
+| `guide(options)` | Guided multi-step workflow |
+| `flowInto(options)` | Workflow orchestration |
+| `prismFocus(options)` | Type transformation |
+| `estimateCost(tool, args)` | Pre-execution credit estimate |
 
 ## Requirements
 

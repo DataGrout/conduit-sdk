@@ -221,6 +221,12 @@ export interface ClientOptions {
    */
   identityAuto?: boolean;
   /**
+   * Custom directory for identity storage and discovery.  Overrides the
+   * default `~/.conduit/` directory.  Useful for running multiple agents
+   * on the same machine — each gets its own identity directory.
+   */
+  identityDir?: string;
+  /**
    * Enable the intelligent interface (DataGrout `discover` / `perform` only).
    *
    * When `true`, `listTools()` returns only the DataGrout semantic discovery

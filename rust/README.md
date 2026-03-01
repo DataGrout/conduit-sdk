@@ -1,6 +1,6 @@
-# DataGrout Conduit SDK for Rust
+# DataGrout Conduit — Rust SDK
 
-Production-ready MCP client with enterprise features for Rust.
+Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, and cost tracking.
 
 [![Crates.io](https://img.shields.io/crates/v/datagrout-conduit.svg)](https://crates.io/crates/datagrout-conduit)
 [![Documentation](https://docs.rs/datagrout-conduit/badge.svg)](https://docs.rs/datagrout-conduit)
@@ -9,11 +9,11 @@ Production-ready MCP client with enterprise features for Rust.
 ## Features
 
 - **MCP Protocol Compliance**: Full JSON-RPC 2.0 over HTTP/SSE support
+- **mTLS Identity**: Auto-discovery, bootstrap, and rotation of client certificates
+- **OAuth 2.1**: Built-in `client_credentials` token management with auto-refresh
 - **DataGrout Extensions**: Semantic discovery, guided workflows, cost tracking
 - **Type-Safe**: Strongly typed Rust APIs with comprehensive error handling
 - **Async/Await**: Built on Tokio for high performance
-- **Zero-Cost Abstractions**: Efficient memory usage and fast execution
-- **Production Ready**: Tested, documented, and battle-hardened
 
 ## Installation
 
@@ -173,6 +173,70 @@ let client = ClientBuilder::new()
     .build()?;
 ```
 
+### OAuth 2.1 (client_credentials)
+
+```rust
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .auth_client_credentials("my_client_id", "my_client_secret")
+    .build()?;
+```
+
+The SDK automatically fetches, caches, and refreshes JWTs before they expire.
+
+### mTLS (Mutual TLS)
+
+After bootstrapping, the client certificate handles authentication at the TLS layer — no tokens needed.
+
+```rust
+// Auto-discover from env vars, CONDUIT_IDENTITY_DIR, or ~/.conduit/
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .with_identity_auto()
+    .build()?;
+
+// Multiple agents on one machine
+let client = ClientBuilder::new()
+    .url("...")
+    .identity_dir("/opt/agents/agent-a/.conduit")
+    .with_identity_auto()
+    .build()?;
+```
+
+#### Identity Auto-Discovery Order
+
+1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
+2. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
+3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+4. `.conduit/` relative to the current working directory
+
+For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently in `build()`.
+
+#### Bootstrapping an mTLS Identity
+
+First-run provisioning — generates a keypair, registers with the DataGrout CA, and saves certs locally. After this, the token is never needed again. Requires the `registration` feature.
+
+```rust
+// First run: token needed for registration
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .bootstrap_identity("your-access-token", "my-laptop")
+    .await?
+    .build()?;
+
+// Or bootstrap with OAuth 2.1 client_credentials
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .bootstrap_identity_oauth("client_id", "client_secret", "my-laptop")
+    .await?
+    .build()?;
+
+// Subsequent runs: no token needed, mTLS auto-discovered
+let client = ClientBuilder::new()
+    .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    .build()?;
+```
+
 ## Error Handling
 
 ```rust
@@ -309,18 +373,11 @@ Benchmarks on M1 Max:
 
 | Feature | Rust | Python | TypeScript |
 |---------|------|--------|------------|
+| **mTLS Identity** | ✅ Full | ✅ Full | ✅ Full |
+| **OAuth 2.1** | ✅ Full | ✅ Full | ✅ Full |
+| **Bootstrap** | ✅ Token + OAuth | ✅ Token + OAuth | ✅ Token |
 | **Type Safety** | ✅ Strong | ⚠️ Runtime | ✅ Compile-time |
-| **Performance** | ✅ Native | ⚠️ Interpreted | ⚠️ JIT |
-| **Memory Safety** | ✅ Guaranteed | ❌ GC | ❌ GC |
 | **Async** | ✅ Tokio | ✅ asyncio | ✅ Promises |
-| **Binary Size** | ⚠️ ~2MB | ✅ ~50KB | ✅ ~100KB |
-| **Startup Time** | ✅ <1ms | ⚠️ ~50ms | ⚠️ ~100ms |
-
-**Use Rust when:**
-- Performance is critical
-- Memory safety is required (Arbiter, Governor)
-- Building CLI tools or embedded systems
-- Long-running services
 
 ## Contributing
 

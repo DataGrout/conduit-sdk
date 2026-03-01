@@ -82,14 +82,14 @@ fn generate_keypair_rotation_flag_not_set_for_new_cert() {
 
 #[cfg(feature = "registration")]
 #[tokio::test]
-async fn register_identity_sends_public_key_and_api_key() {
+async fn register_identity_sends_public_key_and_token() {
     let mut server = mockito::Server::new_async().await;
 
     let mock = server
         .mock("POST", "/register")
-        .match_header("authorization", "Bearer test-arbiter-key")
-        .match_body(mockito::Matcher::PartialJsonString(
-            r#""public_key_pem":"#.to_string(),
+        .match_header("authorization", "Bearer test-access-token")
+        .match_body(mockito::Matcher::Regex(
+            r#"public_key_pem"#.to_string(),
         ))
         .with_status(201)
         .with_header("content-type", "application/json")
@@ -113,7 +113,7 @@ async fn register_identity_sends_public_key_and_api_key() {
         &identity,
         &RegistrationOptions {
             endpoint: server.url(),
-            api_key: "test-arbiter-key".to_string(),
+            auth_token: "test-access-token".to_string(),
             name: "test-substrate".to_string(),
         },
     )
@@ -145,7 +145,7 @@ async fn register_identity_returns_error_on_4xx() {
         &identity,
         &RegistrationOptions {
             endpoint: server.url(),
-            api_key: "key".to_string(),
+            auth_token: "key".to_string(),
             name: "bad".to_string(),
         },
     )
@@ -172,7 +172,7 @@ async fn register_identity_returns_error_on_server_error() {
         &identity,
         &RegistrationOptions {
             endpoint: server.url(),
-            api_key: "key".to_string(),
+            auth_token: "key".to_string(),
             name: "node".to_string(),
         },
     )

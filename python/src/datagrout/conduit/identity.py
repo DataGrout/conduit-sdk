@@ -11,10 +11,13 @@ Auto-discovery order
 first identity it finds:
 
 1. ``CONDUIT_MTLS_CERT`` + ``CONDUIT_MTLS_KEY`` (+ optional ``CONDUIT_MTLS_CA``)
-   environment variables (PEM strings).
-2. ``~/.conduit/identity.pem`` + ``~/.conduit/identity_key.pem``
+   environment variables (inline PEM strings).
+2. ``CONDUIT_IDENTITY_DIR`` environment variable — a directory containing
+   ``identity.pem`` and ``identity_key.pem``.  Useful for running multiple
+   agents on the same machine with distinct identities.
+3. ``~/.conduit/identity.pem`` + ``~/.conduit/identity_key.pem``
    (+ optional ``~/.conduit/ca.pem``).
-3. ``.conduit/identity.pem`` relative to the current working directory.
+4. ``.conduit/identity.pem`` relative to the current working directory.
 
 If nothing is found, :meth:`try_default` returns ``None`` — the transport falls
 back to bearer token / API key auth silently.
@@ -153,16 +156,58 @@ class ConduitIdentity:
             Never raises — loading errors for individual locations are logged
             at DEBUG level and skipped.
         """
-        # 1. Environment variables
+        return cls.try_discover()
+
+    @classmethod
+    def try_discover(
+        cls, override_dir: Optional[Path] = None
+    ) -> Optional["ConduitIdentity"]:
+        """Like :meth:`try_default` but checks *override_dir* first.
+
+        Discovery order:
+
+        1. *override_dir* (if provided)
+        2. ``CONDUIT_MTLS_CERT`` + ``CONDUIT_MTLS_KEY`` env vars
+        3. ``CONDUIT_IDENTITY_DIR`` env var
+        4. ``~/.conduit/``
+        5. ``.conduit/`` relative to cwd
+
+        Args:
+            override_dir: Optional directory to check before the standard chain.
+
+        Returns:
+            A :class:`ConduitIdentity` if one is found, otherwise ``None``.
+        """
+        # 0. Explicit override directory
+        if override_dir is not None:
+            identity = cls._try_load_from_dir(Path(override_dir))
+            if identity is not None:
+                logger.debug(
+                    "conduit: loaded mTLS identity from %s", override_dir
+                )
+                return identity
+
+        # 1. Environment variables (inline PEM strings)
         try:
             identity = cls.from_env()
             if identity is not None:
                 logger.debug("conduit: loaded mTLS identity from environment variables")
                 return identity
         except ValueError:
-            pass  # Missing KEY — don't fall through silently; caller should use from_env()
+            pass
 
-        # 2. ~/.conduit/
+        # 2. CONDUIT_IDENTITY_DIR env var
+        env_dir = os.environ.get("CONDUIT_IDENTITY_DIR")
+        if env_dir:
+            identity = cls._try_load_from_dir(Path(env_dir))
+            if identity is not None:
+                logger.debug(
+                    "conduit: loaded mTLS identity from CONDUIT_IDENTITY_DIR=%s",
+                    env_dir,
+                )
+                return identity
+
+        # 3. ~/.conduit/
         home = Path.home()
         if home:
             identity = cls._try_load_from_dir(home / ".conduit")
@@ -170,7 +215,7 @@ class ConduitIdentity:
                 logger.debug("conduit: loaded mTLS identity from %s/.conduit/", home)
                 return identity
 
-        # 3. .conduit/ relative to cwd
+        # 4. .conduit/ relative to cwd
         identity = cls._try_load_from_dir(Path.cwd() / ".conduit")
         if identity is not None:
             logger.debug("conduit: loaded mTLS identity from .conduit/ in cwd")

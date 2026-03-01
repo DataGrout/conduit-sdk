@@ -435,6 +435,8 @@ pub struct ClientBuilder {
     max_retries: usize,
     /// When `true`, never attempt mTLS even on DG URLs.
     disable_mtls: bool,
+    /// Custom directory for identity storage/discovery (overrides `~/.conduit/`).
+    identity_dir: Option<std::path::PathBuf>,
     /// Pending OAuth credentials resolved into `AuthConfig::ClientCredentials`
     /// during `build()` once the URL is known.
     _pending_oauth_creds: Option<(String, String, Option<String>, Option<String>)>,
@@ -450,6 +452,7 @@ impl Default for ClientBuilder {
             use_intelligent_interface: false,
             max_retries: 3,
             disable_mtls: false,
+            identity_dir: None,
             _pending_oauth_creds: None,
         }
     }
@@ -553,10 +556,25 @@ impl ClientBuilder {
 
     /// Try to load an mTLS identity using the auto-discovery chain.
     ///
-    /// Checks env vars → `~/.conduit/` → `.conduit/` in the cwd.  If nothing
-    /// is found this is a no-op: the client falls back to token auth silently.
+    /// Checks `identity_dir` (if set) → env vars → `CONDUIT_IDENTITY_DIR` →
+    /// `~/.conduit/` → `.conduit/` in the cwd.  If nothing is found this is
+    /// a no-op: the client falls back to token auth silently.
     pub fn with_identity_auto(mut self) -> Self {
-        self.identity = ConduitIdentity::try_default();
+        self.identity = ConduitIdentity::try_discover(
+            self.identity_dir.as_deref(),
+        );
+        self
+    }
+
+    /// Set a custom directory for identity storage and discovery.
+    ///
+    /// This overrides the default `~/.conduit/` directory.  Useful for running
+    /// multiple agents on the same machine — each gets its own identity dir.
+    ///
+    /// Affects both [`with_identity_auto`](Self::with_identity_auto) and
+    /// [`bootstrap_identity`](Self::bootstrap_identity).
+    pub fn identity_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.identity_dir = Some(dir.into());
         self
     }
 
@@ -591,14 +609,16 @@ impl ClientBuilder {
 
     /// Bootstrap an mTLS identity seamlessly.
     ///
-    /// Checks the auto-discovery chain first (`~/.conduit/`, env vars).  If an
-    /// existing identity is found and not near expiry it is used as-is.  If not
-    /// found (or near expiry), a new keypair is generated, registered with
-    /// DataGrout via the Arbiter API key, saved to `~/.conduit/`, and loaded
-    /// as the active identity.
+    /// Checks the auto-discovery chain first (respecting [`identity_dir`] if
+    /// set, then `~/.conduit/`, env vars).  If an existing identity is found
+    /// and not near expiry it is used as-is.  If not found (or near expiry), a
+    /// new keypair is generated, registered with DataGrout using the provided
+    /// bearer token, saved to the identity directory, and loaded as the active
+    /// identity.
     ///
-    /// This is the zero-friction path — call it once with the API key and the
-    /// client handles everything automatically on every subsequent run.
+    /// After the first successful bootstrap the identity is persisted locally
+    /// and auto-discovered on subsequent runs — no token or API key is needed
+    /// again.
     ///
     /// Requires the `registration` feature flag.
     ///
@@ -607,22 +627,40 @@ impl ClientBuilder {
     /// ```rust,no_run
     /// # use datagrout_conduit::ClientBuilder;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // First run: token is needed for registration
     /// let client = ClientBuilder::new()
-    ///     .url("https://app.datagrout.ai/servers/{uuid}/mcp")
-    ///     .bootstrap_identity(
-    ///         std::env::var("ARBITER_API_KEY")?,
-    ///         "my-agent",
-    ///         "https://app.datagrout.ai/api/v1/substrate/identity",
-    ///     )
+    ///     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    ///     .bootstrap_identity("my-access-token", "my-laptop")
     ///     .await?
+    ///     .build()?;
+    ///
+    /// // Subsequent runs: identity auto-discovered, no token needed
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
     ///     .build()?;
     /// # Ok(())
     /// # }
     /// ```
     #[cfg(feature = "registration")]
     pub async fn bootstrap_identity(
+        self,
+        auth_token: impl Into<String>,
+        name: impl Into<String>,
+    ) -> crate::error::Result<Self> {
+        self.bootstrap_identity_with_endpoint(
+            auth_token,
+            name,
+            crate::registration::DG_SUBSTRATE_ENDPOINT,
+        )
+        .await
+    }
+
+    /// Like [`bootstrap_identity`](Self::bootstrap_identity) but with an
+    /// explicit registration endpoint URL.
+    #[cfg(feature = "registration")]
+    pub async fn bootstrap_identity_with_endpoint(
         mut self,
-        api_key: impl Into<String>,
+        auth_token: impl Into<String>,
         name: impl Into<String>,
         substrate_endpoint: impl Into<String>,
     ) -> crate::error::Result<Self> {
@@ -632,7 +670,9 @@ impl ClientBuilder {
         };
 
         // Fast path: existing identity that doesn't need rotation.
-        if let Some(existing) = ConduitIdentity::try_default() {
+        if let Some(existing) = ConduitIdentity::try_discover(
+            self.identity_dir.as_deref(),
+        ) {
             if !existing.needs_rotation(7) {
                 self.identity = Some(existing);
                 return Ok(self);
@@ -644,18 +684,67 @@ impl ClientBuilder {
         let keypair = generate_keypair(&name_str)?;
         let opts = RegistrationOptions {
             endpoint: substrate_endpoint.into(),
-            api_key: api_key.into(),
+            auth_token: auth_token.into(),
             name: name_str,
         };
         let (identity, _resp) = register_identity(&keypair, &opts).await?;
 
-        // Persist so future runs skip registration.
-        if let Some(dir) = default_identity_dir() {
+        // Persist so future runs auto-discover without any token.
+        let save_dir = self.identity_dir.clone()
+            .or_else(default_identity_dir);
+
+        if let Some(dir) = save_dir {
             let _ = save_identity_to_dir(&identity, &dir);
         }
 
         self.identity = Some(identity);
         Ok(self)
+    }
+
+    /// Bootstrap an mTLS identity using OAuth 2.1 `client_credentials`.
+    ///
+    /// Like [`bootstrap_identity`](Self::bootstrap_identity) but instead of
+    /// requiring a pre-obtained token, performs the OAuth token exchange
+    /// inline using the provided `client_id` and `client_secret`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    ///     .bootstrap_identity_oauth(
+    ///         "my_client_id",
+    ///         "my_client_secret",
+    ///         "my-laptop",
+    ///     )
+    ///     .await?
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "registration")]
+    pub async fn bootstrap_identity_oauth(
+        self,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        name: impl Into<String>,
+    ) -> crate::error::Result<Self> {
+        let url = self.url.as_deref()
+            .ok_or_else(|| Error::invalid_config("URL must be set before bootstrap_identity_oauth"))?;
+        let token_endpoint = OAuthTokenProvider::derive_token_endpoint(url);
+
+        let provider = OAuthTokenProvider::new(
+            client_id,
+            client_secret,
+            token_endpoint,
+            None,
+        );
+        let http = reqwest::Client::new();
+        let token = provider.get_token(&http).await?;
+
+        self.bootstrap_identity(token, name).await
     }
 
     /// Build the client
@@ -684,7 +773,7 @@ impl ClientBuilder {
         // For DG URLs, silently try auto-discovering an mTLS identity if none was
         // explicitly set and mTLS wasn't disabled. Non-DG URLs never auto-discover.
         let identity = if dg && !self.disable_mtls && self.identity.is_none() {
-            ConduitIdentity::try_default()
+            ConduitIdentity::try_discover(self.identity_dir.as_deref())
         } else {
             self.identity
         };

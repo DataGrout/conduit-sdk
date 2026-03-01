@@ -40,7 +40,7 @@ export const DEFAULT_IDENTITY_DIR = path.join(os.homedir(), '.conduit');
  */
 export async function fetchDgCaCert(url: string = DG_CA_URL): Promise<string> {
   const resp = await fetch(url, {
-    headers: { Accept: 'application/x-pem-file, text/plain' },
+    headers: { Accept: 'application/x-pem-file, text/plain, */*' },
   });
 
   if (!resp.ok) {
@@ -96,8 +96,8 @@ export interface Keypair {
 export interface RegistrationOptions {
   /** DataGrout substrate identity API base URL. */
   endpoint: string;
-  /** Arbiter API key for bootstrap Bearer auth. */
-  apiKey: string;
+  /** Any valid DG access token for bootstrap Bearer auth. */
+  authToken: string;
   /** Human-readable label for this Substrate instance. */
   name: string;
   /** CA cert URL override (default: {@link DG_CA_URL}). */
@@ -175,7 +175,7 @@ export async function registerIdentity(
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
+      Authorization: `Bearer ${opts.authToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ public_key_pem: publicKeyPem, name: opts.name }),

@@ -12,9 +12,12 @@
  * identity it finds:
  *
  * 1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` (+ optional `CONDUIT_MTLS_CA`)
- *    environment variables.
- * 2. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
- * 3. `.conduit/identity.pem` relative to the current working directory.
+ *    environment variables (inline PEM strings).
+ * 2. `CONDUIT_IDENTITY_DIR` environment variable — a directory containing
+ *    `identity.pem` and `identity_key.pem`.  Useful for running multiple
+ *    agents on the same machine with distinct identities.
+ * 3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+ * 4. `.conduit/identity.pem` relative to the current working directory.
  *
  * If nothing is found, `tryDefault` returns `null` — the client falls back to
  * bearer token / API key auth silently.
@@ -130,7 +133,27 @@ export class ConduitIdentity {
    * module docs.  Returns `null` if nothing is found.
    */
   static tryDefault(): ConduitIdentity | null {
-    // 1. Environment variables
+    return ConduitIdentity.tryDiscover();
+  }
+
+  /**
+   * Like {@link tryDefault} but checks `overrideDir` first.
+   *
+   * Discovery order:
+   * 1. `overrideDir` (if provided)
+   * 2. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` env vars
+   * 3. `CONDUIT_IDENTITY_DIR` env var
+   * 4. `~/.conduit/`
+   * 5. `.conduit/` relative to cwd
+   */
+  static tryDiscover(overrideDir?: string): ConduitIdentity | null {
+    // 0. Explicit override directory
+    if (overrideDir) {
+      const id = ConduitIdentity._tryLoadFromDir(overrideDir);
+      if (id) return id;
+    }
+
+    // 1. Environment variables (inline PEM strings)
     try {
       const id = ConduitIdentity.fromEnv();
       if (id) return id;
@@ -143,14 +166,23 @@ export class ConduitIdentity {
       return null;
     }
 
-    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
-    const searchDirs = [
-      home ? `${home}/.conduit` : null,
-      '.conduit',
-    ].filter(Boolean) as string[];
+    // 2. CONDUIT_IDENTITY_DIR env var
+    const envDir = process.env.CONDUIT_IDENTITY_DIR;
+    if (envDir) {
+      const id = ConduitIdentity._tryLoadFromDir(envDir);
+      if (id) return id;
+    }
 
-    for (const dir of searchDirs) {
-      const id = ConduitIdentity._tryLoadFromDir(dir);
+    // 3. ~/.conduit/
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    if (home) {
+      const id = ConduitIdentity._tryLoadFromDir(`${home}/.conduit`);
+      if (id) return id;
+    }
+
+    // 4. .conduit/ relative to cwd
+    {
+      const id = ConduitIdentity._tryLoadFromDir('.conduit');
       if (id) return id;
     }
 
