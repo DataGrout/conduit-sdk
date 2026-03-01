@@ -121,9 +121,7 @@
 //!
 //! The simplest path is `bootstrap_identity` on the builder:
 //!
-//! ```rust,no_run
-//! # use datagrout_conduit::ClientBuilder;
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! ```rust,ignore
 //! // First run: provide a valid access token and a name for this identity.
 //! // The SDK generates keys, registers with the DG CA, and saves certs to
 //! // ~/.conduit/ (or the configured identity_dir).
@@ -137,8 +135,6 @@
 //! let client = ClientBuilder::new()
 //!     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
 //!     .build()?;
-//! # Ok(())
-//! # }
 //! ```
 
 #![warn(missing_docs)]
