@@ -136,9 +136,26 @@ client = Client(url, transport="mcp")
 
 ## Key Features
 
+### Intelligent Interface
+
+When connecting to a DataGrout server, you can enable the **Intelligent Interface** — a mode that replaces the entire tool surface with just two tools: `discover` and `perform`. Your agent describes what it wants in natural language, and DataGrout handles tool resolution, multiplexing, data transformation, charting, and more behind the scenes.
+
+This is a significant context window optimization. Instead of your agent reasoning over hundreds or thousands of tool schemas, it sees two. The standard `tools/list` response is replaced with the simplified interface automatically when enabled. Under the hood, `perform` supports the full capability set — demux (fan-out across integrations), refract (data transformation), chart generation, and any other server-side operation — all through a single natural-language entry point.
+
+```python
+# With Intelligent Interface enabled, your agent sees only 2 tools
+tools = await client.list_tools()  # returns: [discover, perform]
+
+# discover finds relevant capabilities by intent
+results = await client.call_tool("discover", {"query": "find unpaid invoices"})
+
+# perform executes — DataGrout resolves the right tools, multiplexes, transforms
+result = await client.call_tool("perform", {"action": "get all open invoices from QuickBooks and Stripe"})
+```
+
 ### Semantic Discovery
 
-Solve the N×M tool problem. Instead of listing thousands of raw tools, agents search by intent:
+When not using the Intelligent Interface, semantic discovery is available as a standalone feature. Solve the N×M tool problem by searching by intent instead of listing raw tools:
 
 ```python
 results = await client.discover(query="find unpaid invoices", limit=5)
@@ -177,7 +194,12 @@ Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, 
 - [TypeScript SDK](./typescript/README.md)
 - [Rust SDK](./rust/README.md)
 - [DataGrout Library](https://library.datagrout.ai)
-- [Security](https://datagrout.ai/security)
+- [Security](https://app.datagrout.ai/security)
+
+### Free Tools
+
+- [MCP Inspector](https://inspectors.datagrout.ai/mcp) — debug any MCP server in the browser with full auth support
+- [JSONRPC Inspector](https://inspectors.datagrout.ai/jsonrpc) — test any JSON-RPC 2.0 endpoint with Bearer, OAuth 2.1, and mTLS
 
 ### Labs
 
