@@ -37,11 +37,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/datagrout/conduit"
+    "url": "https://github.com/DataGrout/conduit-sdk"
   },
-  "homepage": "https://conduit.datagrout.dev",
+  "homepage": "https://github.com/DataGrout/conduit-sdk",
   "bugs": {
-    "url": "https://github.com/datagrout/conduit/issues"
+    "url": "https://github.com/DataGrout/conduit-sdk/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

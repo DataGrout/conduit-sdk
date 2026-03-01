@@ -42,10 +42,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/datagrout/conduit"
-Documentation = "https://conduit.datagrout.dev"
-Repository = "https://github.com/datagrout/conduit"
-Issues = "https://github.com/datagrout/conduit/issues"
+Homepage = "https://github.com/DataGrout/conduit-sdk"
+Documentation = "https://library.datagrout.ai/conduit-sdk"
+Repository = "https://github.com/DataGrout/conduit-sdk"
+Issues = "https://github.com/DataGrout/conduit-sdk/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

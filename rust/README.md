@@ -3,8 +3,7 @@
 Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, and cost tracking.
 
 [![Crates.io](https://img.shields.io/crates/v/datagrout-conduit.svg)](https://crates.io/crates/datagrout-conduit)
-[![Documentation](https://docs.rs/datagrout-conduit/badge.svg)](https://docs.rs/datagrout-conduit)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
 
 ## Features
 
@@ -385,17 +384,9 @@ MIT License - see [LICENSE](../LICENSE) for details.
 
 ## Links
 
-- **Documentation**: https://docs.rs/datagrout-conduit
-- **Repository**: https://github.com/datagrout/conduit
-- **Homepage**: https://conduit.datagrout.dev
+- **DataGrout**: https://datagrout.ai
+- **Documentation**: https://library.datagrout.ai/conduit-sdk
+- **Repository**: https://github.com/DataGrout/conduit-sdk
+- **Issues**: https://github.com/DataGrout/conduit-sdk/issues
 - **MCP Spec**: https://modelcontextprotocol.io
-
-## Support
-
-- **Issues**: https://github.com/datagrout/conduit/issues
-- **Discord**: https://discord.gg/datagrout
-- **Email**: hello@datagrout.ai
-
----
-
-**Made with ❤️ by DataGrout**
+- **Contact**: hello@datagrout.ai

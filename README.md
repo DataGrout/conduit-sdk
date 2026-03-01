@@ -161,7 +161,7 @@ Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, 
 - [Python SDK](./python/README.md)
 - [TypeScript SDK](./typescript/README.md)
 - [Rust SDK](./rust/README.md)
-- [DataGrout Library](https://docs.datagrout.ai)
+- [DataGrout Library](https://library.datagrout.ai)
 
 ---
 
