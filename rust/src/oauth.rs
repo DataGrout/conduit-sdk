@@ -32,6 +32,7 @@ use tokio::sync::RwLock;
 // ─── Token response from DataGrout ───────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TokenResponse {
     access_token: String,
     token_type: String,

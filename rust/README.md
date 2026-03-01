@@ -379,10 +379,6 @@ Benchmarks on M1 Max:
 | **Type Safety** | ✅ Strong | ⚠️ Runtime | ✅ Compile-time |
 | **Async** | ✅ Tokio | ✅ asyncio | ✅ Promises |
 
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](../CONTRIBUTING.md).
-
 ## License
 
 MIT License - see [LICENSE](../LICENSE) for details.

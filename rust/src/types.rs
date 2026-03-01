@@ -22,8 +22,11 @@ pub struct Tool {
 /// BYOK (Bring Your Own Key) discount details embedded in a receipt.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Byok {
+    /// Whether the user has BYOK enabled for this server.
     pub enabled: bool,
+    /// Absolute discount applied (in credits).
     pub discount_applied: f64,
+    /// Discount rate as a fraction (0.0–1.0).
     pub discount_rate: f64,
 }
 
@@ -38,11 +41,17 @@ pub struct Receipt {
     /// DB transaction ID (set only when a user account was charged).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_id: Option<String>,
+    /// ISO-8601 timestamp of the charge.
     pub timestamp: String,
+    /// Pre-execution credit estimate.
     pub estimated_credits: f64,
+    /// Actual credits charged after execution.
     pub actual_credits: f64,
+    /// Net credits after discounts.
     pub net_credits: f64,
+    /// Credits saved via caching or BYOK.
     pub savings: f64,
+    /// Bonus savings (e.g. loyalty tier).
     pub savings_bonus: f64,
     /// Account balance before the charge (set only when a user was charged).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +61,7 @@ pub struct Receipt {
     pub balance_after: Option<f64>,
     /// Per-component credit breakdown (`{ "base": 1.0, "semantic_guard": 0.5, … }`).
     pub breakdown: Value,
+    /// BYOK discount details.
     #[serde(default)]
     pub byok: Byok,
 }
@@ -59,9 +69,13 @@ pub struct Receipt {
 /// Pre-execution credit estimate embedded under `result["_datagrout"]["credit_estimate"]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreditEstimate {
+    /// Total estimated credits before execution.
     pub estimated_total: f64,
+    /// Actual credits charged.
     pub actual_total: f64,
+    /// Net credits after discounts.
     pub net_total: f64,
+    /// Per-component breakdown.
     pub breakdown: Value,
 }
 
@@ -80,7 +94,9 @@ pub struct CreditEstimate {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolMeta {
+    /// Charge receipt for the tool call.
     pub receipt: Receipt,
+    /// Pre-execution estimate (present when estimation was requested).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_estimate: Option<CreditEstimate>,
 }

@@ -28,7 +28,9 @@
 
 use crate::error::{Error, Result};
 use crate::identity::ConduitIdentity;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+#[cfg(feature = "registration")]
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -58,26 +60,37 @@ pub struct RenewalOptions {
 /// Response body from `POST /api/v1/substrate/identity/register` or `/rotate`.
 #[derive(Debug, Deserialize)]
 pub struct RegistrationResponse {
+    /// Server-assigned identity ID.
     pub id: String,
+    /// DG-CA-signed certificate in PEM format.
     pub cert_pem: String,
+    /// DG CA certificate (for chain verification).
     pub ca_cert_pem: Option<String>,
+    /// SHA-256 fingerprint of the issued certificate.
     pub fingerprint: String,
+    /// Human-readable label provided during registration.
     pub name: String,
+    /// ISO-8601 timestamp of registration.
     pub registered_at: String,
+    /// ISO-8601 expiry of the certificate (typically 30 days).
     pub valid_until: Option<String>,
 }
 
 /// What [`save_identity_to_dir`] writes to disk.
 #[derive(Debug, Clone)]
 pub struct SavedIdentityPaths {
+    /// Path to the DG-signed certificate PEM.
     pub cert_path: PathBuf,
+    /// Path to the private key PEM.
     pub key_path: PathBuf,
+    /// Path to the CA certificate PEM (if available).
     pub ca_path: Option<PathBuf>,
 }
 
 // ─── Payloads ────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[cfg(feature = "registration")]
 struct RegisterPayload<'a> {
     public_key_pem: &'a str,
     name: &'a str,
@@ -237,6 +250,7 @@ pub async fn register_identity(
     }
 }
 
+/// Fallback stub when the `registration` feature is not enabled.
 #[cfg(not(feature = "registration"))]
 pub async fn register_identity(
     _keypair: &ConduitIdentity,
@@ -313,6 +327,7 @@ pub async fn rotate_identity(
     }
 }
 
+/// Fallback stub when the `registration` feature is not enabled.
 #[cfg(not(feature = "registration"))]
 pub async fn rotate_identity(
     _current: &ConduitIdentity,
