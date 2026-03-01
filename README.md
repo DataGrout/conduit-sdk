@@ -100,6 +100,21 @@ Identity auto-discovery searches:
 
 For multiple agents on one machine, use `identity_dir` to give each its own certificate directory.
 
+#### The DataGrout CA
+
+mTLS identities are X.509 certificates signed by the **DataGrout Certificate Authority** (`ca.datagrout.ai`). DataGrout operates its own CA rather than relying on a third-party provider because agent identity has different requirements than browser identity — agents need rapid programmatic issuance, automated rotation, and machine-to-machine trust without human ceremony.
+
+When you call `bootstrap_identity`, here's what happens:
+
+1. The SDK generates an ECDSA P-256 key pair locally — the private key never leaves your machine.
+2. The public key is sent to the DataGrout CA along with a one-time access token.
+3. The CA signs a certificate binding your public key to a Substrate identity (e.g., `CN=conduit-my-agent`).
+4. The signed certificate and CA chain are returned and saved to disk.
+
+From that point on, every request presents the client certificate. The server verifies it against the CA chain — no tokens, no secrets in environment variables, no credentials to rotate manually. The SDK handles certificate renewal automatically before expiry.
+
+The CA private key is stored in an HSM-backed AWS KMS key (FIPS 140-2 Level 2), so the signing key is never exposed in memory or on disk. The CA certificate itself is publicly available at `https://ca.datagrout.ai/ca.pem` for any client that needs to verify the chain independently.
+
 ---
 
 ## Transport Modes
@@ -152,7 +167,7 @@ session = await client.guide(goal="create invoice from lead")
 
 ### Cognitive Trust Certificates
 
-Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, and budget-respecting.
+Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, and budget-respecting. CTCs are signed by the same DataGrout CA that issues Substrate identities, creating a unified trust chain from agent identity through workflow verification.
 
 ---
 
@@ -162,6 +177,18 @@ Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, 
 - [TypeScript SDK](./typescript/README.md)
 - [Rust SDK](./rust/README.md)
 - [DataGrout Library](https://library.datagrout.ai)
+- [Security](https://datagrout.ai/security)
+
+### Labs
+
+DataGrout Labs publishes research papers on the systems that Conduit interacts with. If you want to understand the "why" behind the SDK's features:
+
+- [Cognitive Trust Certificates](https://labs.datagrout.ai/ctc) — formal verification proofs for agent workflows
+- [Consequential Analysis](https://labs.datagrout.ai/consequential-analysis) — semantic code verification via structural facts + intent inference
+- [Policy & Semantic Guards](https://labs.datagrout.ai/policy) — runtime policy enforcement and dynamic redaction
+- [Semio](https://labs.datagrout.ai/semio) — the semantic interface layer for typed tool contracts
+- [Credits & Virtual Economy](https://labs.datagrout.ai/credits) — how cost tracking and credit estimation work
+- [AI Link Layer](https://labs.datagrout.ai/ail) — machine-readable content discovery protocol
 
 ---
 
