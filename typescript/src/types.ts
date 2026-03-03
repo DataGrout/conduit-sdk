@@ -231,9 +231,8 @@ export interface ClientOptions {
    *
    * When `true`, `listTools()` returns only the DataGrout semantic discovery
    * and execution tools instead of the raw tool list from the MCP server.
-   * This mirrors the `use_intelligent_interface` setting on the server.
-   *
-   * @default false
+   * Defaults to `true` for DataGrout URLs, `false` otherwise.
+   * Pass explicitly to override.
    */
   useIntelligentInterface?: boolean;
   /**
@@ -248,6 +247,14 @@ export interface ClientOptions {
   disableMtls?: boolean;
   transport?: 'mcp' | 'jsonrpc';
   timeout?: number;
+  /**
+   * Maximum number of automatic retries on "server not initialized" errors.
+   * The client re-initializes the connection between attempts with a 500ms
+   * backoff.
+   *
+   * @default 3
+   */
+  maxRetries?: number;
 }
 
 export interface DiscoverOptions {
@@ -281,15 +288,100 @@ export interface FlowOptions {
 }
 
 export interface PrismFocusOptions {
-  data: Record<string, any>;
+  data: any;
   sourceType: string;
   targetType: string;
+  sourceAnnotations?: Record<string, any>;
+  targetAnnotations?: Record<string, any>;
+  context?: string;
+}
+
+export interface PlanOptions {
+  goal?: string;
+  query?: string;
+  server?: string;
+  k?: number;
+  policy?: any;
+  have?: any;
+  returnCallHandles?: boolean;
+  exposeVirtualSkills?: boolean;
+  modelOverrides?: any;
+}
+
+export interface RefractOptions {
+  goal: string;
+  payload: any;
+  verbose?: boolean;
+  chart?: boolean;
+}
+
+export interface ChartOptions {
+  goal: string;
+  payload: any;
+  format?: string;
+  chartType?: string;
+  title?: string;
+  xLabel?: string;
+  yLabel?: string;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Options for `Client.remember()`.
+ * Supply either `statement` (natural language) or `facts` (pre-structured),
+ * but not neither.
+ */
+export interface RememberOptions {
+  /** Natural language statement to convert to symbolic facts. */
+  statement?: string;
+  /** Pre-structured fact list (skips NL conversion). */
+  facts?: Record<string, any>[];
+  /** Tag/namespace for grouping facts (default: `"default"`). */
+  tag?: string;
+}
+
+/**
+ * Options for `Client.queryCell()`.
+ * Supply either `question` (natural language) or `patterns` (pre-built),
+ * but not neither.
+ */
+export interface QueryCellOptions {
+  /** Natural language question to translate into query patterns. */
+  question?: string;
+  /** Pre-built pattern list (skips NL translation). */
+  patterns?: Record<string, any>[];
+  /** Maximum number of results to return (default: 50). */
+  limit?: number;
+}
+
+/** Options for `Client.forget()`. Supply `handles`, `pattern`, or both. */
+export interface ForgetOptions {
+  /** Specific fact handles to retract. */
+  handles?: string[];
+  /** Natural language pattern — retract all matching facts. */
+  pattern?: string;
+}
+
+/** Options for `Client.constrain()`. */
+export interface ConstrainOptions {
+  /** Tag/namespace for this constraint (default: `"constraint"`). */
+  tag?: string;
+}
+
+/** Options for `Client.reflect()`. */
+export interface ReflectOptions {
+  /** Optional entity name to scope the reflection. */
+  entity?: string;
+  /** When `true`, return only summary counts instead of full facts. */
+  summaryOnly?: boolean;
 }
 
 export interface MCPTool {
   name: string;
   description?: string;
   inputSchema?: Record<string, any>;
+  annotations?: Record<string, any>;
 }
 
 export interface MCPResource {

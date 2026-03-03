@@ -1,6 +1,6 @@
 //! Basic Conduit SDK usage example
 
-use datagrout_conduit::{Client, ClientBuilder, Transport};
+use datagrout_conduit::{ClientBuilder, Transport};
 use serde_json::json;
 
 #[tokio::main]

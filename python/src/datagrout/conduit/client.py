@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from .identity import ConduitIdentity
 from .transports import Transport, MCPTransport, JSONRPCTransport
-from .types import DiscoverResult, PerformResult, GuideState, GuideOptions
+from .types import DiscoverResult, PerformResult, GuideState, GuideOptions, ToolInfo
 from .registration import Receipt
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 
 def is_dg_url(url: str) -> bool:
     """Return ``True`` when *url* points at a DataGrout-managed endpoint."""
-    return "datagrout.ai" in url or "datagrout.dev" in url
+    return (
+        "datagrout.ai" in url
+        or "datagrout.dev" in url
+        or "CONDUIT_IS_DG" in __import__("os").environ
+    )
 
 
 class GuidedSession:
@@ -73,30 +77,12 @@ class GuidedSession:
 class Client:
     """DataGrout Conduit client - drop-in replacement for MCP clients."""
 
-    # DataGrout first-party tools that should be exposed
-    _DATAGROUT_TOOLS = [
-        "data-grout/discovery.discover",
-        "data-grout/discovery.perform",
-        "data-grout/discovery.guide",
-        "data-grout/flow.into",
-        "data-grout/flow.request-approval",
-        "data-grout/flow.request-feedback",
-        "data-grout/prism.focus",
-        "data-grout/prism.refract",
-        # Logic Cell — symbolic persistent memory
-        "data-grout/logic.remember",
-        "data-grout/logic.query",
-        "data-grout/logic.forget",
-        "data-grout/logic.constrain",
-        "data-grout/logic.reflect",
-    ]
-
     def __init__(
         self,
         url: str,
         auth: Optional[Dict[str, Any]] = None,
-        use_intelligent_interface: bool = False,
-        transport: str = "jsonrpc",
+        use_intelligent_interface: Optional[bool] = None,
+        transport: str = "mcp",
         identity: Optional[ConduitIdentity] = None,
         identity_auto: bool = False,
         identity_dir: Optional[str] = None,
@@ -118,7 +104,8 @@ class Client:
                   — OAuth 2.1 client credentials (see also *client_id* / *client_secret*).
             use_intelligent_interface: When ``True``, ``list_tools()`` returns only the
                 DataGrout semantic discovery / execution tools instead of the raw MCP tool
-                list.  Mirrors ``use_intelligent_interface`` on the server side.
+                list.  Defaults to ``True`` for DataGrout URLs, ``False`` otherwise.
+                Pass explicitly to override.
             transport: Transport mode ("mcp" or "jsonrpc").
             identity: Explicit mTLS identity (client certificate + key).
             identity_auto: Auto-discover an mTLS identity from env vars / ~/.conduit/.
@@ -135,8 +122,8 @@ class Client:
             **kwargs: Additional transport-specific options.
         """
         self.url = url
-        self.use_intelligent_interface = use_intelligent_interface
         self._is_dg = is_dg_url(url)
+        self.use_intelligent_interface = use_intelligent_interface if use_intelligent_interface is not None else self._is_dg
         self._dg_warned = False
 
         # Merge convenience client_id/client_secret kwargs into auth dict.
@@ -153,6 +140,8 @@ class Client:
             auth["client_credentials"] = cc
 
         self.auth = auth
+        self._initialized = False
+        self._max_retries = kwargs.pop("max_retries", 3)
 
         # Resolve identity: explicit > identity_auto flag > DG URL auto-discover.
         # For DG URLs, silently try auto-discovery unless disabled or already set.
@@ -165,20 +154,71 @@ class Client:
 
         # Initialize transport
         if transport == "mcp":
-            self._transport: Transport = MCPTransport(url, auth=auth, **kwargs)
+            self._transport: Transport = MCPTransport(url, auth=auth, identity=resolved_identity, **kwargs)
         elif transport == "jsonrpc":
-            self._transport = JSONRPCTransport(url, auth=auth, identity=resolved_identity, **kwargs)
+            # When the user passes an MCP URL (ending in /mcp), transparently
+            # rewrite the path to the DG JSONRPC endpoint (/rpc).
+            rpc_url = url[:-4] + "/rpc" if url.endswith("/mcp") else url
+            self._transport = JSONRPCTransport(rpc_url, auth=auth, identity=resolved_identity, **kwargs)
         else:
             raise ValueError(f"Unknown transport: {transport}")
 
+    async def connect(self) -> None:
+        """Establish connection to the server.
+
+        Can be used instead of the ``async with`` context manager pattern
+        when explicit lifecycle control is needed.  Pair with :meth:`disconnect`.
+        """
+        await self._transport.connect()
+        self._initialized = True
+
+    async def disconnect(self) -> None:
+        """Close the connection.
+
+        Safe to call even if already disconnected.
+        """
+        if hasattr(self._transport, "disconnect"):
+            await self._transport.disconnect()
+        self._initialized = False
+
     async def __aenter__(self) -> "Client":
         """Async context manager entry."""
-        await self._transport.connect()
+        await self.connect()
         return self
 
     async def __aexit__(self, *args: Any) -> None:
         """Async context manager exit."""
-        await self._transport.disconnect()
+        await self.disconnect()
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            raise RuntimeError(
+                "Client not initialized. Call connect() first or use 'async with'."
+            )
+
+    async def _send_with_retry(self, fn: Any) -> Any:
+        """Wrap a transport call with automatic retry on 'not initialized' errors.
+
+        Retries up to ``_max_retries`` times (default 3) with 500 ms backoff
+        between attempts, matching the Rust reference implementation.
+        """
+        import asyncio
+
+        retries = self._max_retries
+        while True:
+            try:
+                return await fn()
+            except Exception as e:
+                is_not_init = (
+                    getattr(e, "code", None) == -32002
+                    or "not initialized" in str(e).lower()
+                )
+                if is_not_init and retries > 0:
+                    retries -= 1
+                    await self.connect()
+                    await asyncio.sleep(0.5)
+                    continue
+                raise
 
     # ===== Bootstrap / seamless mTLS =====
 
@@ -299,31 +339,49 @@ class Client:
     # ===== Standard MCP API (Drop-in Compatible) =====
 
     async def list_tools(self, **kwargs: Any) -> List[Dict[str, Any]]:
-        """List available tools.
+        """List available tools with automatic pagination.
 
         When ``use_intelligent_interface=True``, filters out third-party
         integration tools (those whose name contains ``@``) and returns only
-        DataGrout's own meta-tools (arbiter, governor, etc.).  Agents using the
+        DataGrout's meta-tools (including Arbiter, Governor).  Agents using the
         intelligent interface call :meth:`discover` instead of enumerating raw
         integrations.
 
         Returns:
             List of tool definitions.
         """
-        tools = await self._transport.list_tools(**kwargs)
-        if self.use_intelligent_interface:
-            # Third-party integration tools use the integration@version/tool@version
-            # naming scheme. DG's own tools (arbiter_*, governor_*) do not contain "@".
-            tools = [t for t in tools if "@" not in t.get("name", "")]
-        return tools
+        self._ensure_initialized()
+
+        async def _do() -> List[Dict[str, Any]]:
+            all_tools: List[Dict[str, Any]] = []
+            cursor: Optional[str] = None
+            while True:
+                params = {**kwargs}
+                if cursor:
+                    params["cursor"] = cursor
+                response = await self._transport.list_tools(**params)
+                if isinstance(response, list):
+                    all_tools.extend(response)
+                    break
+                tools = response.get("tools", [])
+                all_tools.extend(tools)
+                cursor = response.get("nextCursor")
+                if not cursor:
+                    break
+            if self.use_intelligent_interface:
+                all_tools = [t for t in all_tools if "@" not in t.get("name", "")]
+            return all_tools
+
+        return await self._send_with_retry(_do)
 
     async def call_tool(
         self, name: str, arguments: Dict[str, Any], **kwargs: Any
     ) -> Any:
         """
-        Call a tool (standard MCP method).
+        Call a tool (standard MCP ``tools/call``).
 
-        Automatically routes through discovery.perform for tracking.
+        Uses the standard MCP path so non-DataGrout servers work correctly.
+        For DataGrout-tracked execution, use :meth:`perform` instead.
 
         Args:
             name: Tool name (e.g., "salesforce@1/get_lead@1")
@@ -332,26 +390,40 @@ class Client:
         Returns:
             Tool execution result
         """
-        # Route through discovery.perform for tracking
-        return await self._perform_with_tracking(name, arguments, **kwargs)
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(name, arguments, **kwargs)
+        )
 
     async def list_resources(self, **kwargs: Any) -> List[Dict[str, Any]]:
         """List available resources (standard MCP method)."""
-        return await self._transport.list_resources(**kwargs)
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.list_resources(**kwargs)
+        )
 
     async def read_resource(self, uri: str, **kwargs: Any) -> Any:
         """Read a resource (standard MCP method)."""
-        return await self._transport.read_resource(uri, **kwargs)
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.read_resource(uri, **kwargs)
+        )
 
     async def list_prompts(self, **kwargs: Any) -> List[Dict[str, Any]]:
         """List available prompts (standard MCP method)."""
-        return await self._transport.list_prompts(**kwargs)
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.list_prompts(**kwargs)
+        )
 
     async def get_prompt(
         self, name: str, arguments: Optional[Dict[str, Any]] = None, **kwargs: Any
     ) -> Any:
         """Get a prompt (standard MCP method)."""
-        return await self._transport.get_prompt(name, arguments, **kwargs)
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.get_prompt(name, arguments, **kwargs)
+        )
 
     # ===== Logic Cell Extensions =====
 
@@ -365,8 +437,9 @@ class Client:
         """
         Store facts in the agent's persistent logic cell.
 
-        Converts natural language to symbolic Prolog facts and stores them
-        durably. Facts persist across sessions and can be queried zero-token.
+        Converts natural language to symbolic facts and stores them durably.
+        The server uses Prolog for storage. Facts persist across sessions and
+        can be queried zero-token.
 
         Args:
             statement: Natural language statement to remember
@@ -376,13 +449,16 @@ class Client:
         Returns:
             Dict with handles, facts, and count
         """
+        self._ensure_initialized()
         params: Dict[str, Any] = {"tag": tag, **kwargs}
         if facts is not None:
             params["facts"] = facts
         else:
             params["statement"] = statement
 
-        return await self._transport.call_tool("data-grout/logic.remember", params)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/logic.remember", params)
+        )
 
     async def query_cell(
         self,
@@ -394,7 +470,7 @@ class Client:
         """
         Query the agent's logic cell with natural language.
 
-        Translates question to Prolog patterns and queries the cell.
+        Translates question to query patterns and queries the cell.
         Retrieval itself uses zero tokens.
 
         Args:
@@ -405,13 +481,16 @@ class Client:
         Returns:
             Dict with results, total, and description
         """
+        self._ensure_initialized()
         params: Dict[str, Any] = {"limit": limit, **kwargs}
         if patterns is not None:
             params["patterns"] = patterns
         else:
             params["question"] = question
 
-        return await self._transport.call_tool("data-grout/logic.query", params)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/logic.query", params)
+        )
 
     async def forget(
         self,
@@ -429,13 +508,16 @@ class Client:
         Returns:
             Dict with retracted count and handles
         """
+        self._ensure_initialized()
         params: Dict[str, Any] = {**kwargs}
         if handles:
             params["handles"] = handles
         if pattern:
             params["pattern"] = pattern
 
-        return await self._transport.call_tool("data-grout/logic.forget", params)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/logic.forget", params)
+        )
 
     async def reflect(
         self,
@@ -453,11 +535,14 @@ class Client:
         Returns:
             Dict with full cell summary or entity-scoped facts
         """
+        self._ensure_initialized()
         params: Dict[str, Any] = {"summary_only": summary_only, **kwargs}
         if entity:
             params["entity"] = entity
 
-        return await self._transport.call_tool("data-grout/logic.reflect", params)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/logic.reflect", params)
+        )
 
     async def constrain(
         self,
@@ -473,10 +558,13 @@ class Client:
             tag: Tag/namespace for this constraint
 
         Returns:
-            Dict with handle, name, and Prolog rule text
+            Dict with handle, name, and constraint rule text
         """
+        self._ensure_initialized()
         params: Dict[str, Any] = {"rule": rule, "tag": tag, **kwargs}
-        return await self._transport.call_tool("data-grout/logic.constrain", params)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/logic.constrain", params)
+        )
 
     # ===== DG-awareness helpers =====
 
@@ -517,6 +605,7 @@ class Client:
         Returns:
             Discovery results with matching tools
         """
+        self._ensure_initialized()
         self._warn_if_not_dg("discover")
         params = {
             "limit": limit,
@@ -533,11 +622,30 @@ class Client:
         if servers:
             params["servers"] = servers
 
-        result = await self._transport.call_tool(
-            "data-grout/discovery.discover", params
+        result = await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/discovery.discover", params)
         )
 
-        return DiscoverResult(**result)
+        # DG returns "results" + "goal_used"; normalise to the SDK's field names.
+        raw_tools = result.get("results") or result.get("tools") or []
+        return DiscoverResult(
+            query_used=result.get("goal_used") or result.get("query_used") or "",
+            results=[
+                ToolInfo(
+                    tool_name=t.get("tool_name") or t.get("name") or "",
+                    integration=t.get("integration") or "",
+                    server_id=t.get("server"),
+                    score=t.get("score"),
+                    distance=t.get("distance"),
+                    description=t.get("description"),
+                    input_schema=t.get("input_contract") or t.get("input_schema"),
+                    output_schema=t.get("output_contract") or t.get("output_schema"),
+                )
+                for t in raw_tools
+            ],
+            total=len(raw_tools),
+            limit=limit,
+        )
 
     async def perform(
         self,
@@ -559,6 +667,7 @@ class Client:
         Returns:
             Tool execution result
         """
+        self._ensure_initialized()
         self._warn_if_not_dg("perform")
         return await self._perform_with_tracking(
             tool, args, demux=demux, demux_mode=demux_mode, **kwargs
@@ -576,11 +685,10 @@ class Client:
         Returns:
             List of results (same order as calls)
         """
-        result = await self._transport.call_tool(
-            "data-grout/discovery.perform", calls, **kwargs
+        self._ensure_initialized()
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/discovery.perform", calls, **kwargs)
         )
-
-        return result
 
     async def guide(
         self,
@@ -602,6 +710,7 @@ class Client:
         Returns:
             GuidedSession instance
         """
+        self._ensure_initialized()
         self._warn_if_not_dg("guide")
         params = {**kwargs}
 
@@ -614,8 +723,8 @@ class Client:
         if choice:
             params["choice"] = choice
 
-        result = await self._transport.call_tool(
-            "data-grout/discovery.guide", params
+        result = await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/discovery.guide", params)
         )
 
         return GuidedSession(self, result)
@@ -640,6 +749,7 @@ class Client:
         Returns:
             Workflow execution result
         """
+        self._ensure_initialized()
         self._warn_if_not_dg("flow_into")
         params = {
             "plan": plan,
@@ -651,15 +761,18 @@ class Client:
         if input_data:
             params["input_data"] = input_data
 
-        result = await self._transport.call_tool("data-grout/flow.into", params)
-
-        return result
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/flow.into", params)
+        )
 
     async def prism_focus(
         self,
-        data: Dict[str, Any],
+        data: Any,
         source_type: str,
         target_type: str,
+        source_annotations: Optional[Dict[str, Any]] = None,
+        target_annotations: Optional[Dict[str, Any]] = None,
+        context: Optional[str] = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -667,21 +780,377 @@ class Client:
 
         Args:
             data: Data to transform
-            source_type: Source semantic type (e.g., "crm.lead@1")
-            target_type: Target semantic type (e.g., "billing.customer@1")
+            source_type: Source type annotation (e.g., "crm.lead@1")
+            target_type: Target type annotation (e.g., "billing.customer@1")
+            source_annotations: Optional extra annotations for the source type
+            target_annotations: Optional extra annotations for the target type
+            context: Optional natural language context hint for the transformation
 
         Returns:
             Transformed data
         """
         self._warn_if_not_dg("prism_focus")
-        params = {
+        self._ensure_initialized()
+        params: Dict[str, Any] = {
             "data": data,
             "source_type": source_type,
             "target_type": target_type,
+        }
+        if source_annotations:
+            params["source_annotations"] = source_annotations
+        if target_annotations:
+            params["target_annotations"] = target_annotations
+        if context:
+            params["context"] = context
+
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/prism.focus", params)
+        )
+
+    async def plan(
+        self,
+        goal: Optional[str] = None,
+        query: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Plan tool execution for a goal (DataGrout-native).
+
+        At least one of *goal* or *query* must be provided.
+
+        Args:
+            goal: Natural language goal description
+            query: Alternative short search query
+            **kwargs: Optional server, k, policy, have, return_call_handles,
+                expose_virtual_skills, model_overrides
+
+        Returns:
+            Planning result with suggested call sequence
+        """
+        if goal is None and query is None:
+            raise ValueError("At least one of 'goal' or 'query' must be provided")
+        self._warn_if_not_dg("plan")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {}
+        if goal is not None:
+            params["goal"] = goal
+        if query is not None:
+            params["query"] = query
+        _PLAN_OPTS = (
+            "server", "k", "policy", "have",
+            "return_call_handles", "expose_virtual_skills", "model_overrides",
+        )
+        for key in _PLAN_OPTS:
+            if key in kwargs:
+                params[key] = kwargs.pop(key)
+
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/discovery.plan", params)
+        )
+
+    async def refract(
+        self,
+        goal: str,
+        payload: Any,
+        verbose: bool = False,
+        chart: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Refract (analyse/transform) a payload toward a goal (DataGrout-native).
+
+        Args:
+            goal: Natural language transformation or analysis goal
+            payload: Input data to refract
+            verbose: Return intermediate reasoning steps
+            chart: Include a chart in the output
+
+        Returns:
+            Refracted result
+        """
+        self._warn_if_not_dg("refract")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {
+            "goal": goal,
+            "payload": payload,
+            "verbose": verbose,
+            "chart": chart,
             **kwargs,
         }
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/prism.refract", params)
+        )
 
-        return await self._transport.call_tool("data-grout/prism.focus", params)
+    async def chart(
+        self,
+        goal: str,
+        payload: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Generate a chart from data (DataGrout-native).
+
+        Args:
+            goal: Natural language description of the desired chart
+            payload: Input data to visualise
+            **kwargs: Optional format, chart_type, title, x_label, y_label,
+                width, height
+
+        Returns:
+            Chart result (format depends on server config)
+        """
+        self._warn_if_not_dg("chart")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {"goal": goal, "payload": payload}
+        _CHART_OPTS = (
+            "format", "chart_type", "title", "x_label", "y_label", "width", "height",
+        )
+        for key in _CHART_OPTS:
+            if key in kwargs:
+                params[key] = kwargs.pop(key)
+
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/prism.chart", params)
+        )
+
+    async def render(
+        self,
+        goal: str,
+        payload: Any = None,
+        format: str = "markdown",
+        sections: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Generate a document toward a natural-language goal (DataGrout-native).
+
+        The server chooses the best rendering strategy for the target format.
+        Supported formats include markdown, html, pdf, json.
+
+        Args:
+            goal: Natural language description of the content to generate
+            payload: Input data to base the content on
+            format: Output format (markdown, html, pdf, json)
+            sections: Optional list of section specs (id, goal, data, type)
+            **kwargs: Additional options passed to the tool
+
+        Returns:
+            Generated content (structure depends on format and server)
+        """
+        self._warn_if_not_dg("render")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {"goal": goal, "format": format, **kwargs}
+        if payload is not None:
+            params["payload"] = payload
+        if sections is not None:
+            params["sections"] = sections
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/prism.render", params)
+        )
+
+    async def export(
+        self,
+        content: Any,
+        format: str,
+        style: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Convert content to another format (DataGrout-native).
+
+        Fast format conversion without LLM. Supports pdf, json, csv, xlsx,
+        html, markdown, xml, latex, ndjson, yaml, txt.
+
+        Args:
+            content: Data or string to export
+            format: Target format (e.g. "csv", "xlsx", "pdf")
+            style: Optional styling (theme, page_size, font_size, etc.)
+            metadata: Optional document metadata (title, author, etc.)
+            **kwargs: Format-specific options (e.g. csv_delimiter)
+
+        Returns:
+            Dict with output, format, size_bytes, and metadata
+        """
+        self._warn_if_not_dg("export")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {"content": content, "format": format, **kwargs}
+        if style is not None:
+            params["style"] = style
+        if metadata is not None:
+            params["metadata"] = metadata
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/prism.export", params)
+        )
+
+    async def request_approval(
+        self,
+        action: str,
+        details: Optional[Dict[str, Any]] = None,
+        reason: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Pause workflow for human approval (DataGrout-native).
+
+        Use when an operation is destructive or policy requires confirmation.
+        Execution blocks until the user approves, rejects, or modifies.
+
+        Args:
+            action: Name of the action (e.g. "create_invoice", "delete_record")
+            details: Action-specific payload (amount, customer, etc.)
+            reason: Why approval is being requested
+            context: Workflow context (workflow_id, step, etc.)
+            **kwargs: Additional params for the tool
+
+        Returns:
+            Approval result (status, decision, etc.)
+        """
+        self._warn_if_not_dg("request_approval")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {"action": action, **kwargs}
+        if details is not None:
+            params["details"] = details
+        if reason is not None:
+            params["reason"] = reason
+        if context is not None:
+            params["context"] = context
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(
+                "data-grout/flow.request-approval", params
+            )
+        )
+
+    async def request_feedback(
+        self,
+        missing_fields: List[str],
+        reason: str,
+        current_data: Optional[Dict[str, Any]] = None,
+        suggestions: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Request user clarification for missing fields (DataGrout-native).
+
+        Pauses workflow until the user provides values for the required fields.
+
+        Args:
+            missing_fields: List of field names that need values
+            reason: Why this information is needed
+            current_data: Data already collected (for context)
+            suggestions: Optional suggested options per field
+            context: Workflow context
+            **kwargs: Additional params for the tool
+
+        Returns:
+            Feedback result (status, provided_data, feedback_id)
+        """
+        self._warn_if_not_dg("request_feedback")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {
+            "missing_fields": missing_fields,
+            "reason": reason,
+            **kwargs,
+        }
+        if current_data is not None:
+            params["current_data"] = current_data
+        if suggestions is not None:
+            params["suggestions"] = suggestions
+        if context is not None:
+            params["context"] = context
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(
+                "data-grout/flow.request-feedback", params
+            )
+        )
+
+    async def execution_history(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        refractions_only: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        List recent tool executions for the current server (DataGrout-native).
+
+        Args:
+            limit: Max results (default 50, max 500)
+            offset: Pagination offset
+            status: Filter by success, error, or timeout
+            refractions_only: Only show refraction executions
+            **kwargs: Additional params for the tool
+
+        Returns:
+            Dict with executions list, count, limit, offset
+        """
+        self._warn_if_not_dg("execution_history")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+            "refractions_only": refractions_only,
+            **kwargs,
+        }
+        if status is not None:
+            params["status"] = status
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(
+                "data-grout/inspect.execution-history", params
+            )
+        )
+
+    async def execution_details(self, execution_id: str, **kwargs: Any) -> Any:
+        """
+        Get details and transcript for a specific execution (DataGrout-native).
+
+        Args:
+            execution_id: Unique execution ID (from execution_history or MCP)
+            **kwargs: Additional params for the tool
+
+        Returns:
+            Dict with execution object and found flag
+        """
+        self._warn_if_not_dg("execution_details")
+        self._ensure_initialized()
+        params: Dict[str, Any] = {"execution_id": execution_id, **kwargs}
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(
+                "data-grout/inspect.execution-details", params
+            )
+        )
+
+    async def dg(
+        self,
+        tool_short_name: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """
+        Call any DataGrout first-party tool by its short name.
+
+        Equivalent to ``call_tool("data-grout/<tool_short_name>", params)``.
+
+        Args:
+            tool_short_name: Tool short name without the ``data-grout/`` prefix
+                (e.g., ``"prism.render"``, ``"discovery.plan"``).
+            params: Optional parameters dict to pass to the tool.
+
+        Returns:
+            Tool result
+
+        Example::
+
+            result = await client.dg("prism.render", {"payload": data, "goal": "summary"})
+        """
+        self._ensure_initialized()
+        method = f"data-grout/{tool_short_name}"
+        _params = params or {}
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(method, _params)
+        )
 
     async def estimate_cost(self, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -694,27 +1163,22 @@ class Client:
         Returns:
             Cost estimate with breakdown
         """
+        self._ensure_initialized()
         estimate_args = {**args, "estimate_only": True}
-        return await self._transport.call_tool(tool, estimate_args)
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool(tool, estimate_args)
+        )
 
     # ===== Internal Helpers =====
 
     async def _perform_with_tracking(
         self, tool: str, args: Dict[str, Any], **kwargs: Any
     ) -> Any:
-        """
-        Execute tool via discovery.perform and track receipt.
-
-        This is called by call_tool() to add tracking to standard MCP calls.
-        """
+        """Execute tool via discovery.perform and track receipt."""
         params = {"tool": tool, "args": args, **kwargs}
-
-        result = await self._transport.call_tool(
-            "data-grout/discovery.perform", params
+        return await self._send_with_retry(
+            lambda: self._transport.call_tool("data-grout/discovery.perform", params)
         )
-        # Receipt is embedded in result["_meta"]["datagrout"]["receipt"] — callers can use
-        # extract_meta(result) to access it without any client-side state.
-        return result
 
     async def _get_datagrout_tools_stub(self) -> List[Dict[str, Any]]:
         """Stub — not called. List is fetched from server and filtered."""
@@ -746,7 +1210,7 @@ class Client:
             },
             {
                 "name": "data-grout/discovery.guide",
-                "description": "Guided workflow navigation (MUD-style)",
+                "description": "Guided workflow navigation",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -776,11 +1240,10 @@ class Client:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "data": {"type": "object"},
-                        "source_type": {"type": "string"},
-                        "target_type": {"type": "string"},
+                        "data": {},
+                        "lens": {"type": "string"},
                     },
-                    "required": ["data", "source_type", "target_type"],
+                    "required": ["data"],
                 },
             },
             {

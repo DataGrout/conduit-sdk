@@ -24,10 +24,26 @@ impl std::fmt::Display for RateLimit {
     }
 }
 
-/// Conduit error types
+/// Conduit SDK error variants.
+///
+/// All builder `.execute()` calls and `Client` methods return `Result<T, Error>`.
+/// Match on specific variants for fine-grained error handling:
+///
+/// ```rust
+/// # use datagrout_conduit::error::Error;
+/// # fn handle(e: Error) {
+/// match e {
+///     Error::NotInitialized => { /* call connect() first */ }
+///     Error::RateLimit { retry_after, .. } => { /* back off */ }
+///     Error::Auth(_) => { /* check credentials */ }
+///     Error::Server { code, message, .. } => { /* server-side error */ }
+///     _ => {}
+/// }
+/// # }
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// HTTP transport error
+    /// HTTP transport error (connection refused, TLS failure, etc.)
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
@@ -35,43 +51,55 @@ pub enum Error {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// MCP protocol error (from server)
-    #[error("MCP error {code}: {message}")]
-    Mcp {
+    /// Server-side JSON-RPC error (method not found, invalid params, etc.)
+    ///
+    /// Maps to the `error` field in a JSON-RPC response.  The `code` follows
+    /// the JSON-RPC 2.0 spec; see [`codes`] for the standard values.
+    #[error("Server error {code}: {message}")]
+    Server {
         /// JSON-RPC error code
         code: i32,
-        /// Error message
+        /// Human-readable error message from the server
         message: String,
-        /// Additional error data
+        /// Additional structured error data, if provided by the server
         data: Option<serde_json::Value>,
     },
 
-    /// Rate limit exceeded.
+    /// Rate limit exceeded (HTTP 429).
     ///
     /// Authenticated DataGrout users are never rate-limited (`limit` =
     /// [`RateLimit::Unlimited`]). Anonymous visitors hitting the inspector
     /// receive this error once the per-hour cap is reached.
+    ///
+    /// `retry_after` is populated when the server provides a `Retry-After`
+    /// response header (number of seconds to wait before retrying).
     #[error("Rate limit exceeded ({used} / {limit} calls this hour)")]
-    RateLimited {
+    RateLimit {
+        /// Seconds to wait before retrying, if the server advertised one.
+        retry_after: Option<u64>,
         /// Calls made in the current window
         used: u32,
         /// Total allowed calls in the window
         limit: RateLimit,
     },
 
-    /// Connection error
-    #[error("Connection error: {0}")]
-    Connection(String),
+    /// Network-level error (TCP connection failure, DNS, etc.)
+    #[error("Network error: {0}")]
+    Network(String),
 
-    /// Authentication error
+    /// Protocol-level error (unexpected SSE format, malformed response, etc.)
+    #[error("Protocol error: {0}")]
+    Protocol(String),
+
+    /// Authentication error — bad token, expired credentials, etc.
     #[error("Authentication error: {0}")]
     Auth(String),
 
-    /// Initialization error
+    /// Initialization error — unexpected failure during the MCP handshake.
     #[error("Initialization error: {0}")]
     Init(String),
 
-    /// Timeout error
+    /// Request timed out after the given number of milliseconds.
     #[error("Operation timed out after {0}ms")]
     Timeout(u64),
 
@@ -79,11 +107,11 @@ pub enum Error {
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
 
-    /// Invalid configuration
+    /// Invalid configuration — missing required field, incompatible options, etc.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
-    /// Session not initialized
+    /// Session not initialized — call [`Client::connect`](crate::client::Client::connect) first.
     #[error("Session not initialized. Call connect() first.")]
     NotInitialized,
 
@@ -103,71 +131,72 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// SSE stream error
-    #[error("SSE stream error: {0}")]
-    Sse(String),
-
-    /// Other error
+    /// Catch-all for unexpected errors not covered by the above variants.
     #[error("{0}")]
     Other(String),
 }
 
 impl Error {
-    /// Create a new MCP error
-    pub fn mcp(code: i32, message: impl Into<String>, data: Option<serde_json::Value>) -> Self {
-        Self::Mcp {
+    /// Create a new server-side JSON-RPC error.
+    pub fn server(code: i32, message: impl Into<String>, data: Option<serde_json::Value>) -> Self {
+        Self::Server {
             code,
             message: message.into(),
             data,
         }
     }
 
-    /// Create a rate-limited error for anonymous visitors.
-    pub fn rate_limited(used: u32, per_hour_limit: u32) -> Self {
-        Self::RateLimited {
+    /// Create a rate-limit error for anonymous visitors.
+    ///
+    /// `retry_after` is the number of seconds the caller should wait before
+    /// retrying, as advertised by the server's `Retry-After` header (or `None`
+    /// when the header was absent).
+    pub fn rate_limit(used: u32, per_hour_limit: u32, retry_after: Option<u64>) -> Self {
+        Self::RateLimit {
+            retry_after,
             used,
             limit: RateLimit::PerHour(per_hour_limit),
         }
     }
 
-    /// Create a connection error
-    pub fn connection(message: impl Into<String>) -> Self {
-        Self::Connection(message.into())
+    /// Create a network error.
+    pub fn network(message: impl Into<String>) -> Self {
+        Self::Network(message.into())
     }
 
-    /// Create an authentication error
+    /// Create an authentication error.
     pub fn auth(message: impl Into<String>) -> Self {
         Self::Auth(message.into())
     }
 
-    /// Create an initialization error
+    /// Create an initialization error.
     pub fn init(message: impl Into<String>) -> Self {
         Self::Init(message.into())
     }
 
-    /// Create an invalid URL error
+    /// Create an invalid URL error.
     pub fn invalid_url(message: impl Into<String>) -> Self {
         Self::InvalidUrl(message.into())
     }
 
-    /// Create an invalid configuration error
+    /// Create an invalid configuration error.
     pub fn invalid_config(message: impl Into<String>) -> Self {
         Self::InvalidConfig(message.into())
     }
 
-    /// Check if error is retriable
+    /// Returns `true` when the error is likely transient and safe to retry.
     pub fn is_retriable(&self) -> bool {
         matches!(
             self,
-            Error::Http(_) | Error::Timeout(_) | Error::Connection(_) | Error::Sse(_)
+            Error::Http(_) | Error::Timeout(_) | Error::Network(_) | Error::Protocol(_)
         )
     }
 
-    /// Check if error indicates not initialized
+    /// Returns `true` when the client has not yet been initialized via `connect()`.
     pub fn is_not_initialized(&self) -> bool {
         match self {
             Error::NotInitialized => true,
-            Error::Mcp { code, message, .. } => {
+            Error::Server { code, message, .. } => {
                 *code == -32002
                     || message.contains("not initialized")
                     || message.contains("Server not initialized")
@@ -176,9 +205,9 @@ impl Error {
         }
     }
 
-    /// Check if the caller has been rate-limited.
+    /// Returns `true` when the server has rate-limited this caller (HTTP 429).
     pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Error::RateLimited { .. })
+        matches!(self, Error::RateLimit { .. })
     }
 }
 

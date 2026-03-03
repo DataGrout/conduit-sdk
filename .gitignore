@@ -57,6 +57,8 @@ Cargo.lock
 .env
 .env.local
 *.log
+.tool-versions
 
 # Lock files — consumers generate their own
 package-lock.json
+Gemfile.lock

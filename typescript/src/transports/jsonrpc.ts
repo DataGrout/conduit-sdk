@@ -6,25 +6,29 @@ import { Transport } from './base';
 import { ConduitIdentity, fetchWithIdentity } from '../identity';
 import { OAuthTokenProvider } from '../oauth';
 import type { AuthConfig, MCPTool, MCPResource, MCPPrompt, RateLimit, RateLimitStatus } from '../types';
+import { RateLimitError } from '../errors';
+
+// Re-export for backward compatibility — callers that import RateLimitError
+// directly from this module continue to work unchanged.
+export { RateLimitError };
 
 /**
- * Thrown when the DataGrout gateway returns HTTP 429.
- *
- * Authenticated users are never rate-limited. Unauthenticated callers
- * hitting the hourly cap will receive this error.
+ * Unwrap the MCP content envelope that wraps tool results from both MCP and
+ * JSONRPC transports: `{ "content": [{ "type": "text", "text": "<json>" }] }`.
+ * Returns the parsed inner object, or the raw value if no envelope is present.
  */
-export class RateLimitError extends Error {
-  readonly status: RateLimitStatus;
-
-  constructor(status: RateLimitStatus) {
-    const limitStr =
-      status.limit === 'unlimited'
-        ? 'unlimited'
-        : `${(status.limit as { perHour: number }).perHour}/hour`;
-    super(`Rate limit exceeded (${status.used} / ${limitStr} calls this hour)`);
-    this.name = 'RateLimitError';
-    this.status = status;
+function unwrapContent(result: any): any {
+  if (result && Array.isArray(result.content) && result.content.length > 0) {
+    const first = result.content[0];
+    if (first && typeof first.text === 'string') {
+      try {
+        return JSON.parse(first.text);
+      } catch {
+        return { text: first.text };
+      }
+    }
   }
+  return result;
 }
 
 function parseRateLimitError(response: Response): RateLimitError {
@@ -162,7 +166,8 @@ export class JSONRPCTransport extends Transport {
 
   async callTool(name: string, args: Record<string, any>, options?: any): Promise<any> {
     const params = { name, arguments: args, ...options };
-    return await this.call('tools/call', params);
+    const result = await this.call('tools/call', params);
+    return unwrapContent(result);
   }
 
   async listResources(options?: any): Promise<MCPResource[]> {

@@ -170,7 +170,7 @@ impl OAuthTokenProvider {
             .form(&form)
             .send()
             .await
-            .map_err(|e| Error::Connection(format!("OAuth token request failed: {e}")))?;
+            .map_err(|e| Error::Network(format!("OAuth token request failed: {e}")))?;
 
         let status = resp.status();
 
@@ -182,7 +182,7 @@ impl OAuthTokenProvider {
         }
 
         let token_resp: TokenResponse = resp.json().await.map_err(|e| {
-            Error::Connection(format!("failed to parse OAuth token response: {e}"))
+            Error::Network(format!("failed to parse OAuth token response: {e}"))
         })?;
 
         let expires_in = token_resp.expires_in.unwrap_or(3600);

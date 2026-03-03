@@ -210,7 +210,7 @@ pub async fn register_identity(
 
     let client = reqwest::Client::builder()
         .build()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+        .map_err(|e| Error::Network(e.to_string()))?;
 
     let url = format!("{}/register", opts.endpoint.trim_end_matches('/'));
 
@@ -223,7 +223,7 @@ pub async fn register_identity(
         })
         .send()
         .await
-        .map_err(|e| Error::Connection(format!("registration request failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("registration request failed: {e}")))?;
 
     let status = resp.status();
 
@@ -231,7 +231,7 @@ pub async fn register_identity(
         let body: RegistrationResponse = resp
             .json()
             .await
-            .map_err(|e| Error::Connection(format!("failed to parse registration response: {e}")))?;
+            .map_err(|e| Error::Network(format!("failed to parse registration response: {e}")))?;
 
         // Reconstruct the identity with the DG-signed cert + CA cert.
         let ca_bytes = body.ca_cert_pem.as_deref().map(|s| s.as_bytes().to_vec());
@@ -289,7 +289,7 @@ pub async fn rotate_identity(
 
     let client = builder
         .build()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+        .map_err(|e| Error::Network(e.to_string()))?;
 
     let url = format!("{}/rotate", opts.endpoint.trim_end_matches('/'));
 
@@ -301,7 +301,7 @@ pub async fn rotate_identity(
         })
         .send()
         .await
-        .map_err(|e| Error::Connection(format!("rotation request failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("rotation request failed: {e}")))?;
 
     let status = resp.status();
 
@@ -309,7 +309,7 @@ pub async fn rotate_identity(
         let body: RegistrationResponse = resp
             .json()
             .await
-            .map_err(|e| Error::Connection(format!("failed to parse rotation response: {e}")))?;
+            .map_err(|e| Error::Network(format!("failed to parse rotation response: {e}")))?;
 
         let ca_bytes = body.ca_cert_pem.as_deref().map(|s| s.as_bytes().to_vec());
         let identity = ConduitIdentity::from_pem(
@@ -362,14 +362,14 @@ pub async fn fetch_dg_ca_cert(url: Option<&str>) -> Result<String> {
 
     let client = reqwest::Client::builder()
         .build()
-        .map_err(|e| Error::Connection(e.to_string()))?;
+        .map_err(|e| Error::Network(e.to_string()))?;
 
     let resp = client
         .get(url)
         .header("Accept", "application/x-pem-file, text/plain, */*")
         .send()
         .await
-        .map_err(|e| Error::Connection(format!("CA cert fetch failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("CA cert fetch failed: {e}")))?;
 
     let status = resp.status();
 
@@ -377,7 +377,7 @@ pub async fn fetch_dg_ca_cert(url: Option<&str>) -> Result<String> {
         let pem = resp
             .text()
             .await
-            .map_err(|e| Error::Connection(format!("failed to read CA cert response: {e}")))?;
+            .map_err(|e| Error::Network(format!("failed to read CA cert response: {e}")))?;
 
         if !pem.contains("-----BEGIN CERTIFICATE-----") {
             return Err(Error::Other(format!(
@@ -387,7 +387,7 @@ pub async fn fetch_dg_ca_cert(url: Option<&str>) -> Result<String> {
 
         Ok(pem)
     } else {
-        Err(Error::Connection(format!(
+        Err(Error::Network(format!(
             "CA cert fetch failed (HTTP {status}) from {url}"
         )))
     }

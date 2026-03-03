@@ -592,6 +592,7 @@ class TestClientWithIdentity:
 
             client = Client(
                 "https://gateway.datagrout.ai/servers/test/mcp",
+                transport="jsonrpc",
                 identity=identity,
             )
 

@@ -50,3 +50,7 @@ class Transport(ABC):
     ) -> Any:
         """Get a prompt with optional arguments."""
         pass
+
+    async def send_request(self, method: str, params: Any = None) -> Any:
+        """Send a raw JSON-RPC request. Implemented by transports that support it."""
+        raise NotImplementedError("This transport does not support send_request()")

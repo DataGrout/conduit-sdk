@@ -6,7 +6,7 @@ use crate::oauth::OAuthTokenProvider;
 use crate::protocol::{JsonRpcRequest, JsonRpcResponse};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::{header, Client as HttpClient, StatusCode};
+use reqwest::{header, Client as HttpClient, Response, StatusCode};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -94,6 +94,10 @@ fn build_headers(auth: &AuthConfig) -> header::HeaderMap {
         header::CONTENT_TYPE,
         header::HeaderValue::from_static("application/json"),
     );
+    headers.insert(
+        header::ACCEPT,
+        header::HeaderValue::from_static("application/json, text/event-stream"),
+    );
 
     match auth {
         AuthConfig::Bearer(token) => {
@@ -122,6 +126,83 @@ fn build_headers(auth: &AuthConfig) -> header::HeaderMap {
     headers
 }
 
+/// Inject an `Mcp-Session-Id` header when a session is active.
+fn inject_session_id(session_id: &Option<String>, headers: &mut header::HeaderMap) {
+    if let Some(ref sid) = *session_id {
+        if let Ok(value) = header::HeaderValue::from_str(sid) {
+            headers.insert("Mcp-Session-Id", value);
+        }
+    }
+}
+
+/// Capture the `mcp-session-id` response header and store it.
+async fn capture_session_id(response: &Response, session_id: &RwLock<Option<String>>) {
+    if let Some(value) = response.headers().get("mcp-session-id") {
+        if let Ok(sid) = value.to_str() {
+            let mut lock = session_id.write().await;
+            *lock = Some(sid.to_owned());
+        }
+    }
+}
+
+/// Parse a response body that may be JSON or SSE, returning a `JsonRpcResponse`.
+///
+/// - `application/json` (or no Content-Type) → deserialize directly.
+/// - `text/event-stream` → split on double-newlines, extract `data:` lines,
+///   JSON-decode each one, and return the last JSON-RPC result message.
+async fn parse_response(response: Response) -> Result<JsonRpcResponse> {
+    let is_sse = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    if is_sse {
+        let body = response.text().await?;
+        parse_sse_body(&body)
+    } else {
+        Ok(response.json().await?)
+    }
+}
+
+/// Extract the last JSON-RPC result from an SSE body.
+pub fn parse_sse_body(body: &str) -> Result<JsonRpcResponse> {
+    let mut last_response: Option<JsonRpcResponse> = None;
+
+    for event in body.split("\n\n") {
+        for line in event.lines() {
+            let data = if let Some(rest) = line.strip_prefix("data: ") {
+                rest
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                rest
+            } else {
+                continue;
+            };
+
+            let trimmed = data.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(trimmed) {
+                last_response = Some(resp);
+            }
+        }
+    }
+
+    last_response.ok_or_else(|| Error::Protocol("No JSON-RPC message found in SSE stream".into()))
+}
+
+/// Build an empty "accepted" response for HTTP 202.
+fn accepted_response(request: &JsonRpcRequest) -> JsonRpcResponse {
+    JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id: request.id.clone().unwrap_or_default(),
+        result: Some(serde_json::Value::Null),
+        error: None,
+    }
+}
+
 /// Inject the OAuth bearer token from a `ClientCredentials` provider into an
 /// existing header map.  Returns `Ok(())` if auth is not `ClientCredentials`.
 async fn inject_oauth_token(
@@ -143,12 +224,19 @@ async fn inject_oauth_token(
 ///
 /// The DataGrout inspector uses the following convention:
 /// - HTTP 429 — rate limit exceeded
-/// - Custom headers `X-RateLimit-Used` / `X-RateLimit-Limit` (optional)
-/// - `X-RateLimit-Limit: unlimited` signals authenticated DG users
+/// - `Retry-After` header — seconds until the window resets (optional)
+/// - `X-RateLimit-Used` / `X-RateLimit-Limit` — quota details (optional)
+/// - `X-RateLimit-Limit: unlimited` — authenticated DG users (never throttled)
 fn check_rate_limit(response: &reqwest::Response) -> Option<Error> {
     if response.status() != StatusCode::TOO_MANY_REQUESTS {
         return None;
     }
+
+    let retry_after: Option<u64> = response
+        .headers()
+        .get("Retry-After")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok());
 
     let used: u32 = response
         .headers()
@@ -169,7 +257,7 @@ fn check_rate_limit(response: &reqwest::Response) -> Option<Error> {
         RateLimit::PerHour(limit_str.parse().unwrap_or(50))
     };
 
-    Some(Error::RateLimited { used, limit })
+    Some(Error::RateLimit { retry_after, used, limit })
 }
 
 // ─── MCP transport (SSE-based) ──────────────────────────────────────────────
@@ -180,6 +268,7 @@ pub struct McpTransport {
     auth: AuthConfig,
     client: HttpClient,
     connected: Arc<RwLock<bool>>,
+    session_id: Arc<RwLock<Option<String>>>,
 }
 
 impl McpTransport {
@@ -200,6 +289,7 @@ impl McpTransport {
             auth,
             client,
             connected: Arc::new(RwLock::new(false)),
+            session_id: Arc::new(RwLock::new(None)),
         })
     }
 }
@@ -226,6 +316,10 @@ impl TransportTrait for McpTransport {
 
         let mut headers = build_headers(&self.auth);
         inject_oauth_token(&self.auth, &self.client, &mut headers).await?;
+        {
+            let sid = self.session_id.read().await;
+            inject_session_id(&sid, &mut headers);
+        }
 
         let response = self
             .client
@@ -235,7 +329,6 @@ impl TransportTrait for McpTransport {
             .send()
             .await?;
 
-        // Check for rate limit before consuming the body
         if let Some(rl_err) = check_rate_limit(&response) {
             return Err(rl_err);
         }
@@ -246,6 +339,10 @@ impl TransportTrait for McpTransport {
                 provider.invalidate().await;
                 let mut retry_headers = build_headers(&self.auth);
                 inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
+                {
+                    let sid = self.session_id.read().await;
+                    inject_session_id(&sid, &mut retry_headers);
+                }
                 let retry_resp = self
                     .client
                     .post(&self.url)
@@ -259,25 +356,32 @@ impl TransportTrait for McpTransport {
                 if !retry_resp.status().is_success() {
                     return Err(Error::Auth("OAuth token rejected after refresh".into()));
                 }
-                let json_resp: JsonRpcResponse = retry_resp.json().await?;
+                capture_session_id(&retry_resp, &self.session_id).await;
+                let json_resp = parse_response(retry_resp).await?;
                 if let Some(error) = json_resp.error {
-                    return Err(Error::mcp(error.code, error.message, error.data));
+                    return Err(Error::server(error.code, error.message, error.data));
                 }
                 return Ok(json_resp);
             }
         }
 
+        capture_session_id(&response, &self.session_id).await;
+
+        if response.status() == StatusCode::ACCEPTED {
+            return Ok(accepted_response(&request));
+        }
+
         if !response.status().is_success() {
-            return Err(Error::connection(format!(
+            return Err(Error::network(format!(
                 "HTTP {} error",
                 response.status()
             )));
         }
 
-        let json_response: JsonRpcResponse = response.json().await?;
+        let json_response = parse_response(response).await?;
 
         if let Some(error) = json_response.error {
-            return Err(Error::mcp(error.code, error.message, error.data));
+            return Err(Error::server(error.code, error.message, error.data));
         }
 
         Ok(json_response)
@@ -300,6 +404,7 @@ pub struct JsonRpcTransport {
     auth: AuthConfig,
     client: HttpClient,
     connected: Arc<RwLock<bool>>,
+    session_id: Arc<RwLock<Option<String>>>,
 }
 
 impl JsonRpcTransport {
@@ -320,6 +425,7 @@ impl JsonRpcTransport {
             auth,
             client,
             connected: Arc::new(RwLock::new(false)),
+            session_id: Arc::new(RwLock::new(None)),
         })
     }
 }
@@ -346,6 +452,10 @@ impl TransportTrait for JsonRpcTransport {
 
         let mut headers = build_headers(&self.auth);
         inject_oauth_token(&self.auth, &self.client, &mut headers).await?;
+        {
+            let sid = self.session_id.read().await;
+            inject_session_id(&sid, &mut headers);
+        }
 
         let response = self
             .client
@@ -355,7 +465,6 @@ impl TransportTrait for JsonRpcTransport {
             .send()
             .await?;
 
-        // Rate limit check (before consuming body)
         if let Some(rl_err) = check_rate_limit(&response) {
             return Err(rl_err);
         }
@@ -366,6 +475,10 @@ impl TransportTrait for JsonRpcTransport {
                 provider.invalidate().await;
                 let mut retry_headers = build_headers(&self.auth);
                 inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
+                {
+                    let sid = self.session_id.read().await;
+                    inject_session_id(&sid, &mut retry_headers);
+                }
                 let retry_resp = self
                     .client
                     .post(&self.url)
@@ -379,25 +492,32 @@ impl TransportTrait for JsonRpcTransport {
                 if !retry_resp.status().is_success() {
                     return Err(Error::Auth("OAuth token rejected after refresh".into()));
                 }
-                let json_resp: JsonRpcResponse = retry_resp.json().await?;
+                capture_session_id(&retry_resp, &self.session_id).await;
+                let json_resp = parse_response(retry_resp).await?;
                 if let Some(error) = json_resp.error {
-                    return Err(Error::mcp(error.code, error.message, error.data));
+                    return Err(Error::server(error.code, error.message, error.data));
                 }
                 return Ok(json_resp);
             }
         }
 
+        capture_session_id(&response, &self.session_id).await;
+
+        if response.status() == StatusCode::ACCEPTED {
+            return Ok(accepted_response(&request));
+        }
+
         if !response.status().is_success() {
-            return Err(Error::connection(format!(
+            return Err(Error::network(format!(
                 "HTTP {} error",
                 response.status()
             )));
         }
 
-        let json_response: JsonRpcResponse = response.json().await?;
+        let json_response = parse_response(response).await?;
 
         if let Some(error) = json_response.error {
-            return Err(Error::mcp(error.code, error.message, error.data));
+            return Err(Error::server(error.code, error.message, error.data));
         }
 
         Ok(json_response)

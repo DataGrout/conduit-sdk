@@ -7,7 +7,7 @@ from datagrout.conduit import Client
 async def main():
     """Demonstrate basic Conduit usage."""
     
-    # Initialize client (uses JSONRPC transport by default)
+    # Initialize client (uses MCP transport by default)
     async with Client(
         "https://gateway.datagrout.ai/servers/YOUR_SERVER_UUID/mcp",
         auth={"bearer": "YOUR_API_KEY"}

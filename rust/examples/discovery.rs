@@ -8,7 +8,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== DataGrout Conduit - Discovery Example ===\n");
 
-    // Create and connect client
     let client = ClientBuilder::new()
         .url("https://gateway.datagrout.ai/servers/{your-uuid}/mcp")
         .transport(Transport::Mcp)
@@ -29,15 +28,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execute()
         .await?;
 
-    println!("Found {} tools:", results.total);
+    println!("Found {} tools:", results.tools.len());
     for tool in &results.tools {
-        println!(
-            "  • {} (score: {:.2})",
-            tool.tool.name,
-            tool.score
-        );
-        if let Some(desc) = &tool.tool.description {
-            println!("    {}", desc);
+        println!("  • {} (score: {:.2})", tool.name, tool.score);
+        if !tool.description.is_empty() {
+            println!("    {}", tool.description);
         }
     }
 
@@ -51,20 +46,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execute()
         .await?;
 
-    println!("Found {} matching tools:", results.total);
+    println!("Found {} matching tools:", results.tools.len());
     for tool in &results.tools {
-        println!(
-            "  • {} (score: {:.2})",
-            tool.tool.name,
-            tool.score
-        );
+        println!("  • {} (score: {:.2})", tool.name, tool.score);
     }
 
     // Example 3: Direct tool execution with perform
     if let Some(tool) = results.tools.first() {
         println!("\n--- Executing Tool via Perform ---");
         let result = client
-            .perform(&tool.tool.name)
+            .perform(&tool.name)
             .args(serde_json::json!({
                 "email": "john@example.com"
             }))

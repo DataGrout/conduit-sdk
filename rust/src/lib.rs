@@ -149,7 +149,11 @@ pub mod registration;
 pub mod transport;
 pub mod types;
 
-pub use client::{is_dg_url, Client, ClientBuilder, GuidedSession};
+pub use client::{
+    is_dg_url,
+    ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
+    GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
+};
 pub use error::{Error, RateLimit, Result};
 pub use identity::ConduitIdentity;
 pub use oauth::OAuthTokenProvider;
@@ -158,10 +162,11 @@ pub use registration::{
     save_identity_to_dir, DG_CA_URL, DG_SUBSTRATE_ENDPOINT, RegistrationOptions, RenewalOptions,
     RegistrationResponse, SavedIdentityPaths,
 };
-pub use transport::Transport;
+pub use transport::{Transport, parse_sse_body};
 pub use types::{
-    Byok, CreditEstimate, DiscoverOptions, DiscoverResult, GuideOptions, GuideState,
-    PerformOptions, Receipt, Tool, ToolMeta, extract_meta,
+    Byok, ChartOptions, ChartResult, CreditEstimate, DiscoverOptions, DiscoverResult, GuideOptions,
+    GuideState, PerformOptions, PlanOptions, PlanResult, Receipt, RefractOptions, RefractResult,
+    Tool, ToolMeta, extract_meta,
 };
 
 /// Re-export commonly used types

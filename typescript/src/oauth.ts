@@ -125,7 +125,7 @@ export class OAuthTokenProvider {
       throw new Error(`OAuth token endpoint returned ${response.status}: ${text}`);
     }
 
-    const data: TokenResponse = await response.json();
+    const data = (await response.json()) as TokenResponse;
     const expiresIn = data.expires_in ?? 3600;
 
     const cached: CachedToken = {

@@ -24,6 +24,9 @@ import * as crypto from 'crypto';
 /** Canonical URL for the DataGrout CA certificate. */
 export const DG_CA_URL = 'https://ca.datagrout.ai/ca.pem';
 
+/** Substrate identity registration endpoint. */
+export const DG_SUBSTRATE_ENDPOINT = 'https://app.datagrout.ai/api/v1/substrate/identity';
+
 /** Default local identity directory. */
 export const DEFAULT_IDENTITY_DIR = path.join(os.homedir(), '.conduit');
 
@@ -186,7 +189,7 @@ export async function registerIdentity(
     throw new Error(`Registration failed (HTTP ${resp.status}): ${body}`);
   }
 
-  const body = await resp.json();
+  const body = (await resp.json()) as Record<string, any>;
   let caPem: string | undefined = body.ca_cert_pem;
 
   if (!caPem) {
@@ -198,14 +201,14 @@ export async function registerIdentity(
   }
 
   return {
-    certPem: body.cert_pem,
+    certPem: body.cert_pem as string,
     keyPem: privateKeyPem,
     caPem,
-    id: body.id,
-    name: body.name,
-    fingerprint: body.fingerprint,
-    registeredAt: body.registered_at ?? '',
-    validUntil: body.valid_until,
+    id: body.id as string,
+    name: body.name as string,
+    fingerprint: body.fingerprint as string,
+    registeredAt: (body.registered_at as string) ?? '',
+    validUntil: body.valid_until as string,
   };
 }
 

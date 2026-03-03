@@ -61,10 +61,11 @@ client = Client("...", identity_dir="/opt/agents/agent-a/.conduit", identity_aut
 
 #### Identity Auto-Discovery Order
 
-1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
-2. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
-3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
-4. `.conduit/` relative to the current working directory
+1. `identity_dir` option (if provided)
+2. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
+3. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
+4. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+5. `.conduit/` relative to the current working directory
 
 For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently even without `identity_auto=True`.
 
@@ -127,11 +128,11 @@ if meta:
 ## Transports
 
 ```python
-# JSONRPC (default) — lightweight, supports mTLS
-client = Client(url, transport="jsonrpc")
+# MCP (default) — full MCP protocol over Streamable HTTP
+client = Client(url)
 
-# MCP — full MCP protocol over Streamable HTTP
-client = Client(url, transport="mcp")
+# JSONRPC — lightweight, stateless, same tools and auth
+client = Client(url, transport="jsonrpc")
 ```
 
 ## API Reference
@@ -173,7 +174,7 @@ Client(
 | `perform_batch(calls)` | Parallel tool execution |
 | `guide(goal, policy, session_id)` | Guided multi-step workflow |
 | `flow_into(plan, ...)` | Workflow orchestration |
-| `prism_focus(data, source_type, target_type)` | Type transformation |
+| `prism_focus(data, lens)` | Data transformation via Prism lens |
 | `estimate_cost(tool, args)` | Pre-execution credit estimate |
 
 ### Bootstrap Methods

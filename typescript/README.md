@@ -76,52 +76,63 @@ const client = new Client({
 
 #### Identity Auto-Discovery Order
 
-1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
-2. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
-3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
-4. `.conduit/` relative to the current working directory
+1. `identityDir` option (if provided)
+2. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
+3. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
+4. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+5. `.conduit/` relative to the current working directory
 
 For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently even without `identityAuto: true`.
 
 #### Bootstrapping an mTLS Identity
 
-First-run provisioning — generates a keypair, registers with the DataGrout CA, and saves certs locally. After this, the token is never needed again.
+One-call provisioning — generates a keypair, registers with the DataGrout CA, saves certs locally, and returns a connected client. After this, the token is never needed again.
 
 ```typescript
-import {
-  generateKeypair,
-  registerIdentity,
-  saveIdentity,
-} from '@datagrout/conduit';
+import { Client } from '@datagrout/conduit';
 
-const keypair = generateKeypair();
-const { identity } = await registerIdentity(keypair, {
-  endpoint: 'https://app.datagrout.ai/api/v1/substrate/identity',
-  authToken: 'your-access-token',
-  name: 'my-laptop',
+// One-call bootstrap with a one-time access token
+const client = await Client.bootstrapIdentity({
+  url: 'https://gateway.datagrout.ai/servers/{uuid}/mcp',
+  authToken: 'your-one-time-token',
+  name: 'my-agent',
 });
-saveIdentity(identity);  // saves to ~/.conduit/
+
+// All subsequent runs: mTLS auto-discovered from ~/.conduit/
+const client = new Client('https://gateway.datagrout.ai/servers/{uuid}/mcp');
+await client.connect();
 ```
 
-## Semantic Discovery
-
-When `useIntelligentInterface` is enabled, `listTools()` returns only DataGrout's meta-tools. Agents use semantic search instead of enumerating raw integrations:
+You can also use the registration functions directly:
 
 ```typescript
-const client = new Client({
-  url: '...',
-  useIntelligentInterface: true,
+import { generateKeypair, registerIdentity, saveIdentityToDir } from '@datagrout/conduit';
+
+const { publicKeyPem, privateKeyPem } = generateKeypair();
+const reg = await registerIdentity(publicKeyPem, {
+  authToken: 'your-access-token',
+  name: 'my-agent',
 });
+await saveIdentityToDir(reg.certPem, privateKeyPem, '~/.conduit', reg.caCertPem);
+```
+
+## Semantic Discovery & Intelligent Interface
+
+For DataGrout URLs, the Intelligent Interface is enabled by default — `listTools()` returns only `data-grout@1/discovery.discover@1` and `data-grout@1/discovery.perform@1`. Agents use semantic search instead of enumerating raw integrations:
+
+```typescript
+// Intelligent Interface auto-enabled for DG URLs
+const client = new Client('https://gateway.datagrout.ai/servers/{uuid}/mcp');
+await client.connect();
 
 // Semantic search across all connected integrations
 const results = await client.discover({ query: 'find unpaid invoices', limit: 5 });
 
 // Direct execution with cost tracking
-const result = await client.perform({
-  tool: 'salesforce@1/get_lead@1',
-  args: { id: '123' },
-});
+const result = await client.perform('salesforce@1/get_lead@1', { id: '123' });
 ```
+
+Pass `useIntelligentInterface: false` to opt out and see all raw tools.
 
 ## Cost Tracking
 
@@ -142,11 +153,11 @@ if (meta) {
 ## Transports
 
 ```typescript
-// JSONRPC (default) — lightweight, supports mTLS
-const client = new Client({ url, transport: 'jsonrpc' });
+// MCP (default) — full MCP protocol over Streamable HTTP
+const client = new Client({ url });
 
-// MCP — full MCP protocol over Streamable HTTP
-const client = new Client({ url, transport: 'mcp' });
+// JSONRPC — lightweight, stateless, same tools and auth
+const client = new Client({ url, transport: 'jsonrpc' });
 ```
 
 ## API Reference

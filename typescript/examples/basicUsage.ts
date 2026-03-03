@@ -5,7 +5,7 @@
 import { Client } from '@datagrout/conduit';
 
 async function main() {
-  // Initialize client (uses JSONRPC transport by default)
+  // Initialize client (uses MCP transport by default)
   const client = new Client({
     url: 'https://gateway.datagrout.ai/servers/YOUR_SERVER_UUID/mcp',
     auth: { bearer: 'YOUR_API_KEY' },

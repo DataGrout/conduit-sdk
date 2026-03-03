@@ -11,12 +11,13 @@
  *   DG_MCP_SERVER_UUID       — MCP server UUID (default: open, no-auth test server)
  *   DG_MACHINE_CLIENT_ID     — for OAuth 2.1 client_credentials tests
  *   DG_MACHINE_CLIENT_SECRET — for OAuth 2.1 client_credentials tests
+ *   DG_INTEGRATION_NETWORK   — set to any value to enable CA/mTLS network tests
  *
  * Run:
  *   DG_RPC_SERVER_UUID=... DG_RPC_AUTH_TOKEN=... npm test -- tests/integration.test.ts
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, test, expect, beforeAll, afterAll } from 'vitest';
 import * as crypto from 'node:crypto';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
@@ -59,13 +60,14 @@ const MACHINE_CLIENT_SECRET = process.env.DG_MACHINE_CLIENT_SECRET;
 
 const HAS_MCP = !!SERVER_MCP_URL;
 const HAS_RPC = !!SERVER_RPC_URL && !!RPC_AUTH_TOKEN;
+const HAS_NETWORK = !!process.env.DG_INTEGRATION_NETWORK;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. CA Certificate Distribution
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('CA Certificate Distribution (ca.datagrout.ai)', () => {
-  it('fetches ca.pem and returns a valid PEM certificate', async () => {
+  it.skipIf(!HAS_NETWORK)('fetches ca.pem and returns a valid PEM certificate', async () => {
     const pem = await fetchDgCaCert(DG_CA_URL);
 
     expect(pem).toContain('-----BEGIN CERTIFICATE-----');
@@ -76,7 +78,7 @@ describe('CA Certificate Distribution (ca.datagrout.ai)', () => {
     expect(new Date(cert.validTo).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('returns CA metadata from /info endpoint', async () => {
+  it.skipIf(!HAS_NETWORK)('returns CA metadata from /info endpoint', async () => {
     const resp = await fetch(DG_CA_INFO_URL, {
       headers: { Accept: 'application/json' },
     });
@@ -94,7 +96,7 @@ describe('CA Certificate Distribution (ca.datagrout.ai)', () => {
     expect(info.ca_cert_pem).toContain('-----BEGIN CERTIFICATE-----');
   });
 
-  it('CA cert has a reasonable validity period', async () => {
+  it.skipIf(!HAS_NETWORK)('CA cert has a reasonable validity period', async () => {
     const pem = await fetchDgCaCert(DG_CA_URL);
     const cert = new crypto.X509Certificate(pem);
 
@@ -509,7 +511,7 @@ describe('OAuth 2.1 Machine Client', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('mTLS code path', () => {
-  it('fetchWithIdentity sends a request with client cert headers', async () => {
+  it.skipIf(!HAS_NETWORK)('fetchWithIdentity sends a request with client cert headers', async () => {
     const conduitId = ConduitIdentity.fromPem(FIXTURE_CERT_PEM, FIXTURE_KEY_PEM);
 
     // This exercises the Node.js https.request + client cert path.
@@ -598,6 +600,265 @@ describe('End-to-end: SDK Client Pipeline', () => {
     },
     60_000
   );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. Conduit URL integration tests (gated on CONDUIT_TEST_URL)
+//
+//    Set CONDUIT_TEST_URL to a live DataGrout-compatible MCP endpoint.
+//    Optionally set CONDUIT_TEST_TOKEN with a bearer token for authenticated
+//    endpoints.
+//
+//    Run:
+//      CONDUIT_TEST_URL=https://... CONDUIT_TEST_TOKEN=... npx vitest run
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TEST_URL = process.env.CONDUIT_TEST_URL;
+const TEST_TOKEN = process.env.CONDUIT_TEST_TOKEN;
+
+function buildClient() {
+  return new Client({
+    url: TEST_URL!,
+    auth: TEST_TOKEN ? { bearer: TEST_TOKEN } : undefined,
+  });
+}
+
+describe('Conduit URL integration (CONDUIT_TEST_URL)', () => {
+  // ── MCP baseline ─────────────────────────────────────────────────────────
+
+  test.skipIf(!TEST_URL)('connects and lists at least one tool', async () => {
+    const client = buildClient();
+    await client.connect();
+
+    const tools = await client.listTools();
+
+    expect(Array.isArray(tools)).toBe(true);
+    expect(tools.length).toBeGreaterThan(0);
+
+    for (const tool of tools.slice(0, 3)) {
+      expect(tool).toHaveProperty('name');
+      expect(typeof tool.name).toBe('string');
+    }
+
+    await client.disconnect();
+  }, 30_000);
+
+  test.skipIf(!TEST_URL)(
+    'intelligent interface: useIntelligentInterface=true returns only non-@ tools',
+    async () => {
+      const iiClient = new Client({
+        url: TEST_URL!,
+        auth: TEST_TOKEN ? { bearer: TEST_TOKEN } : undefined,
+        useIntelligentInterface: true,
+      });
+      await iiClient.connect();
+
+      const iiTools = await iiClient.listTools();
+
+      expect(Array.isArray(iiTools)).toBe(true);
+      for (const tool of iiTools) {
+        expect(tool.name).not.toMatch(/@/);
+      }
+
+      await iiClient.disconnect();
+    },
+    30_000
+  );
+
+  test.skipIf(!TEST_URL)(
+    'callTool on a known DG tool returns a non-null result',
+    async () => {
+      const client = buildClient();
+      await client.connect();
+
+      const result = await client.callTool('data-grout@1/discovery.discover@1', {
+        query: 'test',
+        limit: 1,
+      });
+
+      expect(result).not.toBeNull();
+
+      await client.disconnect();
+    },
+    30_000
+  );
+
+  // ── Discovery ─────────────────────────────────────────────────────────────
+
+  test.skipIf(!TEST_URL)('discover() returns a tools array', async () => {
+    const client = buildClient();
+    await client.connect();
+
+    const result = await client.discover({ query: 'find recent data', limit: 3 });
+
+    expect(result).toHaveProperty('results');
+    expect(Array.isArray(result.results)).toBe(true);
+    expect(result).toHaveProperty('queryUsed');
+
+    await client.disconnect();
+  }, 30_000);
+
+  test.skipIf(!TEST_URL)('plan() with goal returns a non-null result', async () => {
+    const client = buildClient();
+    await client.connect();
+
+    const result = await client.plan({ goal: 'summarize data' });
+
+    expect(result).not.toBeNull();
+
+    await client.disconnect();
+  }, 30_000);
+
+  test.skipIf(!TEST_URL)(
+    'guide() returns a sessionId and options array',
+    async () => {
+      const client = buildClient();
+      await client.connect();
+
+      const session = await client.guide({ goal: 'help me find something' });
+
+      expect(session.sessionId).toBeTruthy();
+      expect(typeof session.sessionId).toBe('string');
+      expect(Array.isArray(session.options)).toBe(true);
+
+      await client.disconnect();
+    },
+    30_000
+  );
+
+  // ── Prism ─────────────────────────────────────────────────────────────────
+
+  test.skipIf(!TEST_URL)('refract() returns a non-null result', async () => {
+    const client = buildClient();
+    await client.connect();
+
+    const result = await client.refract({ goal: 'count items', payload: [1, 2, 3] });
+
+    expect(result).not.toBeNull();
+
+    await client.disconnect();
+  }, 30_000);
+
+  test.skipIf(!TEST_URL)('chart() returns a non-null result', async () => {
+    const client = buildClient();
+    await client.connect();
+
+    const result = await client.chart({ goal: 'show counts', payload: { a: 1, b: 2 } });
+
+    expect(result).not.toBeNull();
+
+    await client.disconnect();
+  }, 30_000);
+
+  // ── Logic Cell lifecycle ──────────────────────────────────────────────────
+
+  test.skipIf(!TEST_URL)(
+    'logic cell: remember → queryCell → forget → reflect lifecycle',
+    async () => {
+      const client = buildClient();
+      await client.connect();
+
+      const testStatement = 'sdk integration test fact for conduit lifecycle';
+
+      // 1. Store a fact
+      const remembered = await client.remember({ statement: testStatement });
+      expect(remembered).toHaveProperty('handles');
+      expect(Array.isArray(remembered.handles)).toBe(true);
+      expect(remembered.handles.length).toBeGreaterThan(0);
+
+      const handles = remembered.handles;
+
+      // 2. Query to verify the fact is retrievable
+      const queried = await client.queryCell({ question: 'sdk integration test' });
+      expect(queried).toHaveProperty('results');
+      expect(Array.isArray(queried.results)).toBe(true);
+
+      // 3. Forget the fact by handles
+      const forgotten = await client.forget({ handles });
+      expect(forgotten).toHaveProperty('retracted');
+      expect(typeof forgotten.retracted).toBe('number');
+
+      // 4. Reflect to verify state
+      const reflection = await client.reflect();
+      expect(reflection).toHaveProperty('total');
+      expect(typeof reflection.total).toBe('number');
+
+      await client.disconnect();
+    },
+    60_000
+  );
+
+  // ── Generic dg() hook ─────────────────────────────────────────────────────
+
+  test.skipIf(!TEST_URL)(
+    'dg() generic hook returns a non-null result',
+    async () => {
+      const client = buildClient();
+      await client.connect();
+
+      const result = await client.dg('discovery.discover', { query: 'test', limit: 1 });
+
+      expect(result).not.toBeNull();
+
+      await client.disconnect();
+    },
+    30_000
+  );
+
+  // ── Input validation (local, no network) ──────────────────────────────────
+
+  test('plan() throws InvalidConfigError when neither goal nor query is provided', async () => {
+    const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
+    // @ts-ignore
+    client.initialized = true;
+    const { InvalidConfigError: ICE } = await import('../src/errors');
+    await expect(client.plan({})).rejects.toBeInstanceOf(ICE);
+  });
+
+  test('forget() throws InvalidConfigError when neither handles nor pattern is provided', async () => {
+    const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
+    // @ts-ignore
+    client.initialized = true;
+    const { InvalidConfigError: ICE } = await import('../src/errors');
+    await expect(client.forget({})).rejects.toBeInstanceOf(ICE);
+  });
+
+  test('remember() throws InvalidConfigError when neither statement nor facts is provided', async () => {
+    const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
+    // @ts-ignore
+    client.initialized = true;
+    const { InvalidConfigError: ICE } = await import('../src/errors');
+    await expect(client.remember('')).rejects.toBeInstanceOf(ICE);
+    await expect(client.remember({})).rejects.toBeInstanceOf(ICE);
+  });
+
+  test('queryCell() throws InvalidConfigError when neither question nor patterns is provided', async () => {
+    const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
+    // @ts-ignore
+    client.initialized = true;
+    const { InvalidConfigError: ICE } = await import('../src/errors');
+    await expect(client.queryCell('')).rejects.toBeInstanceOf(ICE);
+    await expect(client.queryCell({})).rejects.toBeInstanceOf(ICE);
+  });
+
+  test('error hierarchy: all Conduit errors extend ConduitError', async () => {
+    const {
+      ConduitError: CE,
+      NotInitializedError: NIE,
+      RateLimitError: RLE,
+      AuthError: AE,
+      NetworkError: NE,
+      ServerError: SE,
+      InvalidConfigError: ICE,
+    } = await import('../src/errors');
+
+    expect(new NIE()).toBeInstanceOf(CE);
+    expect(new RLE({ used: 1, limit: { perHour: 50 }, isLimited: true, remaining: 49 })).toBeInstanceOf(CE);
+    expect(new AE()).toBeInstanceOf(CE);
+    expect(new NE('timeout')).toBeInstanceOf(CE);
+    expect(new SE(500, 'internal')).toBeInstanceOf(CE);
+    expect(new ICE('bad config')).toBeInstanceOf(CE);
+  });
 });
 
 // ── Fixtures ───────────────────────────────────────────────────────────────

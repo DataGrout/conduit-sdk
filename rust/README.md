@@ -118,8 +118,7 @@ if let Some(receipt) = client.last_receipt().await {
 ```rust
 let client = ClientBuilder::new()
     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
-    .transport(Transport::Mcp)  // Full MCP protocol over SSE
-    .build()?;
+    .build()?;  // MCP transport by default
 ```
 
 **Features:**
@@ -204,10 +203,11 @@ let client = ClientBuilder::new()
 
 #### Identity Auto-Discovery Order
 
-1. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
-2. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
-3. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
-4. `.conduit/` relative to the current working directory
+1. `identity_dir()` option (if provided)
+2. `CONDUIT_MTLS_CERT` + `CONDUIT_MTLS_KEY` environment variables (inline PEM)
+3. `CONDUIT_IDENTITY_DIR` environment variable (directory path)
+4. `~/.conduit/identity.pem` + `~/.conduit/identity_key.pem`
+5. `.conduit/` relative to the current working directory
 
 For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently in `build()`.
 

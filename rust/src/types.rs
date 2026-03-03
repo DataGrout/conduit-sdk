@@ -132,31 +132,52 @@ pub struct DiscoverOptions {
     pub servers: Vec<String>,
 }
 
-/// Discovery result
+/// Discovery result — matches the response shape of `data-grout/discovery.discover`.
+///
+/// DG returns `results` (not `tools`) and `goal_used` (not `query`), so we use
+/// serde rename attributes to keep the Rust API idiomatic while matching the wire.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoverResult {
-    /// Matching tools
+    /// Matching tools (wire key: `results`)
+    #[serde(rename = "results", default)]
     pub tools: Vec<DiscoveredTool>,
-    /// Query used
+    /// Goal / query used (wire key: `goal_used`)
+    #[serde(rename = "goal_used")]
     pub query: Option<String>,
-    /// Total count
-    pub total: usize,
+    /// Human-readable instruction for how to use the results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
 }
 
-/// Discovered tool with score
+/// Discovered tool with semantic similarity score.
+///
+/// DG returns `tool_name` (not `name`), `input_contract` (not `input_schema`),
+/// so we use serde rename to preserve a stable Rust API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredTool {
-    /// Tool definition
-    #[serde(flatten)]
-    pub tool: Tool,
-    /// Semantic similarity score
+    /// Canonical tool name (wire key: `tool_name`)
+    #[serde(rename = "tool_name")]
+    pub name: String,
+    /// Semantic similarity score (0.0 – 1.0)
     pub score: f64,
-    /// Integration name
+    /// Cosine distance from the query embedding
+    #[serde(default)]
+    pub distance: f64,
+    /// Human-readable description
+    #[serde(default)]
+    pub description: String,
+    /// Integration / provider name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integration: Option<String>,
-    /// Server ID
+    /// Server ID (present for multiplexed tools)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
+    /// Input schema (wire key: `input_contract`)
+    #[serde(rename = "input_contract", skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<serde_json::Value>,
+    /// Output schema (wire key: `output_contract`)
+    #[serde(rename = "output_contract", skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
 }
 
 /// Perform (tool execution) options
@@ -245,3 +266,71 @@ pub struct PrismFocusResult {
     /// Metadata
     pub metadata: Value,
 }
+
+/// Plan options (used by `PlanBuilder`)
+#[derive(Debug, Clone, Default)]
+pub struct PlanOptions {
+    /// Natural language goal
+    pub goal: Option<String>,
+    /// Semantic query string
+    pub query: Option<String>,
+    /// Scope to a specific server ID
+    pub server: Option<String>,
+    /// Number of candidate steps to consider
+    pub k: Option<u32>,
+    /// Governance policy object
+    pub policy: Option<Value>,
+    /// Pre-existing knowledge / context hints
+    pub have: Option<Value>,
+    /// Whether the result should include call handles for each step
+    pub return_call_handles: bool,
+    /// Whether virtual skills should be surfaced in the plan
+    pub expose_virtual_skills: bool,
+    /// Per-step LLM model overrides
+    pub model_overrides: Option<Value>,
+}
+
+/// Raw JSON plan result from `data-grout/discovery.plan`
+pub type PlanResult = Value;
+
+/// Refract options (used by `RefractBuilder`)
+#[derive(Debug, Clone)]
+pub struct RefractOptions {
+    /// Natural language goal describing the desired transformation
+    pub goal: String,
+    /// Input payload to refract
+    pub payload: Value,
+    /// Emit verbose intermediate reasoning
+    pub verbose: bool,
+    /// Include a chart representation when applicable
+    pub chart: bool,
+}
+
+/// Raw JSON result from `data-grout/prism.refract`
+pub type RefractResult = Value;
+
+/// Chart options (used by `ChartBuilder`)
+#[derive(Debug, Clone)]
+pub struct ChartOptions {
+    /// Natural language description of what to chart
+    pub goal: String,
+    /// Input data payload
+    pub payload: Value,
+    /// Output format (e.g. `"svg"`, `"png"`, `"json"`)
+    pub format: Option<String>,
+    /// Chart type hint (e.g. `"bar"`, `"line"`, `"pie"`)
+    pub chart_type: Option<String>,
+    /// Chart title
+    pub title: Option<String>,
+    /// X-axis label
+    pub x_label: Option<String>,
+    /// Y-axis label
+    pub y_label: Option<String>,
+    /// Width in pixels
+    pub width: Option<u32>,
+    /// Height in pixels
+    pub height: Option<u32>,
+}
+
+/// Raw JSON result from `data-grout/prism.chart`
+pub type ChartResult = Value;

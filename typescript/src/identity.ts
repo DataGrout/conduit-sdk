@@ -283,7 +283,7 @@ export async function fetchWithIdentity(
     port: parsedUrl.port || 443,
     path: parsedUrl.pathname + parsedUrl.search,
     method: (init.method ?? 'GET').toUpperCase(),
-    headers: flattenHeaders(init.headers),
+    headers: flattenHeaders(init.headers as Record<string, string> | string[][] | Headers | undefined),
     cert: identity.certPem,
     key: identity.keyPem,
     ...(identity.caPem ? { ca: identity.caPem } : {}),
@@ -323,7 +323,7 @@ export async function fetchWithIdentity(
 }
 
 function flattenHeaders(
-  headers: HeadersInit | undefined
+  headers: Record<string, string> | string[][] | Headers | undefined
 ): Record<string, string> {
   if (!headers) return {};
   if (headers instanceof Headers) {
