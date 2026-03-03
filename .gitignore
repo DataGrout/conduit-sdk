@@ -58,6 +58,7 @@ Cargo.lock
 .env.local
 *.log
 .tool-versions
+.DS_Store
 
 # Lock files — consumers generate their own
 package-lock.json

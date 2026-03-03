@@ -1,7 +1,7 @@
 {
   "name": "@datagrout/conduit",
   "version": "0.1.0",
-  "description": "Production-ready MCP client with enterprise features",
+  "description": "Production-ready MCP client with mTLS, OAuth 2.1, and semantic discovery",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",

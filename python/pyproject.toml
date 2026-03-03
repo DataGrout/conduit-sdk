@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "datagrout-conduit"
 version = "0.1.0"
-description = "Production-ready MCP client with enterprise features"
+description = "Production-ready MCP client with mTLS, OAuth 2.1, and semantic discovery"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
