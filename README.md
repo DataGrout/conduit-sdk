@@ -4,6 +4,12 @@
 
 Drop-in replacement for standard MCP clients. Swap one import line and your agent gains semantic discovery, cost tracking, mTLS identity management, and OAuth 2.1 — without changing any other code.
 
+[![PyPI](https://img.shields.io/pypi/v/datagrout-conduit?label=PyPI&color=3775A9)](https://pypi.org/project/datagrout-conduit)
+[![npm](https://img.shields.io/npm/v/@datagrout/conduit?label=npm&color=CB3837)](https://www.npmjs.com/package/@datagrout/conduit)
+[![crates.io](https://img.shields.io/crates/v/datagrout-conduit?label=crates.io&color=f74c00)](https://crates.io/crates/datagrout-conduit)
+[![Hex.pm](https://img.shields.io/hexpm/v/datagrout_conduit?label=hex.pm&color=6E4A7E)](https://hex.pm/packages/datagrout_conduit)
+[![RubyGems](https://img.shields.io/gem/v/datagrout-conduit?label=RubyGems&color=CC342D)](https://rubygems.org/gems/datagrout-conduit)
+
 ## Available Languages
 
 | Language | Package | Install |
