@@ -335,8 +335,8 @@ facts = await client.dg("prism.code_lens", {"source": source_code, "language": "
 
 These run entirely in your browser — no account required, no data stored. Provided as a public service for the MCP and AI tooling community.
 
-- [MCP Inspector](https://app.datagrout.ai/inspector) — debug any MCP server with full auth support
-- [JSONRPC Inspector](https://app.datagrout.ai/jsonrpc-inspector) — test any JSON-RPC 2.0 endpoint with Bearer, OAuth 2.1, and mTLS
+- [MCP Inspector](https://inspectors.datagrout.ai/mcp) — debug any MCP server with full auth support
+- [JSONRPC Inspector](https://inspectors.datagrout.ai/jsonrpc) — test any JSON-RPC 2.0 endpoint with Bearer, OAuth 2.1, and mTLS
 
 ### Labs
 
