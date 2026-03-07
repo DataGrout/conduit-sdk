@@ -343,7 +343,7 @@ These run entirely in your browser — no account required, no data stored. Prov
 DataGrout Labs publishes research papers on the systems that Conduit interacts with. If you want to understand the "why" behind the SDK's features:
 
 - [Cognitive Trust Certificates](https://labs.datagrout.ai/papers/ctc) — formal verification proofs for agent workflows
-- [Consequential Analysis](https://labs.datagrout.ai/papers/consequential-analysis) — semantic code verification via structural facts + intent inference
+- [Consequential Analysis](https://labs.datagrout.ai/papers/consequential_analysis) — semantic code verification via structural facts + intent inference
 - [Policy & Semantic Guards](https://labs.datagrout.ai/papers/policy) — runtime policy enforcement and dynamic redaction
 - [Semio](https://labs.datagrout.ai/papers/semio) — the semantic interface layer for typed tool contracts
 - [Credits & Virtual Economy](https://labs.datagrout.ai/papers/credits) — how cost tracking and credit estimation work
