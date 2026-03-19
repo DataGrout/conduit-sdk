@@ -101,22 +101,22 @@ module DatagroutConduit
   def self.extract_meta(result)
     return nil unless result.is_a?(Hash)
 
-    # 1. Rich: _meta.datagrout
-    rich = result.dig("_meta", "datagrout")
-    if rich.is_a?(Hash) && rich["receipt"]
-      return ToolMeta.from_hash(rich)
+    # 1. Rich: _meta.datagrout (string or symbol keys)
+    rich = result.dig("_meta", "datagrout") || result.dig(:_meta, :datagrout)
+    if rich.is_a?(Hash) && (rich["receipt"] || rich[:receipt])
+      return ToolMeta.from_hash(rich.transform_keys(&:to_s))
     end
 
-    # 2. Legacy: _datagrout or bare _meta
+    # 2. Legacy: _datagrout or bare _meta (string or symbol keys)
     %w[_datagrout _meta].each do |key|
-      legacy = result[key]
-      if legacy.is_a?(Hash) && legacy["receipt"]
-        return ToolMeta.from_hash(legacy)
+      legacy = result[key] || result[key.to_sym]
+      if legacy.is_a?(Hash) && (legacy["receipt"] || legacy[:receipt])
+        return ToolMeta.from_hash(legacy.transform_keys(&:to_s))
       end
     end
 
-    # 3. Compact: _dg
-    dg = result["_dg"]
+    # 3. Compact: _dg (string or symbol keys)
+    dg = result["_dg"] || result[:_dg]
     if dg.is_a?(Hash)
       credits = dg["credits"] || {}
       breakdown = {}

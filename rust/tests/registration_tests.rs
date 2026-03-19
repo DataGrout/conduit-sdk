@@ -3,9 +3,9 @@
 //! These tests use `mockito` to simulate the DataGrout registration endpoint,
 //! so no network access is required.
 
-use datagrout_conduit::registration::{
-    register_identity, save_identity_to_dir, RegistrationOptions,
-};
+use datagrout_conduit::registration::save_identity_to_dir;
+#[cfg(feature = "registration")]
+use datagrout_conduit::registration::{register_identity, RegistrationOptions};
 
 // ─── Shared PEM fixtures ──────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ SGDxcMtNsPEpdzYwW+UrgE+zC8mhRANCAARKOXE+izDXZf6rY19YASHOHVMLw3gP\n\
 f79a5F7N2gjVCvJLEj/zxT1BO81jm0WudPRPskd1lpc4rzENAn0QFMz1\n\
 -----END PRIVATE KEY-----\n";
 
-// A DG-signed certificate that the server would return after registration
+#[cfg(feature = "registration")]
 const DG_SIGNED_CERT_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
 MIIBpTCCAQ6gAwIBAgIUZ2F0ZXdheS1jbGllbnQtMDAxMCAXDTI1MDEwMTAwMDAw\n\
 MFoYDzIwMzUwMTAxMDAwMDAwWjAWMRQwEgYDVQQDDAtleGFtcGxlLmNvbTCBnzAN\n\
@@ -50,13 +50,11 @@ fn make_identity() -> datagrout_conduit::ConduitIdentity {
 fn generate_keypair_produces_valid_identity() {
     use datagrout_conduit::registration::generate_keypair;
 
-    let identity = generate_keypair("test-substrate").expect("should generate without error");
+    let identity = generate_keypair("test-substrate")
+        .expect("should generate without error");
 
     let cert = String::from_utf8_lossy(identity.cert_pem_bytes());
-    assert!(
-        cert.contains("BEGIN CERTIFICATE"),
-        "cert_pem should be a cert"
-    );
+    assert!(cert.contains("BEGIN CERTIFICATE"), "cert_pem should be a cert");
 
     let key = String::from_utf8_lossy(identity.key_pem_bytes());
     assert!(key.contains("BEGIN"), "key_pem should be a key");
@@ -67,15 +65,13 @@ fn generate_keypair_produces_valid_identity() {
 fn generate_keypair_rotation_flag_not_set_for_new_cert() {
     use datagrout_conduit::registration::generate_keypair;
 
-    let identity = generate_keypair("test-node").expect("should generate");
+    let identity = generate_keypair("test-node")
+        .expect("should generate");
 
     // A freshly-generated keypair has no server-assigned expiry yet
     // (expiry is set after the server returns a signed cert), so
     // needs_rotation should be false.
-    assert!(
-        !identity.needs_rotation(30),
-        "fresh keypair should not need rotation"
-    );
+    assert!(!identity.needs_rotation(30), "fresh keypair should not need rotation");
 }
 
 // ─── register_identity (mocked DG CA flow) ────────────────────────────────────
@@ -92,7 +88,9 @@ async fn register_identity_sends_public_key_and_token() {
     let mock = server
         .mock("POST", "/register")
         .match_header("authorization", "Bearer test-access-token")
-        .match_body(mockito::Matcher::Regex(r#"public_key_pem"#.to_string()))
+        .match_body(mockito::Matcher::Regex(
+            r#"public_key_pem"#.to_string(),
+        ))
         .with_status(201)
         .with_header("content-type", "application/json")
         .with_body(format!(
@@ -125,10 +123,7 @@ async fn register_identity_sends_public_key_and_token() {
     let (_identity, reg) = resp;
     assert_eq!(reg.id, "sub_abc123");
     assert_eq!(reg.fingerprint, "aa:bb:cc:dd");
-    assert!(
-        reg.cert_pem.contains("BEGIN CERTIFICATE"),
-        "should return a DG-signed cert"
-    );
+    assert!(reg.cert_pem.contains("BEGIN CERTIFICATE"), "should return a DG-signed cert");
     mock.assert_async().await;
 }
 
@@ -157,10 +152,7 @@ async fn register_identity_returns_error_on_4xx() {
     .await
     .expect_err("should fail on 422");
 
-    assert!(
-        err.to_string().contains("422"),
-        "error should mention status: {err}"
-    );
+    assert!(err.to_string().contains("422"), "error should mention status: {err}");
 }
 
 #[cfg(feature = "registration")]
@@ -197,7 +189,8 @@ fn save_identity_to_dir_writes_cert_and_key() {
     let dir = tempfile::tempdir().expect("temp dir");
     let identity = make_identity();
 
-    let paths = save_identity_to_dir(&identity, dir.path()).expect("should save without error");
+    let paths = save_identity_to_dir(&identity, dir.path())
+        .expect("should save without error");
 
     assert!(paths.cert_path.exists(), "cert file should exist");
     assert!(paths.key_path.exists(), "key file should exist");
@@ -243,8 +236,5 @@ fn default_identity_dir_returns_home_conduit() {
     }
 
     let dir = default_identity_dir().expect("should return a path");
-    assert!(
-        dir.ends_with(".conduit"),
-        "should end with .conduit: {dir:?}"
-    );
+    assert!(dir.ends_with(".conduit"), "should end with .conduit: {dir:?}");
 }
