@@ -117,7 +117,10 @@ impl Client {
             },
         };
 
-        let request = self.build_request("initialize", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "initialize",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let transport = self.transport.read().await;
         let response = transport.send_request(request).await?;
@@ -197,7 +200,10 @@ impl Client {
                 cursor: cursor.clone(),
             };
 
-            let request = self.build_request("tools/list", Some(serde_json::to_value(params)?))?;
+            let request = self.build_request(
+                "tools/list",
+                Some(serde_json::to_value(params)?),
+            )?;
 
             let response = self.send_with_retry(request).await?;
 
@@ -226,10 +232,7 @@ impl Client {
         // Third-party tools use the "integration@version/tool@version" naming scheme; DG's
         // own tools do not contain "@".
         let all_tools = if self.use_intelligent_interface {
-            all_tools
-                .into_iter()
-                .filter(|t| !t.name.contains('@'))
-                .collect()
+            all_tools.into_iter().filter(|t| !t.name.contains('@')).collect()
         } else {
             all_tools
         };
@@ -251,7 +254,10 @@ impl Client {
             arguments: Some(arguments),
         };
 
-        let request = self.build_request("tools/call", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "tools/call",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -274,7 +280,10 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ListResourcesParams::default();
-        let request = self.build_request("resources/list", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "resources/list",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -291,7 +300,10 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ReadResourceParams { uri: uri.into() };
-        let request = self.build_request("resources/read", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "resources/read",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -308,7 +320,10 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ListPromptsParams::default();
-        let request = self.build_request("prompts/list", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "prompts/list",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -335,7 +350,10 @@ impl Client {
             arguments,
         };
 
-        let request = self.build_request("prompts/get", Some(serde_json::to_value(params)?))?;
+        let request = self.build_request(
+            "prompts/get",
+            Some(serde_json::to_value(params)?),
+        )?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -403,9 +421,7 @@ impl Client {
     pub async fn perform_batch(&self, calls: Vec<Value>) -> Result<Vec<Value>> {
         self.warn_if_not_dg("perform_batch");
         self.ensure_initialized().await?;
-        let result = self
-            .call_dg_tool("data-grout/discovery.perform", Value::Array(calls))
-            .await?;
+        let result = self.call_dg_tool("data-grout/discovery.perform", Value::Array(calls)).await?;
         match result {
             Value::Array(arr) => Ok(arr),
             other => Ok(vec![other]),
@@ -567,10 +583,9 @@ impl Client {
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             eprintln!(
-                "[conduit] warning: `{}` is a DataGrout-specific extension. \
-                 The connected server ({}) may not support it. \
+                "[conduit] warning: `{method}` is a DataGrout-specific extension. \
+                 The connected server (non-DG endpoint) may not support it. \
                  Standard MCP methods (list_tools, call_tool, …) work on any server.",
-                method, "non-DG endpoint"
             );
         }
     }
@@ -579,11 +594,7 @@ impl Client {
     // Internal helpers
     // ========================================================================
 
-    fn build_request(
-        &self,
-        method: impl Into<String>,
-        params: Option<Value>,
-    ) -> Result<JsonRpcRequest> {
+    fn build_request(&self, method: impl Into<String>, params: Option<Value>) -> Result<JsonRpcRequest> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).to_string();
         Ok(JsonRpcRequest::new(id, method, params))
     }
@@ -726,7 +737,8 @@ impl ClientBuilder {
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
     ) -> Self {
-        self._pending_oauth_creds = Some((client_id.into(), client_secret.into(), None, None));
+        self._pending_oauth_creds =
+            Some((client_id.into(), client_secret.into(), None, None));
         self
     }
 
@@ -764,7 +776,9 @@ impl ClientBuilder {
     /// `~/.conduit/` → `.conduit/` in the cwd.  If nothing is found this is
     /// a no-op: the client falls back to token auth silently.
     pub fn with_identity_auto(mut self) -> Self {
-        self.identity = ConduitIdentity::try_discover(self.identity_dir.as_deref());
+        self.identity = ConduitIdentity::try_discover(
+            self.identity_dir.as_deref(),
+        );
         self
     }
 
@@ -866,12 +880,14 @@ impl ClientBuilder {
         substrate_endpoint: impl Into<String>,
     ) -> crate::error::Result<Self> {
         use crate::registration::{
-            default_identity_dir, generate_keypair, register_identity, save_identity_to_dir,
-            RegistrationOptions,
+            default_identity_dir, generate_keypair, register_identity,
+            save_identity_to_dir, RegistrationOptions,
         };
 
         // Fast path: existing identity that doesn't need rotation.
-        if let Some(existing) = ConduitIdentity::try_discover(self.identity_dir.as_deref()) {
+        if let Some(existing) = ConduitIdentity::try_discover(
+            self.identity_dir.as_deref(),
+        ) {
             if !existing.needs_rotation(7) {
                 self.identity = Some(existing);
                 return Ok(self);
@@ -889,7 +905,8 @@ impl ClientBuilder {
         let (identity, _resp) = register_identity(&keypair, &opts).await?;
 
         // Persist so future runs auto-discover without any token.
-        let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
+        let save_dir = self.identity_dir.clone()
+            .or_else(default_identity_dir);
 
         if let Some(dir) = save_dir {
             let _ = save_identity_to_dir(&identity, &dir);
@@ -929,12 +946,16 @@ impl ClientBuilder {
         client_secret: impl Into<String>,
         name: impl Into<String>,
     ) -> crate::error::Result<Self> {
-        let url = self.url.as_deref().ok_or_else(|| {
-            Error::invalid_config("URL must be set before bootstrap_identity_oauth")
-        })?;
+        let url = self.url.as_deref()
+            .ok_or_else(|| Error::invalid_config("URL must be set before bootstrap_identity_oauth"))?;
         let token_endpoint = OAuthTokenProvider::derive_token_endpoint(url);
 
-        let provider = OAuthTokenProvider::new(client_id, client_secret, token_endpoint, None);
+        let provider = OAuthTokenProvider::new(
+            client_id,
+            client_secret,
+            token_endpoint,
+            None,
+        );
         let http = reqwest::Client::new();
         let token = provider.get_token(&http).await?;
 
@@ -946,27 +967,26 @@ impl ClientBuilder {
     /// Returns [`Error::InvalidConfig`](crate::error::Error::InvalidConfig)
     /// when required fields (e.g. `url`) are missing.
     pub fn build(self) -> Result<Client> {
-        let url = self
-            .url
-            .ok_or_else(|| Error::invalid_config("URL is required"))?;
+        let url = self.url.ok_or_else(|| Error::invalid_config("URL is required"))?;
         let dg = is_dg_url(&url);
 
         let transport_mode = self.transport.unwrap_or(Transport::Mcp);
 
         // Resolve OAuth credentials now that the URL is known.
-        let auth =
-            if let Some((client_id, client_secret, endpoint, scope)) = self._pending_oauth_creds {
-                let token_endpoint =
-                    endpoint.unwrap_or_else(|| OAuthTokenProvider::derive_token_endpoint(&url));
-                AuthConfig::ClientCredentials(OAuthTokenProvider::new(
-                    client_id,
-                    client_secret,
-                    token_endpoint,
-                    scope,
-                ))
-            } else {
-                self.auth.unwrap_or(AuthConfig::None)
-            };
+        let auth = if let Some((client_id, client_secret, endpoint, scope)) =
+            self._pending_oauth_creds
+        {
+            let token_endpoint = endpoint
+                .unwrap_or_else(|| OAuthTokenProvider::derive_token_endpoint(&url));
+            AuthConfig::ClientCredentials(OAuthTokenProvider::new(
+                client_id,
+                client_secret,
+                token_endpoint,
+                scope,
+            ))
+        } else {
+            self.auth.unwrap_or(AuthConfig::None)
+        };
 
         // For DG URLs, silently try auto-discovering an mTLS identity if none was
         // explicitly set and mTLS wasn't disabled. Non-DG URLs never auto-discover.
@@ -990,11 +1010,7 @@ impl ClientBuilder {
                 } else {
                     url
                 };
-                Box::new(JsonRpcTransport::with_identity(
-                    rpc_url,
-                    auth,
-                    identity_ref,
-                )?)
+                Box::new(JsonRpcTransport::with_identity(rpc_url, auth, identity_ref)?)
             }
         };
 
@@ -1096,10 +1112,7 @@ impl<'a> DiscoverBuilder<'a> {
             params["servers"] = json!(self.options.servers);
         }
 
-        let result = self
-            .client
-            .call_dg_tool("data-grout/discovery.discover", params)
-            .await?;
+        let result = self.client.call_dg_tool("data-grout/discovery.discover", params).await?;
         Ok(serde_json::from_value(result)?)
     }
 }
@@ -1153,9 +1166,7 @@ impl<'a> PerformBuilder<'a> {
             "demux_mode": self.options.demux_mode,
         });
 
-        self.client
-            .call_dg_tool("data-grout/discovery.perform", params)
-            .await
+        self.client.call_dg_tool("data-grout/discovery.perform", params).await
     }
 }
 
@@ -1210,10 +1221,7 @@ impl<'a> GuideBuilder<'a> {
             params["choice"] = json!(choice);
         }
 
-        let result = self
-            .client
-            .call_dg_tool("data-grout/discovery.guide", params)
-            .await?;
+        let result = self.client.call_dg_tool("data-grout/discovery.guide", params).await?;
         let state: GuideState = serde_json::from_value(result)?;
         Ok(GuidedSession::new(self.client, state))
     }
@@ -1344,9 +1352,7 @@ impl<'a> FlowIntoBuilder<'a> {
 
         // Receipt is embedded in result["_datagrout"]["receipt"] — callers can use
         // extract_meta(&result) to access it without any client-side state.
-        self.client
-            .call_dg_tool("data-grout/flow.into", params)
-            .await
+        self.client.call_dg_tool("data-grout/flow.into", params).await
     }
 }
 
@@ -1461,9 +1467,7 @@ impl<'a> PlanBuilder<'a> {
             params["model_overrides"] = model_overrides;
         }
 
-        self.client
-            .call_dg_tool("data-grout/discovery.plan", params)
-            .await
+        self.client.call_dg_tool("data-grout/discovery.plan", params).await
     }
 }
 
@@ -1511,9 +1515,7 @@ impl<'a> RefractBuilder<'a> {
             "chart": self.options.chart,
         });
 
-        self.client
-            .call_dg_tool("data-grout/prism.refract", params)
-            .await
+        self.client.call_dg_tool("data-grout/prism.refract", params).await
     }
 }
 
@@ -1616,9 +1618,7 @@ impl<'a> ChartBuilder<'a> {
             params["height"] = json!(height);
         }
 
-        self.client
-            .call_dg_tool("data-grout/prism.chart", params)
-            .await
+        self.client.call_dg_tool("data-grout/prism.chart", params).await
     }
 }
 
@@ -1665,9 +1665,7 @@ impl<'a> PrismFocusBuilder<'a> {
     pub async fn execute(self) -> Result<Value> {
         self.client.ensure_initialized().await?;
 
-        let data = self
-            .data
-            .ok_or_else(|| Error::invalid_config("data is required"))?;
+        let data = self.data.ok_or_else(|| Error::invalid_config("data is required"))?;
         let source_type = self
             .source_type
             .ok_or_else(|| Error::invalid_config("source_type is required"))?;
@@ -1681,8 +1679,6 @@ impl<'a> PrismFocusBuilder<'a> {
             "target_type": target_type,
         });
 
-        self.client
-            .call_dg_tool("data-grout/prism.focus", params)
-            .await
+        self.client.call_dg_tool("data-grout/prism.focus", params).await
     }
 }

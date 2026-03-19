@@ -34,26 +34,4 @@ module DatagroutConduit
       ENV.key?("CONDUIT_IS_DG")
   end
 
-  # Extract the DataGrout metadata block from a tool-call result.
-  #
-  # Checks +_meta.datagrout+ first (current format), then +_datagrout+,
-  # then falls back to +_meta+ for backward compatibility with older
-  # gateway responses.
-  #
-  # Returns nil when the result contains neither key (e.g. upstream servers
-  # that don't go through the DG gateway).
-  #
-  #   meta = DatagroutConduit.extract_meta(result)
-  #   meta.receipt.net_credits  #=> 1.5
-  #   meta.receipt.receipt_id   #=> "rcp_abc123"
-  def self.extract_meta(result)
-    return nil unless result.is_a?(Hash)
-
-    raw = result.dig("_meta", "datagrout") || result.dig(:_meta, :datagrout) ||
-          result["_datagrout"] || result[:_datagrout] ||
-          result["_meta"] || result[:_meta]
-    return nil if raw.nil?
-
-    ToolMeta.from_hash(raw)
-  end
 end
