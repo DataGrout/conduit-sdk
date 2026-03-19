@@ -194,6 +194,34 @@ module DatagroutConduit
     end
 
     # ================================================================
+    # Namespace Accessors
+    # ================================================================
+
+    def prism
+      @prism ||= PrismNamespace.new(self)
+    end
+
+    def logic
+      @logic ||= LogicNamespace.new(self)
+    end
+
+    def warden
+      @warden ||= WardenNamespace.new(self)
+    end
+
+    def deliverables
+      @deliverables ||= DeliverablesNamespace.new(self)
+    end
+
+    def ephemerals
+      @ephemerals ||= EphemeralsNamespace.new(self)
+    end
+
+    def flow
+      @flow ||= FlowNamespace.new(self)
+    end
+
+    # ================================================================
     # DataGrout Extensions
     # ================================================================
 
@@ -225,6 +253,23 @@ module DatagroutConduit
       call_dg_tool("data-grout/discovery.perform", params)
     end
 
+    # Execute multiple tool calls in a single gateway request.
+    #
+    # Each element should be a hash with "tool" and "args" keys.
+    # Returns an array of results in the same order as the input calls.
+    #
+    #   results = client.perform_batch([
+    #     { "tool" => "data-grout/data.count", "args" => { "data" => [1, 2, 3] } },
+    #     { "tool" => "data-grout/data.keys",  "args" => { "data" => { "a" => 1 } } }
+    #   ])
+    def perform_batch(calls)
+      warn_if_not_dg("perform_batch")
+      ensure_initialized!
+
+      result = call_dg_tool("data-grout/discovery.perform", calls)
+      result.is_a?(Array) ? result : [result]
+    end
+
     # Start or continue a guided workflow.
     def guide(goal: nil, session_id: nil, choice: nil)
       warn_if_not_dg("guide")
@@ -237,32 +282,6 @@ module DatagroutConduit
 
       result = call_dg_tool("data-grout/discovery.guide", params)
       GuidedSession.new(self, GuideState.from_hash(result))
-    end
-
-    # Execute a multi-step workflow plan.
-    def flow_into(plan, validate_ctc: true, save_as_skill: false, input_data: nil)
-      warn_if_not_dg("flow_into")
-      ensure_initialized!
-
-      params = {
-        "plan" => plan,
-        "validate_ctc" => validate_ctc,
-        "save_as_skill" => save_as_skill
-      }
-      params["input_data"] = input_data if input_data
-
-      call_dg_tool("data-grout/flow.into", params)
-    end
-
-    # Semantic type transformation via Prism.
-    def prism_focus(data:, source_type:, target_type:, source_annotations: nil, target_annotations: nil, context: nil)
-      params = { "data" => data, "source_type" => source_type, "target_type" => target_type }
-      params["source_annotations"] = source_annotations if source_annotations
-      params["target_annotations"] = target_annotations if target_annotations
-      params["context"] = context if context
-      warn_if_not_dg("prism_focus")
-      ensure_initialized!
-      call_dg_tool("data-grout/prism.focus", params)
     end
 
     # Semantic discovery plan — return a ranked list of tools for a goal.
@@ -283,150 +302,6 @@ module DatagroutConduit
       warn_if_not_dg("plan")
       ensure_initialized!
       call_dg_tool("data-grout/discovery.plan", params)
-    end
-
-    # Transform / reshape a payload via Prism.
-    def refract(goal:, payload:, **opts)
-      params = { "goal" => goal, "payload" => payload }
-      params["verbose"] = opts[:verbose] if opts.key?(:verbose)
-      params["chart"] = opts[:chart] if opts.key?(:chart)
-      warn_if_not_dg("refract")
-      ensure_initialized!
-      call_dg_tool("data-grout/prism.refract", params)
-    end
-
-    # Generate a chart/visual from a payload via Prism.
-    def chart(goal:, payload:, **opts)
-      params = { "goal" => goal, "payload" => payload }
-      params["format"] = opts[:format] if opts[:format]
-      params["chart_type"] = opts[:chart_type] if opts[:chart_type]
-      params["title"] = opts[:title] if opts[:title]
-      params["x_label"] = opts[:x_label] if opts[:x_label]
-      params["y_label"] = opts[:y_label] if opts[:y_label]
-      params["width"] = opts[:width] if opts[:width]
-      params["height"] = opts[:height] if opts[:height]
-      warn_if_not_dg("chart")
-      ensure_initialized!
-      call_dg_tool("data-grout/prism.chart", params)
-    end
-
-    # Generate a document toward a natural-language goal.
-    def render(goal:, payload: nil, format: "markdown", sections: nil, **opts)
-      params = { "goal" => goal, "format" => format }.merge(normalize_hash(opts))
-      params["payload"] = payload if payload
-      params["sections"] = sections if sections
-      warn_if_not_dg("render")
-      ensure_initialized!
-      call_dg_tool("data-grout/prism.render", params)
-    end
-
-    # Convert content to another format (no LLM). Supports csv, xlsx, pdf, json, etc.
-    def export(content:, format:, style: nil, metadata: nil, **opts)
-      params = { "content" => content, "format" => format }.merge(normalize_hash(opts))
-      params["style"] = style if style
-      params["metadata"] = metadata if metadata
-      warn_if_not_dg("export")
-      ensure_initialized!
-      call_dg_tool("data-grout/prism.export", params)
-    end
-
-    # Pause workflow for human approval.
-    def request_approval(action:, details: nil, reason: nil, context: nil, **opts)
-      params = { "action" => action }.merge(normalize_hash(opts))
-      params["details"] = details if details
-      params["reason"] = reason if reason
-      params["context"] = context if context
-      warn_if_not_dg("request_approval")
-      ensure_initialized!
-      call_dg_tool("data-grout/flow.request-approval", params)
-    end
-
-    # Request user clarification for missing fields.
-    def request_feedback(missing_fields:, reason:, current_data: nil, suggestions: nil, context: nil, **opts)
-      params = { "missing_fields" => missing_fields, "reason" => reason }.merge(normalize_hash(opts))
-      params["current_data"] = current_data if current_data
-      params["suggestions"] = suggestions if suggestions
-      params["context"] = context if context
-      warn_if_not_dg("request_feedback")
-      ensure_initialized!
-      call_dg_tool("data-grout/flow.request-feedback", params)
-    end
-
-    # List recent tool executions for the current server.
-    def execution_history(limit: 50, offset: 0, status: nil, refractions_only: false, **opts)
-      params = { "limit" => limit, "offset" => offset, "refractions_only" => refractions_only }.merge(normalize_hash(opts))
-      params["status"] = status if status
-      warn_if_not_dg("execution_history")
-      ensure_initialized!
-      call_dg_tool("data-grout/inspect.execution-history", params)
-    end
-
-    # Get details for a specific execution.
-    def execution_details(execution_id:)
-      params = { "execution_id" => execution_id }
-      warn_if_not_dg("execution_details")
-      ensure_initialized!
-      call_dg_tool("data-grout/inspect.execution-details", params)
-    end
-
-    # ================================================================
-    # Logic Cell Methods
-    # ================================================================
-
-    # Assert a fact or statement into the logic cell.
-    def remember(statement: nil, facts: nil, tag: nil)
-      raise ArgumentError, "must provide statement or facts" unless statement || facts
-
-      params = {}
-      params["statement"] = statement if statement
-      params["facts"] = facts if facts
-      params["tag"] = tag if tag
-      warn_if_not_dg("remember")
-      ensure_initialized!
-      call_dg_tool("data-grout/logic.remember", params)
-    end
-
-    # Query the logic cell by question or patterns.
-    def query_cell(question: nil, patterns: nil, limit: nil)
-      raise ArgumentError, "must provide question or patterns" unless question || patterns
-
-      params = {}
-      params["question"] = question if question
-      params["patterns"] = patterns if patterns
-      params["limit"] = limit if limit
-      warn_if_not_dg("query_cell")
-      ensure_initialized!
-      call_dg_tool("data-grout/logic.query", params)
-    end
-
-    # Remove facts from the logic cell by handles or pattern.
-    def forget(handles: nil, pattern: nil)
-      raise ArgumentError, "must provide handles or pattern" unless handles || pattern
-
-      params = {}
-      params["handles"] = handles if handles
-      params["pattern"] = pattern if pattern
-      warn_if_not_dg("forget")
-      ensure_initialized!
-      call_dg_tool("data-grout/logic.forget", params)
-    end
-
-    # Assert a constraint rule into the logic cell.
-    def constrain(rule:, tag: nil)
-      params = { "rule" => rule }
-      params["tag"] = tag if tag
-      warn_if_not_dg("constrain")
-      ensure_initialized!
-      call_dg_tool("data-grout/logic.constrain", params)
-    end
-
-    # Reflect on known facts about an entity.
-    def reflect(entity: nil, summary_only: false)
-      params = { "summary_only" => summary_only }
-      params["entity"] = entity if entity
-      warn_if_not_dg("reflect")
-      ensure_initialized!
-      call_dg_tool("data-grout/logic.reflect", params)
     end
 
     # Call any DataGrout first-party tool by short name.

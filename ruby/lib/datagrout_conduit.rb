@@ -11,6 +11,12 @@ require_relative "datagrout_conduit/registration"
 require_relative "datagrout_conduit/transport/base"
 require_relative "datagrout_conduit/transport/mcp"
 require_relative "datagrout_conduit/transport/jsonrpc"
+require_relative "datagrout_conduit/namespaces/prism"
+require_relative "datagrout_conduit/namespaces/logic"
+require_relative "datagrout_conduit/namespaces/warden"
+require_relative "datagrout_conduit/namespaces/deliverables"
+require_relative "datagrout_conduit/namespaces/ephemerals"
+require_relative "datagrout_conduit/namespaces/flow"
 require_relative "datagrout_conduit/client"
 
 module DatagroutConduit

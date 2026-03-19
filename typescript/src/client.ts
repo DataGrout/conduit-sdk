@@ -15,6 +15,14 @@ import {
   DG_SUBSTRATE_ENDPOINT,
 } from './registration';
 import { NotInitializedError, InvalidConfigError } from './errors';
+import {
+  PrismNamespace,
+  LogicNamespace,
+  WardenNamespace,
+  DeliverablesNamespace,
+  EphemeralsNamespace,
+  FlowNamespace,
+} from './namespaces';
 import type {
   ClientOptions,
   DiscoverResult,
@@ -325,6 +333,43 @@ export class Client {
     }
   }
 
+  // ===== Namespace Accessors =====
+
+  private callDgTool = async (tool: string, params: Record<string, any>): Promise<any> => {
+    this.ensureInitialized();
+    return this.sendWithRetry(() => this.transport.callTool(`data-grout/${tool}`, params));
+  };
+
+  /** Data transformation, charting, rendering, and type bridging. */
+  get prism(): PrismNamespace {
+    return new PrismNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
+  /** Persistent agent memory backed by a Prolog logic cell. */
+  get logic(): LogicNamespace {
+    return new LogicNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
+  /** Safety gates, intent verification, and multi-model consensus. */
+  get warden(): WardenNamespace {
+    return new WardenNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
+  /** Work product registration, listing, and retrieval. */
+  get deliverables(): DeliverablesNamespace {
+    return new DeliverablesNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
+  /** Cache listing and inspection. */
+  get ephemerals(): EphemeralsNamespace {
+    return new EphemeralsNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
+  /** Multi-step orchestration, routing, approvals, and execution history. */
+  get flow(): FlowNamespace {
+    return new FlowNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+  }
+
   // ===== Standard MCP API (Drop-in Compatible) =====
 
   /**
@@ -571,65 +616,6 @@ export class Client {
   }
 
   /**
-   * Execute a pre-planned sequence of tool calls (a "flow") through the
-   * DataGrout gateway.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/flow.into`
-   *
-   * @param options.plan          - Ordered list of tool call descriptors.
-   * @param options.validateCtc   - Validate each call against its CTC schema (default: `true`).
-   * @param options.saveAsSkill   - Persist the flow as a reusable skill (default: `false`).
-   * @param options.inputData     - Runtime input data for the flow.
-   */
-  async flowInto(options: FlowOptions): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('flowInto');
-    const params: Record<string, any> = {
-      plan: options.plan,
-      validate_ctc: options.validateCtc ?? true,
-      save_as_skill: options.saveAsSkill ?? false,
-    };
-
-    if (options.inputData) {
-      params.input_data = options.inputData;
-    }
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/flow.into', params)
-    );
-  }
-
-  /**
-   * Transform data from one annotated type to another using the DataGrout
-   * Prism semantic mapping engine.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/prism.focus`
-   *
-   * @param options.data               - Source payload to transform.
-   * @param options.sourceType         - Semantic type of the source data.
-   * @param options.targetType         - Desired semantic type for the output.
-   * @param options.sourceAnnotations  - Additional schema hints for the source.
-   * @param options.targetAnnotations  - Additional schema hints for the target.
-   * @param options.context            - Free-text context to guide the mapping.
-   */
-  async prismFocus(options: PrismFocusOptions): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('prismFocus');
-    const params: Record<string, any> = {
-      data: options.data,
-      source_type: options.sourceType,
-      target_type: options.targetType,
-      ...(options.sourceAnnotations && { source_annotations: options.sourceAnnotations }),
-      ...(options.targetAnnotations && { target_annotations: options.targetAnnotations }),
-      ...(options.context && { context: options.context }),
-    };
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/prism.focus', params)
-    );
-  }
-
-  /**
    * Generate an execution plan for a goal using DataGrout's planning engine.
    *
    * Returns an ordered list of tool calls that, when executed, accomplish the
@@ -674,138 +660,6 @@ export class Client {
   }
 
   /**
-   * Analyse and summarise a payload using the DataGrout Prism refraction engine.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/prism.refract`
-   *
-   * @param options.goal    - Description of what to extract or summarise.
-   * @param options.payload - Input data to analyse (any JSON-serializable value).
-   * @param options.verbose - Include detailed processing trace in the response.
-   * @param options.chart   - Also generate a chart representation.
-   */
-  async refract(options: RefractOptions): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('refract');
-    const params: Record<string, any> = {
-      goal: options.goal,
-      payload: options.payload,
-    };
-
-    if (options.verbose !== undefined) params.verbose = options.verbose;
-    if (options.chart !== undefined) params.chart = options.chart;
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/prism.refract', params)
-    );
-  }
-
-  /**
-   * Generate a chart from a data payload using the DataGrout Prism engine.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/prism.chart`
-   *
-   * @param options.goal      - What the chart should visualise.
-   * @param options.payload   - Input data (any JSON-serializable value).
-   * @param options.format    - Output format (e.g. `"png"`, `"svg"`).
-   * @param options.chartType - Chart type (e.g. `"bar"`, `"line"`, `"pie"`).
-   * @param options.title     - Chart title.
-   * @param options.xLabel    - X-axis label.
-   * @param options.yLabel    - Y-axis label.
-   * @param options.width     - Chart width in pixels.
-   * @param options.height    - Chart height in pixels.
-   */
-  async chart(options: ChartOptions): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('chart');
-    const params: Record<string, any> = {
-      goal: options.goal,
-      payload: options.payload,
-    };
-
-    if (options.format) params.format = options.format;
-    if (options.chartType) params.chart_type = options.chartType;
-    if (options.title) params.title = options.title;
-    if (options.xLabel) params.x_label = options.xLabel;
-    if (options.yLabel) params.y_label = options.yLabel;
-    if (options.width !== undefined) params.width = options.width;
-    if (options.height !== undefined) params.height = options.height;
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/prism.chart', params)
-    );
-  }
-
-  /**
-   * Generate a document toward a natural-language goal.
-   * Supported formats: markdown, html, pdf, json.
-   */
-  async render(options: { goal: string; payload?: any; format?: string; sections?: any[]; [k: string]: any }): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('render');
-    const { goal, format = 'markdown', payload, sections, ...rest } = options;
-    const params: Record<string, any> = { goal, format, ...rest };
-    if (payload !== undefined) params.payload = payload;
-    if (sections !== undefined) params.sections = sections;
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/prism.render', params));
-  }
-
-  /**
-   * Convert content to another format (no LLM). Supports csv, xlsx, pdf, json, html, markdown, etc.
-   */
-  async export(options: { content: any; format: string; style?: Record<string, any>; metadata?: Record<string, any>; [k: string]: any }): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('export');
-    const { content, format, ...rest } = options;
-    const params: Record<string, any> = { content, format, ...rest };
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/prism.export', params));
-  }
-
-  /**
-   * Pause workflow for human approval. Use for destructive or policy-gated actions.
-   */
-  async requestApproval(options: { action: string; details?: Record<string, any>; reason?: string; context?: Record<string, any>; [k: string]: any }): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('requestApproval');
-    const { action, details, reason, context, ...rest } = options;
-    const params: Record<string, any> = { action, ...rest };
-    if (details !== undefined) params.details = details;
-    if (reason !== undefined) params.reason = reason;
-    if (context !== undefined) params.context = context;
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/flow.request-approval', params));
-  }
-
-  /**
-   * Request user clarification for missing fields. Pauses until user provides values.
-   */
-  async requestFeedback(options: { missing_fields: string[]; reason: string; current_data?: Record<string, any>; suggestions?: Record<string, any>; context?: Record<string, any>; [k: string]: any }): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('requestFeedback');
-    const { missing_fields, reason, ...rest } = options;
-    const params: Record<string, any> = { missing_fields, reason, ...rest };
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/flow.request-feedback', params));
-  }
-
-  /**
-   * List recent tool executions for the current server.
-   */
-  async executionHistory(options: { limit?: number; offset?: number; status?: string; refractions_only?: boolean; [k: string]: any } = {}): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('executionHistory');
-    const params: Record<string, any> = { limit: options.limit ?? 50, offset: options.offset ?? 0, refractions_only: options.refractions_only ?? false, ...options };
-    if (options.status !== undefined) params.status = options.status;
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/inspect.execution-history', params));
-  }
-
-  /**
-   * Get details and transcript for a specific execution.
-   */
-  async executionDetails(executionId: string): Promise<any> {
-    this.ensureInitialized();
-    this.warnIfNotDg('executionDetails');
-    return this.sendWithRetry(() => this.transport.callTool('data-grout/inspect.execution-details', { execution_id: executionId }));
-  }
-
-  /**
    * Call any DataGrout first-party tool by its short name.
    *
    * Prepends `data-grout/` to the tool name automatically, so
@@ -820,206 +674,6 @@ export class Client {
     this.ensureInitialized();
     const method = `data-grout/${toolShortName}`;
     return this.sendWithRetry(() => this.transport.callTool(method, params));
-  }
-
-  // ===== Logic Cell Extensions =====
-
-  /**
-   * Store facts in the agent's persistent logic cell.
-   *
-   * Converts natural language to symbolic facts and stores them
-   * durably across sessions. Accepts either a natural language `statement`
-   * (positional or via options) or a pre-structured `facts` array.
-   *
-   * Throws `InvalidConfigError` if neither `statement` nor `facts` is provided.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.remember`
-   *
-   * @param statement - Natural language statement to remember.
-   * @param options.tag   - Tag/namespace for grouping facts (default: `"default"`).
-   * @param options.facts - Optional pre-structured fact list (skips NL conversion).
-   */
-  async remember(statement: string, options?: RememberOptions): Promise<{ handles: string[]; facts: any[]; count: number; message: string }>;
-  /**
-   * Store facts in the agent's persistent logic cell using an options object.
-   *
-   * Throws `InvalidConfigError` if neither `statement` nor `facts` is provided.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.remember`
-   */
-  async remember(options: RememberOptions): Promise<{ handles: string[]; facts: any[]; count: number; message: string }>;
-  async remember(
-    statementOrOptions: string | RememberOptions,
-    optionsArg?: RememberOptions
-  ): Promise<{ handles: string[]; facts: any[]; count: number; message: string }> {
-    this.ensureInitialized();
-
-    let statement: string | undefined;
-    let opts: RememberOptions | undefined;
-
-    if (typeof statementOrOptions === 'string') {
-      statement = statementOrOptions;
-      opts = optionsArg;
-    } else {
-      opts = statementOrOptions;
-      statement = opts.statement;
-    }
-
-    if (!statement && !opts?.facts?.length) {
-      throw new InvalidConfigError('remember() requires either a statement or facts');
-    }
-
-    const params: Record<string, any> = {
-      tag: opts?.tag ?? 'default',
-    };
-
-    if (opts?.facts) {
-      params.facts = opts.facts;
-    } else {
-      params.statement = statement;
-    }
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/logic.remember', params)
-    );
-  }
-
-  /**
-   * Query the agent's logic cell with a natural language question.
-   *
-   * Translates the question to query patterns and retrieves matching facts.
-   * Accepts either a natural language `question` (positional or via options)
-   * or a pre-built `patterns` array.
-   *
-   * Throws `InvalidConfigError` if neither `question` nor `patterns` is provided.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.query`
-   *
-   * @param question       - Natural language question.
-   * @param options.limit  - Maximum results to return (default: 50).
-   * @param options.patterns - Optional pre-built pattern list (skips NL translation).
-   */
-  async queryCell(question: string, options?: QueryCellOptions): Promise<{ results: any[]; total: number; description: string; message: string }>;
-  /**
-   * Query the agent's logic cell using an options object.
-   *
-   * Throws `InvalidConfigError` if neither `question` nor `patterns` is provided.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.query`
-   */
-  async queryCell(options: QueryCellOptions): Promise<{ results: any[]; total: number; description: string; message: string }>;
-  async queryCell(
-    questionOrOptions: string | QueryCellOptions,
-    optionsArg?: QueryCellOptions
-  ): Promise<{ results: any[]; total: number; description: string; message: string }> {
-    this.ensureInitialized();
-
-    let question: string | undefined;
-    let opts: QueryCellOptions | undefined;
-
-    if (typeof questionOrOptions === 'string') {
-      question = questionOrOptions;
-      opts = optionsArg;
-    } else {
-      opts = questionOrOptions;
-      question = opts.question;
-    }
-
-    if (!question && !opts?.patterns?.length) {
-      throw new InvalidConfigError('queryCell() requires either a question or patterns');
-    }
-
-    const params: Record<string, any> = {
-      limit: opts?.limit ?? 50,
-    };
-
-    if (opts?.patterns) {
-      params.patterns = opts.patterns;
-    } else {
-      params.question = question;
-    }
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/logic.query', params)
-    );
-  }
-
-  /**
-   * Retract facts from the agent's logic cell.
-   *
-   * Throws `InvalidConfigError` if neither `handles` nor `pattern` is provided.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.forget`
-   *
-   * @param options.handles - Specific fact handles to retract.
-   * @param options.pattern - Natural language pattern — retract all matching facts.
-   */
-  async forget(
-    options: ForgetOptions
-  ): Promise<{ retracted: number; handles: string[]; message: string }> {
-    this.ensureInitialized();
-
-    if (!options.handles?.length && !options.pattern) {
-      throw new InvalidConfigError('forget() requires either handles or pattern');
-    }
-
-    const params: Record<string, any> = {};
-
-    if (options.handles) params.handles = options.handles;
-    if (options.pattern) params.pattern = options.pattern;
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/logic.forget', params)
-    );
-  }
-
-  /**
-   * Reflect on the agent's logic cell — returns a full snapshot or a
-   * per-entity view of all stored facts.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.reflect`
-   *
-   * @param options.entity      - Optional entity name to scope reflection.
-   * @param options.summaryOnly - When `true`, return only counts (default: `false`).
-   */
-  async reflect(
-    options?: ReflectOptions
-  ): Promise<{ total: number; summary?: any; entity?: string; facts?: any[]; message: string }> {
-    this.ensureInitialized();
-    const params: Record<string, any> = {
-      summary_only: options?.summaryOnly ?? false,
-    };
-
-    if (options?.entity) params.entity = options.entity;
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/logic.reflect', params)
-    );
-  }
-
-  /**
-   * Store a logical rule or policy in the agent's logic cell.
-   *
-   * Rules are permanent constraints evaluated during `queryCell()` calls.
-   *
-   * JSON-RPC method: `tools/call` → `data-grout/logic.constrain`
-   *
-   * @param rule         - Natural language rule (e.g. `"VIP customers have ARR > $500K"`).
-   * @param options.tag  - Tag/namespace for this constraint (default: `"constraint"`).
-   */
-  async constrain(
-    rule: string,
-    options?: ConstrainOptions
-  ): Promise<{ handle: string; name: string; rule: string; message: string }> {
-    this.ensureInitialized();
-    const params: Record<string, any> = {
-      rule,
-      tag: options?.tag ?? 'constraint',
-    };
-
-    return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/logic.constrain', params)
-    );
   }
 
   /**

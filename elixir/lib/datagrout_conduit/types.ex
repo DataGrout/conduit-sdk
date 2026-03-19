@@ -3,6 +3,8 @@ defmodule DatagroutConduit.Types do
   Type definitions for MCP protocol objects and DataGrout extensions.
   """
 
+  require Logger
+
   defmodule Tool do
     @moduledoc "An MCP tool descriptor."
     @type t :: %__MODULE__{
@@ -347,6 +349,82 @@ defmodule DatagroutConduit.Types do
   end
 
   def parse_tool_meta(_), do: %ToolMeta{}
+
+  @doc """
+  Extract DataGrout metadata from a tool-call result map.
+
+  Checks sources in priority order:
+  1. `result["_meta"]["datagrout"]` — rich format
+  2. `result["_datagrout"]` / `result["_meta"]` — legacy
+  3. `result["_dg"]` — compact inline (synthesized)
+
+  Returns `nil` when no metadata is found.
+  """
+  @spec extract_meta(map()) :: ToolMeta.t() | nil
+  def extract_meta(result) when is_map(result) do
+    rich = get_in(result, ["_meta", "datagrout"])
+    if is_map(rich) and is_map(rich["receipt"]) do
+      parse_tool_meta(rich)
+    else
+      legacy =
+        cond do
+          is_map(result["_datagrout"]) and is_map(result["_datagrout"]["receipt"]) ->
+            result["_datagrout"]
+          is_map(result["_meta"]) and is_map(result["_meta"]["receipt"]) ->
+            result["_meta"]
+          true ->
+            nil
+        end
+
+      if legacy do
+        parse_tool_meta(legacy)
+      else
+        dg = result["_dg"]
+
+        if is_map(dg) do
+          synthesize_from_dg(dg)
+        else
+          Logger.warning(
+            "No DataGrout metadata found in tool result. " <>
+              "Cost tracking data is unavailable. Enable 'Include DG Inline' " <>
+              "or 'Include DataGrout Metadata' in your server settings."
+          )
+
+          nil
+        end
+      end
+    end
+  end
+
+  def extract_meta(_), do: nil
+
+  defp synthesize_from_dg(dg) when is_map(dg) do
+    credits = dg["credits"] || %{}
+    charged = credits["charged"] || 0.0
+    estimated = credits["estimated"] || 0.0
+    remaining = credits["remaining"]
+
+    breakdown = %{}
+    breakdown = if credits["premium"], do: Map.put(breakdown, "premium", credits["premium"]), else: breakdown
+    breakdown = if credits["llm"], do: Map.put(breakdown, "llm", credits["llm"]), else: breakdown
+
+    %ToolMeta{
+      receipt: %Receipt{
+        receipt_id: nil,
+        timestamp: nil,
+        estimated_credits: estimated / 1,
+        actual_credits: charged / 1,
+        net_credits: charged / 1,
+        savings: 0.0,
+        savings_bonus: 0.0,
+        balance_after: remaining,
+        breakdown: breakdown,
+        byok: %Byok{enabled: false, discount_applied: false, discount_rate: nil}
+      },
+      credit_estimate: nil,
+      raw: dg
+    }
+  end
 
   defp to_float(v) when is_float(v), do: v
   defp to_float(v) when is_integer(v), do: v * 1.0

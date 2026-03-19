@@ -8,7 +8,8 @@ use serde_json::json;
 
 #[test]
 fn test_parse_sse_single_event() {
-    let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"ok\":true}}\n\n";
+    let body =
+        "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"ok\":true}}\n\n";
     let resp = parse_sse_body(body).unwrap();
     assert_eq!(resp.id, "1");
     assert_eq!(resp.result.unwrap(), json!({"ok": true}));
@@ -123,19 +124,13 @@ async fn test_session_id_captured_and_sent() {
         McpTransport::new(format!("{}/mcp", server.url()), AuthConfig::None).unwrap();
     transport.connect().await.unwrap();
 
-    let req1 = datagrout_conduit::protocol::JsonRpcRequest::new(
-        "1".into(),
-        "initialize",
-        Some(json!({})),
-    );
+    let req1 =
+        datagrout_conduit::protocol::JsonRpcRequest::new("1".into(), "initialize", Some(json!({})));
     let _ = transport.send_request(req1).await.unwrap();
     first.assert_async().await;
 
-    let req2 = datagrout_conduit::protocol::JsonRpcRequest::new(
-        "2".into(),
-        "tools/list",
-        Some(json!({})),
-    );
+    let req2 =
+        datagrout_conduit::protocol::JsonRpcRequest::new("2".into(), "tools/list", Some(json!({})));
     let _ = transport.send_request(req2).await.unwrap();
     second.assert_async().await;
 }
@@ -146,7 +141,8 @@ async fn test_session_id_captured_and_sent() {
 async fn test_sse_content_type_parsed() {
     let mut server = mockito::Server::new_async().await;
 
-    let sse_body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"sse\":true}}\n\n";
+    let sse_body =
+        "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"sse\":true}}\n\n";
 
     let mock = server
         .mock("POST", "/mcp")
@@ -160,11 +156,7 @@ async fn test_sse_content_type_parsed() {
         McpTransport::new(format!("{}/mcp", server.url()), AuthConfig::None).unwrap();
     transport.connect().await.unwrap();
 
-    let request = datagrout_conduit::protocol::JsonRpcRequest::new(
-        "1".into(),
-        "test",
-        None,
-    );
+    let request = datagrout_conduit::protocol::JsonRpcRequest::new("1".into(), "test", None);
     let resp = transport.send_request(request).await.unwrap();
 
     assert_eq!(resp.result.unwrap(), json!({"sse": true}));
@@ -192,11 +184,7 @@ async fn test_accept_header_sent() {
         McpTransport::new(format!("{}/mcp", server.url()), AuthConfig::None).unwrap();
     transport.connect().await.unwrap();
 
-    let request = datagrout_conduit::protocol::JsonRpcRequest::new(
-        "1".into(),
-        "test",
-        None,
-    );
+    let request = datagrout_conduit::protocol::JsonRpcRequest::new("1".into(), "test", None);
     let _ = transport.send_request(request).await.unwrap();
     mock.assert_async().await;
 }

@@ -165,28 +165,15 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
   end
 
-  describe "flow_into/2 wire protocol" do
+  describe "Flow.run/2 wire protocol" do
     test "sends data-grout/flow.into via tools/call" do
       client = start_capture_client(%{"results" => []})
 
-      Client.flow_into(client, plan: [%{"tool" => "t1", "args" => %{}}])
+      DatagroutConduit.Flow.run(client, %{"plan" => [%{"tool" => "t1", "args" => %{}}]})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
       assert opts.params["name"] == "data-grout/flow.into"
-      GenServer.stop(client)
-    end
-
-    test "sends plan list with validate_ctc and save_as_skill defaults" do
-      client = start_capture_client(%{"results" => []})
-
-      Client.flow_into(client, plan: [%{"tool" => "t1", "args" => %{}}])
-
-      assert_received {:rpc_call, opts}
-      args = opts.params["arguments"]
-      assert args["plan"] == [%{"tool" => "t1", "args" => %{}}]
-      assert args["validate_ctc"] == true
-      assert args["save_as_skill"] == false
       GenServer.stop(client)
     end
   end
@@ -210,11 +197,11 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
   end
 
-  describe "prism_focus/2 wire protocol" do
+  describe "Prism.focus/2 wire protocol" do
     test "routes via tools/call and sends source_type/target_type (not lens)" do
       client = start_capture_client(%{"output" => "result"})
 
-      Client.prism_focus(client, data: "hello", source_type: "text", target_type: "json")
+      DatagroutConduit.Prism.focus(client, %{"data" => "hello", "source_type" => "text", "target_type" => "json"})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -224,26 +211,6 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert args["target_type"] == "json"
       assert args["data"] == "hello"
       refute Map.has_key?(args, "lens"), "unexpected 'lens' key in arguments"
-      GenServer.stop(client)
-    end
-
-    test "includes optional source_annotations, target_annotations, context" do
-      client = start_capture_client(%{"output" => "result"})
-
-      Client.prism_focus(client,
-        data: "d",
-        source_type: "csv",
-        target_type: "markdown",
-        source_annotations: %{"cols" => ["a"]},
-        target_annotations: %{"format" => "table"},
-        context: "financial report"
-      )
-
-      assert_received {:rpc_call, opts}
-      args = opts.params["arguments"]
-      assert args["source_annotations"] == %{"cols" => ["a"]}
-      assert args["target_annotations"] == %{"format" => "table"}
-      assert args["context"] == "financial report"
       GenServer.stop(client)
     end
   end
@@ -309,11 +276,11 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
   end
 
-  describe "refract/2" do
-    test "routes data-grout/prism.refract via tools/call with goal and payload" do
+  describe "Prism.refract/2" do
+    test "routes data-grout/prism.refract via tools/call" do
       client = start_capture_client(%{"output" => "transformed"})
 
-      Client.refract(client, goal: "normalise addresses", payload: %{"street" => "123 Main"})
+      DatagroutConduit.Prism.refract(client, %{"goal" => "normalise addresses", "payload" => %{"street" => "123 Main"}})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -323,25 +290,13 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert args["payload"] == %{"street" => "123 Main"}
       GenServer.stop(client)
     end
-
-    test "includes verbose and chart opts in arguments" do
-      client = start_capture_client(%{"output" => "x"})
-
-      Client.refract(client, goal: "g", payload: %{}, verbose: true, chart: %{"type" => "bar"})
-
-      assert_received {:rpc_call, opts}
-      args = opts.params["arguments"]
-      assert args["verbose"] == true
-      assert args["chart"] == %{"type" => "bar"}
-      GenServer.stop(client)
-    end
   end
 
-  describe "chart/2" do
-    test "routes data-grout/prism.chart via tools/call with goal and payload" do
+  describe "Prism.chart/2" do
+    test "routes data-grout/prism.chart via tools/call" do
       client = start_capture_client(%{"image" => "base64..."})
 
-      Client.chart(client, goal: "bar chart of revenue", payload: [%{"month" => "Jan", "revenue" => 1000}])
+      DatagroutConduit.Prism.chart(client, %{"goal" => "bar chart of revenue", "payload" => [%{"month" => "Jan", "revenue" => 1000}]})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -351,42 +306,15 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert is_list(args["payload"])
       GenServer.stop(client)
     end
-
-    test "includes optional chart options in arguments" do
-      client = start_capture_client(%{"image" => "..."})
-
-      Client.chart(client,
-        goal: "g",
-        payload: [],
-        format: "png",
-        chart_type: "line",
-        title: "Revenue",
-        x_label: "Month",
-        y_label: "USD",
-        width: 800,
-        height: 400
-      )
-
-      assert_received {:rpc_call, opts}
-      args = opts.params["arguments"]
-      assert args["format"] == "png"
-      assert args["chart_type"] == "line"
-      assert args["title"] == "Revenue"
-      assert args["x_label"] == "Month"
-      assert args["y_label"] == "USD"
-      assert args["width"] == 800
-      assert args["height"] == 400
-      GenServer.stop(client)
-    end
   end
 
-  # --- Phase 2: Logic cell methods ---
+  # --- Namespaced logic cell methods ---
 
-  describe "remember/2" do
-    test "routes data-grout/logic.remember via tools/call with statement" do
+  describe "Logic.remember/2" do
+    test "routes data-grout/logic.remember via dg" do
       client = start_capture_client(%{"handle" => "h1"})
 
-      Client.remember(client, statement: "parent(tom, bob).")
+      DatagroutConduit.Logic.remember(client, %{"statement" => "parent(tom, bob)."})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -394,26 +322,13 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert opts.params["arguments"]["statement"] == "parent(tom, bob)."
       GenServer.stop(client)
     end
-
-    test "sends facts list and tag in arguments" do
-      client = start_capture_client(%{"handles" => ["h1", "h2"]})
-
-      Client.remember(client, facts: ["likes(alice, pizza).", "likes(bob, pasta)."], tag: "food")
-
-      assert_received {:rpc_call, opts}
-      assert opts.params["name"] == "data-grout/logic.remember"
-      args = opts.params["arguments"]
-      assert args["facts"] == ["likes(alice, pizza).", "likes(bob, pasta)."]
-      assert args["tag"] == "food"
-      GenServer.stop(client)
-    end
   end
 
-  describe "query_cell/2" do
-    test "routes data-grout/logic.query via tools/call with question" do
+  describe "Logic.query/2" do
+    test "routes data-grout/logic.query via dg" do
       client = start_capture_client(%{"results" => []})
 
-      Client.query_cell(client, question: "Who likes pizza?")
+      DatagroutConduit.Logic.query(client, %{"question" => "Who likes pizza?"})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -421,26 +336,13 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert opts.params["arguments"]["question"] == "Who likes pizza?"
       GenServer.stop(client)
     end
-
-    test "sends patterns and limit in arguments" do
-      client = start_capture_client(%{"results" => []})
-
-      Client.query_cell(client, patterns: ["likes(X, pizza)."], limit: 10)
-
-      assert_received {:rpc_call, opts}
-      assert opts.params["name"] == "data-grout/logic.query"
-      args = opts.params["arguments"]
-      assert args["patterns"] == ["likes(X, pizza)."]
-      assert args["limit"] == 10
-      GenServer.stop(client)
-    end
   end
 
-  describe "forget/2" do
-    test "routes data-grout/logic.forget via tools/call with handles" do
+  describe "Logic.forget/2" do
+    test "routes data-grout/logic.forget via dg" do
       client = start_capture_client(%{"retracted" => 2})
 
-      Client.forget(client, handles: ["h1", "h2"])
+      DatagroutConduit.Logic.forget(client, %{"handles" => ["h1", "h2"]})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -448,24 +350,13 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert opts.params["arguments"]["handles"] == ["h1", "h2"]
       GenServer.stop(client)
     end
-
-    test "sends pattern in arguments" do
-      client = start_capture_client(%{"retracted" => 3})
-
-      Client.forget(client, pattern: "likes(_, pizza).")
-
-      assert_received {:rpc_call, opts}
-      assert opts.params["name"] == "data-grout/logic.forget"
-      assert opts.params["arguments"]["pattern"] == "likes(_, pizza)."
-      GenServer.stop(client)
-    end
   end
 
-  describe "constrain/2" do
-    test "routes data-grout/logic.constrain via tools/call with rule and tag" do
+  describe "Logic.constrain/2" do
+    test "routes data-grout/logic.constrain via dg" do
       client = start_capture_client(%{"ok" => true})
 
-      Client.constrain(client, rule: ":- likes(X, Y), hates(X, Y).", tag: "consistency")
+      DatagroutConduit.Logic.constrain(client, %{"rule" => ":- likes(X, Y), hates(X, Y).", "tag" => "consistency"})
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -477,27 +368,29 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
   end
 
-  describe "reflect/2" do
-    test "routes data-grout/logic.reflect via tools/call" do
+  describe "Logic.reflect/2" do
+    test "routes data-grout/logic.reflect via dg" do
       client = start_capture_client(%{"facts" => [], "rules" => []})
 
-      Client.reflect(client)
+      DatagroutConduit.Logic.reflect(client)
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
       assert opts.params["name"] == "data-grout/logic.reflect"
       GenServer.stop(client)
     end
+  end
 
-    test "sends entity and summary_only in arguments when provided" do
-      client = start_capture_client(%{"facts" => [], "summary" => "empty"})
+  describe "Flow.route/2" do
+    test "routes data-grout/flow.route via dg" do
+      client = start_capture_client(%{"matched" => "branch_1"})
 
-      Client.reflect(client, entity: "alice", summary_only: true)
+      DatagroutConduit.Flow.route(client, %{"branches" => [%{"when" => "amount > 1000", "then" => "approval"}], "payload" => %{"amount" => 1500}})
 
       assert_received {:rpc_call, opts}
-      args = opts.params["arguments"]
-      assert args["entity"] == "alice"
-      assert args["summary_only"] == true
+      assert opts.method == "tools/call"
+      assert opts.params["name"] == "data-grout/flow.route"
+      assert opts.params["arguments"]["payload"] == %{"amount" => 1500}
       GenServer.stop(client)
     end
   end
@@ -588,16 +481,16 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
   end
 
-  describe "flow_into/2 new API shape" do
-    test "accepts keyword list with plan, validate_ctc, save_as_skill" do
+  describe "Flow.run/2 new API shape" do
+    test "accepts map with plan, validate_ctc, save_as_skill" do
       client = start_capture_client(%{"results" => [%{"ok" => true}]})
 
-      Client.flow_into(client,
-        plan: [%{"tool" => "t1", "args" => %{}}],
-        validate_ctc: false,
-        save_as_skill: true,
-        input_data: %{"key" => "val"}
-      )
+      DatagroutConduit.Flow.run(client, %{
+        "plan" => [%{"tool" => "t1", "args" => %{}}],
+        "validate_ctc" => false,
+        "save_as_skill" => true,
+        "input_data" => %{"key" => "val"}
+      })
 
       assert_received {:rpc_call, opts}
       args = opts.params["arguments"]

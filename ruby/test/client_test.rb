@@ -384,7 +384,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.prism_focus(data: "hello", source_type: "text", target_type: "embedding")
+    client.prism.focus(data: "hello", source_type: "text", target_type: "embedding")
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -407,7 +407,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.prism_focus(
+    client.prism.focus(
       data: "blob",
       source_type: "json",
       target_type: "csv",
@@ -462,7 +462,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.refract(goal: "summarise", payload: { text: "hello world" }, verbose: true)
+    client.prism.refract(goal: "summarise", payload: { text: "hello world" }, verbose: true)
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -484,7 +484,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.chart(goal: "bar chart of sales", payload: [1, 2, 3], chart_type: "bar", title: "Sales")
+    client.prism.chart(goal: "bar chart of sales", payload: [1, 2, 3], chart_type: "bar", title: "Sales")
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -511,7 +511,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.remember(statement: "The sky is blue", tag: "facts")
+    client.logic.remember(statement: "The sky is blue", tag: "facts")
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -520,8 +520,10 @@ class ClientTest < Minitest::Test
   end
 
   def test_remember_raises_without_statement_or_facts
+    stub_initialize!
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
-    assert_raises(ArgumentError) { client.remember }
+    client.connect
+    assert_raises(ArgumentError) { client.logic.remember }
   end
 
   def test_query_cell_sends_correct_method
@@ -537,7 +539,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.query_cell(question: "What colour is the sky?", limit: 5)
+    client.logic.query(question: "What colour is the sky?", limit: 5)
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -546,8 +548,10 @@ class ClientTest < Minitest::Test
   end
 
   def test_query_cell_raises_without_question_or_patterns
+    stub_initialize!
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
-    assert_raises(ArgumentError) { client.query_cell }
+    client.connect
+    assert_raises(ArgumentError) { client.logic.query }
   end
 
   def test_forget_sends_correct_method
@@ -563,15 +567,17 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.forget(handles: ["h1", "h2"])
+    client.logic.forget(handles: ["h1", "h2"])
 
     refute_nil captured
     assert_equal ["h1", "h2"], captured["params"]["arguments"]["handles"]
   end
 
   def test_forget_raises_without_handles_or_pattern
+    stub_initialize!
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
-    assert_raises(ArgumentError) { client.forget }
+    client.connect
+    assert_raises(ArgumentError) { client.logic.forget }
   end
 
   def test_constrain_sends_correct_method
@@ -587,7 +593,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.constrain(rule: "never store PII", tag: "privacy")
+    client.logic.constrain(rule: "never store PII", tag: "privacy")
 
     refute_nil captured
     args = captured["params"]["arguments"]
@@ -608,7 +614,7 @@ class ClientTest < Minitest::Test
 
     client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
     client.connect
-    client.reflect(entity: "user:42", summary_only: true)
+    client.logic.reflect(entity: "user:42", summary_only: true)
 
     refute_nil captured
     args = captured["params"]["arguments"]

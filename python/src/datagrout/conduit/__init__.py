@@ -2,6 +2,14 @@
 
 from .client import Client, GuidedSession, is_dg_url
 from .identity import ConduitIdentity
+from .namespaces import (
+    PrismNamespace,
+    LogicNamespace,
+    WardenNamespace,
+    DeliverablesNamespace,
+    EphemeralsNamespace,
+    FlowNamespace,
+)
 from .oauth import OAuthTokenProvider, derive_token_endpoint
 from .registration import (
     DG_CA_URL,
@@ -37,6 +45,13 @@ __all__ = [
     "Client",
     "GuidedSession",
     "is_dg_url",
+    # Namespaces
+    "PrismNamespace",
+    "LogicNamespace",
+    "WardenNamespace",
+    "DeliverablesNamespace",
+    "EphemeralsNamespace",
+    "FlowNamespace",
     # Identity / mTLS
     "ConduitIdentity",
     # Registration + CA

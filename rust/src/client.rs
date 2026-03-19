@@ -38,14 +38,15 @@ pub fn is_dg_url(url: &str) -> bool {
 /// # DataGrout extensions
 /// [`discover`](Self::discover), [`perform`](Self::perform),
 /// [`guide`](Self::guide), [`plan`](Self::plan),
-/// [`refract`](Self::refract), [`chart`](Self::chart),
-/// [`flow_into`](Self::flow_into), [`prism_focus`](Self::prism_focus),
 /// [`dg`](Self::dg) (generic hook)
 ///
-/// # Logic Cell
-/// [`remember`](Self::remember), [`remember_facts`](Self::remember_facts),
-/// [`query_cell`](Self::query_cell), [`forget`](Self::forget),
-/// [`reflect`](Self::reflect), [`constrain`](Self::constrain)
+/// # Namespaced tool families
+/// [`prism`](Self::prism) — data transformation, charting, rendering, export
+/// [`logic`](Self::logic) — agent memory (facts, constraints, hypotheticals)
+/// [`warden`](Self::warden) — safety checks, intent verification, consensus
+/// [`deliverables`](Self::deliverables) — work product tracking
+/// [`ephemerals`](Self::ephemerals) — cache management
+/// [`flow`](Self::flow) — orchestration, routing, approvals, execution history
 #[derive(Clone)]
 pub struct Client {
     transport: Arc<RwLock<Box<dyn TransportTrait>>>,
@@ -116,10 +117,7 @@ impl Client {
             },
         };
 
-        let request = self.build_request(
-            "initialize",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("initialize", Some(serde_json::to_value(params)?))?;
 
         let transport = self.transport.read().await;
         let response = transport.send_request(request).await?;
@@ -199,10 +197,7 @@ impl Client {
                 cursor: cursor.clone(),
             };
 
-            let request = self.build_request(
-                "tools/list",
-                Some(serde_json::to_value(params)?),
-            )?;
+            let request = self.build_request("tools/list", Some(serde_json::to_value(params)?))?;
 
             let response = self.send_with_retry(request).await?;
 
@@ -231,7 +226,10 @@ impl Client {
         // Third-party tools use the "integration@version/tool@version" naming scheme; DG's
         // own tools do not contain "@".
         let all_tools = if self.use_intelligent_interface {
-            all_tools.into_iter().filter(|t| !t.name.contains('@')).collect()
+            all_tools
+                .into_iter()
+                .filter(|t| !t.name.contains('@'))
+                .collect()
         } else {
             all_tools
         };
@@ -253,10 +251,7 @@ impl Client {
             arguments: Some(arguments),
         };
 
-        let request = self.build_request(
-            "tools/call",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("tools/call", Some(serde_json::to_value(params)?))?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -279,10 +274,7 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ListResourcesParams::default();
-        let request = self.build_request(
-            "resources/list",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("resources/list", Some(serde_json::to_value(params)?))?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -299,10 +291,7 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ReadResourceParams { uri: uri.into() };
-        let request = self.build_request(
-            "resources/read",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("resources/read", Some(serde_json::to_value(params)?))?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -319,10 +308,7 @@ impl Client {
         self.ensure_initialized().await?;
 
         let params = ListPromptsParams::default();
-        let request = self.build_request(
-            "prompts/list",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("prompts/list", Some(serde_json::to_value(params)?))?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -349,10 +335,7 @@ impl Client {
             arguments,
         };
 
-        let request = self.build_request(
-            "prompts/get",
-            Some(serde_json::to_value(params)?),
-        )?;
+        let request = self.build_request("prompts/get", Some(serde_json::to_value(params)?))?;
 
         let response = self.send_with_retry(request).await?;
 
@@ -401,6 +384,34 @@ impl Client {
         PerformBuilder::new(self, tool.into())
     }
 
+    /// Execute multiple tool calls in a single gateway request
+    /// (`data-grout/discovery.perform`).
+    ///
+    /// Each element should be a JSON object with `"tool"` and `"args"` keys.
+    /// Returns a list of results in the same order as the input calls.
+    ///
+    /// ```no_run
+    /// # use serde_json::json;
+    /// # async fn example(client: &datagrout_conduit::Client) -> datagrout_conduit::Result<()> {
+    /// let results = client.perform_batch(vec![
+    ///     json!({"tool": "data-grout/data.count", "args": {"data": [1, 2, 3]}}),
+    ///     json!({"tool": "data-grout/data.keys",  "args": {"data": {"a": 1}}}),
+    /// ]).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn perform_batch(&self, calls: Vec<Value>) -> Result<Vec<Value>> {
+        self.warn_if_not_dg("perform_batch");
+        self.ensure_initialized().await?;
+        let result = self
+            .call_dg_tool("data-grout/discovery.perform", Value::Array(calls))
+            .await?;
+        match result {
+            Value::Array(arr) => Ok(arr),
+            other => Ok(vec![other]),
+        }
+    }
+
     /// Start or advance a guided multi-step workflow
     /// (`data-grout/discovery.guide`).
     ///
@@ -413,110 +424,14 @@ impl Client {
         GuideBuilder::new(self)
     }
 
-    /// Execute a pre-built multi-step workflow plan (`data-grout/flow.into`).
-    ///
-    /// `plan` is the ordered list of tool-call steps (typically produced by
-    /// [`plan`](Self::plan)`.execute()`).  Returns a [`FlowIntoBuilder`].
-    pub fn flow_into(&self, plan: Vec<Value>) -> FlowIntoBuilder<'_> {
-        self.warn_if_not_dg("flow_into");
-        FlowIntoBuilder::new(self, plan)
-    }
-
-    /// Semantic type transformation (`data-grout/prism.focus`).
-    ///
-    /// Returns a [`PrismFocusBuilder`].  Set `.data()`, `.source_type()`, and
-    /// `.target_type()` then call `.execute()`.
-    pub fn prism_focus(&self) -> PrismFocusBuilder<'_> {
-        self.warn_if_not_dg("prism_focus");
-        PrismFocusBuilder::new(self)
-    }
-
     /// AI-driven workflow planner (`data-grout/discovery.plan`).
     ///
     /// Returns a [`PlanBuilder`].  At least one of `.goal()` or `.query()`
     /// must be set before calling `.execute()`, or the call returns
     /// [`Error::InvalidConfig`](crate::error::Error::InvalidConfig).
-    ///
-    /// The builder pattern is preferred over passing `goal` directly because
-    /// `plan` supports many optional parameters (`k`, `server`, `policy`,
-    /// `have`, `model_overrides`, etc.).
     pub fn plan(&self) -> PlanBuilder<'_> {
         self.warn_if_not_dg("plan");
         PlanBuilder::new(self)
-    }
-
-    /// AI-driven data transformation / normalisation (`data-grout/prism.refract`).
-    ///
-    /// Returns a [`RefractBuilder`].  `goal` describes the desired
-    /// transformation in natural language; `payload` is the raw input data.
-    pub fn refract(&self, goal: impl Into<String>, payload: Value) -> RefractBuilder<'_> {
-        self.warn_if_not_dg("refract");
-        RefractBuilder::new(self, goal.into(), payload)
-    }
-
-    /// AI-driven charting (`data-grout/prism.chart`).
-    ///
-    /// Returns a [`ChartBuilder`].  `goal` is a natural language description
-    /// of what to visualise; `payload` is the input data.
-    pub fn chart(&self, goal: impl Into<String>, payload: Value) -> ChartBuilder<'_> {
-        self.warn_if_not_dg("chart");
-        ChartBuilder::new(self, goal.into(), payload)
-    }
-
-    /// Generate a document toward a natural-language goal (`data-grout/prism.render`).
-    ///
-    /// Params typically include `goal`, `payload`, `format` (e.g. `"markdown"`, `"html"`, `"pdf"`),
-    /// and optionally `sections`.
-    pub async fn render(&self, params: Value) -> Result<Value> {
-        self.warn_if_not_dg("render");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/prism.render", params).await
-    }
-
-    /// Convert content to another format (`data-grout/prism.export`).
-    ///
-    /// Params: `content`, `format` (e.g. `"csv"`, `"xlsx"`, `"pdf"`), and optionally `style`, `metadata`.
-    pub async fn export(&self, params: Value) -> Result<Value> {
-        self.warn_if_not_dg("export");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/prism.export", params).await
-    }
-
-    /// Pause workflow for human approval (`data-grout/flow.request-approval`).
-    ///
-    /// Params: `action`, and optionally `details`, `reason`, `context`.
-    pub async fn request_approval(&self, params: Value) -> Result<Value> {
-        self.warn_if_not_dg("request_approval");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/flow.request-approval", params).await
-    }
-
-    /// Request user clarification for missing fields (`data-grout/flow.request-feedback`).
-    ///
-    /// Params: `missing_fields` (array), `reason`, and optionally `current_data`, `suggestions`, `context`.
-    pub async fn request_feedback(&self, params: Value) -> Result<Value> {
-        self.warn_if_not_dg("request_feedback");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/flow.request-feedback", params).await
-    }
-
-    /// List recent tool executions (`data-grout/inspect.execution-history`).
-    ///
-    /// Params: optional `limit`, `offset`, `status`, `refractions_only`.
-    pub async fn execution_history(&self, params: Value) -> Result<Value> {
-        self.warn_if_not_dg("execution_history");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/inspect.execution-history", params).await
-    }
-
-    /// Get details for a specific execution (`data-grout/inspect.execution-details`).
-    ///
-    /// Params: `execution_id`.
-    pub async fn execution_details(&self, execution_id: impl Into<String>) -> Result<Value> {
-        self.warn_if_not_dg("execution_details");
-        self.ensure_initialized().await?;
-        let params = json!({ "execution_id": execution_id.into() });
-        self.call_dg_tool("data-grout/inspect.execution-details", params).await
     }
 
     /// Pre-execution credit estimation for a DataGrout tool.
@@ -536,16 +451,46 @@ impl Client {
     }
 
     // ========================================================================
+    // Namespaced tool families
+    // ========================================================================
+
+    /// Data transformation, charting, rendering, and type bridging.
+    pub fn prism(&self) -> crate::namespaces::Prism<'_> {
+        crate::namespaces::Prism(self)
+    }
+
+    /// Persistent agent memory backed by a Prolog logic cell.
+    pub fn logic(&self) -> crate::namespaces::Logic<'_> {
+        crate::namespaces::Logic(self)
+    }
+
+    /// Safety gates, intent verification, and multi-model consensus.
+    pub fn warden(&self) -> crate::namespaces::Warden<'_> {
+        crate::namespaces::Warden(self)
+    }
+
+    /// Work product registration, listing, and retrieval.
+    pub fn deliverables(&self) -> crate::namespaces::Deliverables<'_> {
+        crate::namespaces::Deliverables(self)
+    }
+
+    /// Cache listing and inspection for ephemeral tool results.
+    pub fn ephemerals(&self) -> crate::namespaces::Ephemerals<'_> {
+        crate::namespaces::Ephemerals(self)
+    }
+
+    /// Multi-step orchestration, conditional routing, approvals, and history.
+    pub fn flow(&self) -> crate::namespaces::Flow<'_> {
+        crate::namespaces::Flow(self)
+    }
+
+    // ========================================================================
     // Internal: DataGrout tool dispatch
     // ========================================================================
 
     /// Route a DataGrout first-party tool call through the standard MCP
     /// `tools/call` path.
-    ///
-    /// Both the MCP endpoint (`/mcp`) and the JSONRPC endpoint (`/rpc`) only
-    /// dispatch on `tools/call` — they do not handle arbitrary JSON-RPC method
-    /// names. The server resolves both versioned and unversioned tool names.
-    async fn call_dg_tool(&self, name: &str, args: Value) -> Result<Value> {
+    pub(crate) async fn call_dg_tool(&self, name: &str, args: Value) -> Result<Value> {
         let params = json!({
             "name":      name,
             "arguments": args,
@@ -572,154 +517,6 @@ impl Client {
 
         // If there's no content envelope (e.g. raw JSON result), return as-is.
         Ok(raw)
-    }
-
-    // ========================================================================
-    // Logic Cell Methods
-    // ========================================================================
-
-    /// Assert a single fact into the logic cell (`data-grout/logic.remember`).
-    ///
-    /// `statement` is a natural-language sentence or a fact string; the server
-    /// uses Prolog for storage. Returns the server's acknowledgement JSON
-    /// including an opaque fact handle that can later be passed to [`forget`](Self::forget).
-    ///
-    /// For asserting multiple facts at once see [`remember_facts`](Self::remember_facts).
-    pub async fn remember(&self, statement: impl Into<String>) -> Result<Value> {
-        self.warn_if_not_dg("remember");
-        self.ensure_initialized().await?;
-        let params = json!({ "statement": statement.into() });
-        self.call_dg_tool("data-grout/logic.remember", params).await
-    }
-
-    /// Assert multiple facts into the logic cell in a single call
-    /// (`data-grout/logic.remember`).
-    ///
-    /// `facts` should be a JSON array of fact strings or a structured object
-    /// accepted by the server. For a single statement string see
-    /// [`remember`](Self::remember).
-    pub async fn remember_facts(&self, facts: Value) -> Result<Value> {
-        self.warn_if_not_dg("remember_facts");
-        self.ensure_initialized().await?;
-        let params = json!({ "facts": facts });
-        self.call_dg_tool("data-grout/logic.remember", params).await
-    }
-
-    /// Query the logic cell with a natural language question
-    /// (`data-grout/logic.query`).
-    ///
-    /// The server translates `question` into query patterns and returns
-    /// matching facts. For a capped result set use
-    /// [`query_cell_with_limit`](Self::query_cell_with_limit).
-    pub async fn query_cell(&self, question: impl Into<String>) -> Result<Value> {
-        self.warn_if_not_dg("query_cell");
-        self.ensure_initialized().await?;
-        let params = json!({ "question": question.into() });
-        self.call_dg_tool("data-grout/logic.query", params).await
-    }
-
-    /// Query the logic cell with an upper bound on returned results
-    /// (`data-grout/logic.query`).
-    pub async fn query_cell_with_limit(
-        &self,
-        question: impl Into<String>,
-        limit: u32,
-    ) -> Result<Value> {
-        self.warn_if_not_dg("query_cell_with_limit");
-        self.ensure_initialized().await?;
-        let params = json!({ "question": question.into(), "limit": limit });
-        self.call_dg_tool("data-grout/logic.query", params).await
-    }
-
-    /// Query the logic cell using an explicit pattern list
-    /// (`data-grout/logic.query`).
-    ///
-    /// `patterns` is a JSON array of query patterns passed directly without
-    /// natural-language translation.
-    pub async fn query_cell_patterns(&self, patterns: Value) -> Result<Value> {
-        self.warn_if_not_dg("query_cell_patterns");
-        self.ensure_initialized().await?;
-        let params = json!({ "patterns": patterns });
-        self.call_dg_tool("data-grout/logic.query", params).await
-    }
-
-    /// Remove specific facts from the logic cell by their opaque handles
-    /// (`data-grout/logic.forget`).
-    ///
-    /// Handles are returned by [`remember`](Self::remember) and
-    /// [`remember_facts`](Self::remember_facts).  To delete by pattern instead,
-    /// use [`forget_pattern`](Self::forget_pattern) — these are deliberately
-    /// separate methods so there is never ambiguity about which mode is active.
-    pub async fn forget(&self, handles: Vec<String>) -> Result<Value> {
-        self.warn_if_not_dg("forget");
-        self.ensure_initialized().await?;
-        let params = json!({ "handles": handles });
-        self.call_dg_tool("data-grout/logic.forget", params).await
-    }
-
-    /// Remove all facts matching a pattern (`data-grout/logic.forget`).
-    ///
-    /// When both handles and a pattern are available, prefer
-    /// [`forget`](Self::forget) (handle-based removal) — it is more precise
-    /// and avoids accidental over-deletion.
-    pub async fn forget_pattern(&self, pattern: impl Into<String>) -> Result<Value> {
-        self.warn_if_not_dg("forget_pattern");
-        self.ensure_initialized().await?;
-        let params = json!({ "pattern": pattern.into() });
-        self.call_dg_tool("data-grout/logic.forget", params).await
-    }
-
-    /// Add a constraint rule to the logic cell (`data-grout/logic.constrain`).
-    ///
-    /// `rule` is constraint rule text; the server uses Prolog for evaluation.
-    pub async fn constrain(&self, rule: impl Into<String>) -> Result<Value> {
-        self.warn_if_not_dg("constrain");
-        self.ensure_initialized().await?;
-        let params = json!({ "rule": rule.into() });
-        self.call_dg_tool("data-grout/logic.constrain", params).await
-    }
-
-    /// Add a tagged constraint rule to the logic cell
-    /// (`data-grout/logic.constrain`).
-    ///
-    /// `tag` is an opaque string used to identify and later remove this rule.
-    pub async fn constrain_tagged(
-        &self,
-        rule: impl Into<String>,
-        tag: impl Into<String>,
-    ) -> Result<Value> {
-        self.warn_if_not_dg("constrain_tagged");
-        self.ensure_initialized().await?;
-        let params = json!({ "rule": rule.into(), "tag": tag.into() });
-        self.call_dg_tool("data-grout/logic.constrain", params).await
-    }
-
-    /// Reflect on everything the logic cell currently knows
-    /// (`data-grout/logic.reflect`).
-    ///
-    /// Returns a structured summary of all asserted facts and active
-    /// constraints.  For entity-scoped reflection use
-    /// [`reflect_entity`](Self::reflect_entity).
-    pub async fn reflect(&self) -> Result<Value> {
-        self.warn_if_not_dg("reflect");
-        self.ensure_initialized().await?;
-        self.call_dg_tool("data-grout/logic.reflect", json!({})).await
-    }
-
-    /// Reflect on a specific entity within the logic cell
-    /// (`data-grout/logic.reflect`).
-    ///
-    /// When `summary_only` is `true` the server omits individual fact records
-    /// and returns only aggregate counts.
-    pub async fn reflect_entity(
-        &self,
-        entity: impl Into<String>,
-        summary_only: bool,
-    ) -> Result<Value> {
-        self.warn_if_not_dg("reflect_entity");
-        self.ensure_initialized().await?;
-        let params = json!({ "entity": entity.into(), "summary_only": summary_only });
-        self.call_dg_tool("data-grout/logic.reflect", params).await
     }
 
     // ========================================================================
@@ -763,7 +560,7 @@ impl Client {
     /// Emit a one-time warning when a DG-specific method is called against a
     /// non-DataGrout server.  Safe to call from every DG-specific method — the
     /// warning fires at most once per `Client` instance.
-    fn warn_if_not_dg(&self, method: &str) {
+    pub(crate) fn warn_if_not_dg(&self, method: &str) {
         if !self.is_dg
             && !self
                 .dg_warned
@@ -782,12 +579,16 @@ impl Client {
     // Internal helpers
     // ========================================================================
 
-    fn build_request(&self, method: impl Into<String>, params: Option<Value>) -> Result<JsonRpcRequest> {
+    fn build_request(
+        &self,
+        method: impl Into<String>,
+        params: Option<Value>,
+    ) -> Result<JsonRpcRequest> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).to_string();
         Ok(JsonRpcRequest::new(id, method, params))
     }
 
-    async fn ensure_initialized(&self) -> Result<()> {
+    pub(crate) async fn ensure_initialized(&self) -> Result<()> {
         if !self.is_initialized().await {
             return Err(Error::NotInitialized);
         }
@@ -925,8 +726,7 @@ impl ClientBuilder {
         client_id: impl Into<String>,
         client_secret: impl Into<String>,
     ) -> Self {
-        self._pending_oauth_creds =
-            Some((client_id.into(), client_secret.into(), None, None));
+        self._pending_oauth_creds = Some((client_id.into(), client_secret.into(), None, None));
         self
     }
 
@@ -964,9 +764,7 @@ impl ClientBuilder {
     /// `~/.conduit/` → `.conduit/` in the cwd.  If nothing is found this is
     /// a no-op: the client falls back to token auth silently.
     pub fn with_identity_auto(mut self) -> Self {
-        self.identity = ConduitIdentity::try_discover(
-            self.identity_dir.as_deref(),
-        );
+        self.identity = ConduitIdentity::try_discover(self.identity_dir.as_deref());
         self
     }
 
@@ -1068,14 +866,12 @@ impl ClientBuilder {
         substrate_endpoint: impl Into<String>,
     ) -> crate::error::Result<Self> {
         use crate::registration::{
-            default_identity_dir, generate_keypair, register_identity,
-            save_identity_to_dir, RegistrationOptions,
+            default_identity_dir, generate_keypair, register_identity, save_identity_to_dir,
+            RegistrationOptions,
         };
 
         // Fast path: existing identity that doesn't need rotation.
-        if let Some(existing) = ConduitIdentity::try_discover(
-            self.identity_dir.as_deref(),
-        ) {
+        if let Some(existing) = ConduitIdentity::try_discover(self.identity_dir.as_deref()) {
             if !existing.needs_rotation(7) {
                 self.identity = Some(existing);
                 return Ok(self);
@@ -1093,8 +889,7 @@ impl ClientBuilder {
         let (identity, _resp) = register_identity(&keypair, &opts).await?;
 
         // Persist so future runs auto-discover without any token.
-        let save_dir = self.identity_dir.clone()
-            .or_else(default_identity_dir);
+        let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
 
         if let Some(dir) = save_dir {
             let _ = save_identity_to_dir(&identity, &dir);
@@ -1134,16 +929,12 @@ impl ClientBuilder {
         client_secret: impl Into<String>,
         name: impl Into<String>,
     ) -> crate::error::Result<Self> {
-        let url = self.url.as_deref()
-            .ok_or_else(|| Error::invalid_config("URL must be set before bootstrap_identity_oauth"))?;
+        let url = self.url.as_deref().ok_or_else(|| {
+            Error::invalid_config("URL must be set before bootstrap_identity_oauth")
+        })?;
         let token_endpoint = OAuthTokenProvider::derive_token_endpoint(url);
 
-        let provider = OAuthTokenProvider::new(
-            client_id,
-            client_secret,
-            token_endpoint,
-            None,
-        );
+        let provider = OAuthTokenProvider::new(client_id, client_secret, token_endpoint, None);
         let http = reqwest::Client::new();
         let token = provider.get_token(&http).await?;
 
@@ -1155,26 +946,27 @@ impl ClientBuilder {
     /// Returns [`Error::InvalidConfig`](crate::error::Error::InvalidConfig)
     /// when required fields (e.g. `url`) are missing.
     pub fn build(self) -> Result<Client> {
-        let url = self.url.ok_or_else(|| Error::invalid_config("URL is required"))?;
+        let url = self
+            .url
+            .ok_or_else(|| Error::invalid_config("URL is required"))?;
         let dg = is_dg_url(&url);
 
         let transport_mode = self.transport.unwrap_or(Transport::Mcp);
 
         // Resolve OAuth credentials now that the URL is known.
-        let auth = if let Some((client_id, client_secret, endpoint, scope)) =
-            self._pending_oauth_creds
-        {
-            let token_endpoint = endpoint
-                .unwrap_or_else(|| OAuthTokenProvider::derive_token_endpoint(&url));
-            AuthConfig::ClientCredentials(OAuthTokenProvider::new(
-                client_id,
-                client_secret,
-                token_endpoint,
-                scope,
-            ))
-        } else {
-            self.auth.unwrap_or(AuthConfig::None)
-        };
+        let auth =
+            if let Some((client_id, client_secret, endpoint, scope)) = self._pending_oauth_creds {
+                let token_endpoint =
+                    endpoint.unwrap_or_else(|| OAuthTokenProvider::derive_token_endpoint(&url));
+                AuthConfig::ClientCredentials(OAuthTokenProvider::new(
+                    client_id,
+                    client_secret,
+                    token_endpoint,
+                    scope,
+                ))
+            } else {
+                self.auth.unwrap_or(AuthConfig::None)
+            };
 
         // For DG URLs, silently try auto-discovering an mTLS identity if none was
         // explicitly set and mTLS wasn't disabled. Non-DG URLs never auto-discover.
@@ -1198,7 +990,11 @@ impl ClientBuilder {
                 } else {
                     url
                 };
-                Box::new(JsonRpcTransport::with_identity(rpc_url, auth, identity_ref)?)
+                Box::new(JsonRpcTransport::with_identity(
+                    rpc_url,
+                    auth,
+                    identity_ref,
+                )?)
             }
         };
 
@@ -1300,7 +1096,10 @@ impl<'a> DiscoverBuilder<'a> {
             params["servers"] = json!(self.options.servers);
         }
 
-        let result = self.client.call_dg_tool("data-grout/discovery.discover", params).await?;
+        let result = self
+            .client
+            .call_dg_tool("data-grout/discovery.discover", params)
+            .await?;
         Ok(serde_json::from_value(result)?)
     }
 }
@@ -1354,7 +1153,9 @@ impl<'a> PerformBuilder<'a> {
             "demux_mode": self.options.demux_mode,
         });
 
-        self.client.call_dg_tool("data-grout/discovery.perform", params).await
+        self.client
+            .call_dg_tool("data-grout/discovery.perform", params)
+            .await
     }
 }
 
@@ -1409,7 +1210,10 @@ impl<'a> GuideBuilder<'a> {
             params["choice"] = json!(choice);
         }
 
-        let result = self.client.call_dg_tool("data-grout/discovery.guide", params).await?;
+        let result = self
+            .client
+            .call_dg_tool("data-grout/discovery.guide", params)
+            .await?;
         let state: GuideState = serde_json::from_value(result)?;
         Ok(GuidedSession::new(self.client, state))
     }
@@ -1540,7 +1344,9 @@ impl<'a> FlowIntoBuilder<'a> {
 
         // Receipt is embedded in result["_datagrout"]["receipt"] — callers can use
         // extract_meta(&result) to access it without any client-side state.
-        self.client.call_dg_tool("data-grout/flow.into", params).await
+        self.client
+            .call_dg_tool("data-grout/flow.into", params)
+            .await
     }
 }
 
@@ -1655,7 +1461,9 @@ impl<'a> PlanBuilder<'a> {
             params["model_overrides"] = model_overrides;
         }
 
-        self.client.call_dg_tool("data-grout/discovery.plan", params).await
+        self.client
+            .call_dg_tool("data-grout/discovery.plan", params)
+            .await
     }
 }
 
@@ -1703,7 +1511,9 @@ impl<'a> RefractBuilder<'a> {
             "chart": self.options.chart,
         });
 
-        self.client.call_dg_tool("data-grout/prism.refract", params).await
+        self.client
+            .call_dg_tool("data-grout/prism.refract", params)
+            .await
     }
 }
 
@@ -1806,7 +1616,9 @@ impl<'a> ChartBuilder<'a> {
             params["height"] = json!(height);
         }
 
-        self.client.call_dg_tool("data-grout/prism.chart", params).await
+        self.client
+            .call_dg_tool("data-grout/prism.chart", params)
+            .await
     }
 }
 
@@ -1853,7 +1665,9 @@ impl<'a> PrismFocusBuilder<'a> {
     pub async fn execute(self) -> Result<Value> {
         self.client.ensure_initialized().await?;
 
-        let data = self.data.ok_or_else(|| Error::invalid_config("data is required"))?;
+        let data = self
+            .data
+            .ok_or_else(|| Error::invalid_config("data is required"))?;
         let source_type = self
             .source_type
             .ok_or_else(|| Error::invalid_config("source_type is required"))?;
@@ -1867,6 +1681,8 @@ impl<'a> PrismFocusBuilder<'a> {
             "target_type": target_type,
         });
 
-        self.client.call_dg_tool("data-grout/prism.focus", params).await
+        self.client
+            .call_dg_tool("data-grout/prism.focus", params)
+            .await
     }
 }

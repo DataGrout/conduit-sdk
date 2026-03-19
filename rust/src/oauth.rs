@@ -181,9 +181,10 @@ impl OAuthTokenProvider {
             )));
         }
 
-        let token_resp: TokenResponse = resp.json().await.map_err(|e| {
-            Error::Network(format!("failed to parse OAuth token response: {e}"))
-        })?;
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
+            .map_err(|e| Error::Network(format!("failed to parse OAuth token response: {e}")))?;
 
         let expires_in = token_resp.expires_in.unwrap_or(3600);
 

@@ -148,14 +148,19 @@ impl ConduitIdentity {
         };
 
         let key = std::env::var("CONDUIT_MTLS_KEY").map_err(|_| {
-            Error::invalid_config(
-                "CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing",
-            )
+            Error::invalid_config("CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing")
         })?;
 
-        let ca = std::env::var("CONDUIT_MTLS_CA").ok().filter(|s| !s.is_empty());
+        let ca = std::env::var("CONDUIT_MTLS_CA")
+            .ok()
+            .filter(|s| !s.is_empty());
 
-        Self::from_pem(cert.into_bytes(), key.into_bytes(), ca.map(String::into_bytes)).map(Some)
+        Self::from_pem(
+            cert.into_bytes(),
+            key.into_bytes(),
+            ca.map(String::into_bytes),
+        )
+        .map(Some)
     }
 
     /// Try to locate an identity using the auto-discovery chain described in
@@ -203,10 +208,7 @@ impl ConduitIdentity {
         if let Some(home_dir) = dirs_next() {
             let dir = home_dir.join(".conduit");
             if let Some(id) = Self::try_load_from_dir(&dir) {
-                tracing::debug!(
-                    "conduit: loaded mTLS identity from {}",
-                    dir.display()
-                );
+                tracing::debug!("conduit: loaded mTLS identity from {}", dir.display());
                 return Some(id);
             }
         }
@@ -215,10 +217,7 @@ impl ConduitIdentity {
         if let Ok(cwd) = std::env::current_dir() {
             let dir = cwd.join(".conduit");
             if let Some(id) = Self::try_load_from_dir(&dir) {
-                tracing::debug!(
-                    "conduit: loaded mTLS identity from {}",
-                    dir.display()
-                );
+                tracing::debug!("conduit: loaded mTLS identity from {}", dir.display());
                 return Some(id);
             }
         }
@@ -395,15 +394,13 @@ mod tests {
     #[test]
     fn from_pem_accepts_valid_pems() {
         // Won't build a real reqwest::Identity from fake PEMs, but construction succeeds.
-        let id =
-            ConduitIdentity::from_pem(SAMPLE_CERT, SAMPLE_KEY, None::<Vec<u8>>).unwrap();
+        let id = ConduitIdentity::from_pem(SAMPLE_CERT, SAMPLE_KEY, None::<Vec<u8>>).unwrap();
         assert!(!id.needs_rotation(30));
     }
 
     #[test]
     fn needs_rotation_false_when_no_expiry() {
-        let id =
-            ConduitIdentity::from_pem(SAMPLE_CERT, SAMPLE_KEY, None::<Vec<u8>>).unwrap();
+        let id = ConduitIdentity::from_pem(SAMPLE_CERT, SAMPLE_KEY, None::<Vec<u8>>).unwrap();
         assert!(!id.needs_rotation(90));
     }
 

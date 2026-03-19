@@ -35,7 +35,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Found {} tools", tools.len());
 
     for tool in tools.iter().take(5) {
-        println!("  • {} - {}", tool.name, tool.description.as_deref().unwrap_or(""));
+        println!(
+            "  • {} - {}",
+            tool.name,
+            tool.description.as_deref().unwrap_or("")
+        );
     }
 
     // Call a tool
@@ -43,9 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let tool_name = &tools[0].name;
         println!("\n--- Calling Tool: {} ---", tool_name);
 
-        let result = client
-            .call_tool(tool_name, json!({}))
-            .await?;
+        let result = client.call_tool(tool_name, json!({})).await?;
 
         println!("Result: {}", serde_json::to_string_pretty(&result)?);
     }

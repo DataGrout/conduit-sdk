@@ -21,7 +21,10 @@ const INIT_BODY: &str = r#"{"jsonrpc":"2.0","id":"1","result":{"protocolVersion"
 
 /// A generic success result body with a given `id`.
 fn ok_body(id: &str) -> String {
-    format!(r#"{{"jsonrpc":"2.0","id":"{}","result":{{"ok":true}}}}"#, id)
+    format!(
+        r#"{{"jsonrpc":"2.0","id":"{}","result":{{"ok":true}}}}"#,
+        id
+    )
 }
 
 #[tokio::test]
@@ -38,9 +41,7 @@ async fn test_client_builder() {
 
 #[tokio::test]
 async fn test_client_builder_requires_url() {
-    let result = ClientBuilder::new()
-        .transport(Transport::JsonRpc)
-        .build();
+    let result = ClientBuilder::new().transport(Transport::JsonRpc).build();
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("URL is required"));
@@ -86,9 +87,7 @@ async fn test_call_tool() {
 
     client.connect().await.unwrap();
 
-    let result = client
-        .call_tool("test_tool", json!({"arg": "value"}))
-        .await;
+    let result = client.call_tool("test_tool", json!({"arg": "value"})).await;
 
     assert!(result.is_ok());
 }
@@ -253,9 +252,7 @@ async fn test_plan_sends_correct_method_name() {
     // Specific mock for plan calls (registered second → highest priority).
     let m_plan = server
         .mock("POST", "/")
-        .match_body(mockito::Matcher::Regex(
-            r#"discovery\.plan"#.to_string(),
-        ))
+        .match_body(mockito::Matcher::Regex(r#"discovery\.plan"#.to_string()))
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(ok_body("3"))
@@ -316,7 +313,11 @@ async fn test_plan_builder_params() {
         .execute()
         .await;
 
-    assert!(result.is_ok(), "plan() with params failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "plan() with params failed: {:?}",
+        result.unwrap_err()
+    );
     m_plan.assert_async().await;
 }
 
@@ -347,11 +348,16 @@ async fn test_refract_sends_correct_method_name() {
     client.connect().await.unwrap();
 
     let result = client
+        .prism()
         .refract("normalise addresses", json!({"city": "NYC"}))
         .execute()
         .await;
 
-    assert!(result.is_ok(), "refract() failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "prism().refract() failed: {:?}",
+        result.unwrap_err()
+    );
     m_refract.assert_async().await;
 }
 
@@ -384,13 +390,18 @@ async fn test_refract_builder_params() {
     client.connect().await.unwrap();
 
     let result = client
+        .prism()
         .refract("categorise products", json!({"items": []}))
         .verbose(true)
         .chart(true)
         .execute()
         .await;
 
-    assert!(result.is_ok(), "refract() with params failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "prism().refract() with params failed: {:?}",
+        result.unwrap_err()
+    );
     m_refract.assert_async().await;
 }
 
@@ -421,11 +432,16 @@ async fn test_chart_sends_correct_method_name() {
     client.connect().await.unwrap();
 
     let result = client
+        .prism()
         .chart("sales by region", json!({"rows": []}))
         .execute()
         .await;
 
-    assert!(result.is_ok(), "chart() failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "prism().chart() failed: {:?}",
+        result.unwrap_err()
+    );
     m_chart.assert_async().await;
 }
 
@@ -458,6 +474,7 @@ async fn test_chart_builder_params() {
     client.connect().await.unwrap();
 
     let result = client
+        .prism()
         .chart("revenue over time", json!({"series": []}))
         .chart_type("bar")
         .title("Revenue")
@@ -469,7 +486,11 @@ async fn test_chart_builder_params() {
         .execute()
         .await;
 
-    assert!(result.is_ok(), "chart() with params failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "prism().chart() with params failed: {:?}",
+        result.unwrap_err()
+    );
     m_chart.assert_async().await;
 }
 
@@ -499,8 +520,12 @@ async fn test_remember_sends_correct_method_name() {
     let client = mock_client(&server.url());
     client.connect().await.unwrap();
 
-    let result = client.remember("user(alice).").await;
-    assert!(result.is_ok(), "remember() failed: {:?}", result.unwrap_err());
+    let result = client.logic().remember("user(alice).").await;
+    assert!(
+        result.is_ok(),
+        "logic().remember() failed: {:?}",
+        result.unwrap_err()
+    );
     m.assert_async().await;
 }
 
@@ -528,8 +553,12 @@ async fn test_query_cell_sends_correct_method_name() {
     let client = mock_client(&server.url());
     client.connect().await.unwrap();
 
-    let result = client.query_cell("who are the users?").await;
-    assert!(result.is_ok(), "query_cell() failed: {:?}", result.unwrap_err());
+    let result = client.logic().query("who are the users?").await;
+    assert!(
+        result.is_ok(),
+        "logic().query() failed: {:?}",
+        result.unwrap_err()
+    );
     m.assert_async().await;
 }
 
@@ -557,8 +586,12 @@ async fn test_forget_sends_correct_method_name() {
     let client = mock_client(&server.url());
     client.connect().await.unwrap();
 
-    let result = client.forget(vec!["fact_abc".to_string()]).await;
-    assert!(result.is_ok(), "forget() failed: {:?}", result.unwrap_err());
+    let result = client.logic().forget(vec!["fact_abc".to_string()]).await;
+    assert!(
+        result.is_ok(),
+        "logic().forget() failed: {:?}",
+        result.unwrap_err()
+    );
     m.assert_async().await;
 }
 
@@ -586,8 +619,12 @@ async fn test_constrain_sends_correct_method_name() {
     let client = mock_client(&server.url());
     client.connect().await.unwrap();
 
-    let result = client.constrain("cost(X) :- X > 100.").await;
-    assert!(result.is_ok(), "constrain() failed: {:?}", result.unwrap_err());
+    let result = client.logic().constrain("cost(X) :- X > 100.").await;
+    assert!(
+        result.is_ok(),
+        "logic().constrain() failed: {:?}",
+        result.unwrap_err()
+    );
     m.assert_async().await;
 }
 
@@ -615,8 +652,362 @@ async fn test_reflect_sends_correct_method_name() {
     let client = mock_client(&server.url());
     client.connect().await.unwrap();
 
-    let result = client.reflect().await;
-    assert!(result.is_ok(), "reflect() failed: {:?}", result.unwrap_err());
+    let result = client.logic().reflect().await;
+    assert!(
+        result.is_ok(),
+        "logic().reflect() failed: {:?}",
+        result.unwrap_err()
+    );
+    m.assert_async().await;
+}
+
+// ─── extract_meta tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_extract_meta_rich_format() {
+    use datagrout_conduit::extract_meta;
+
+    let result = json!({
+        "data": {"value": 42},
+        "_meta": {
+            "datagrout": {
+                "receipt": {
+                    "receipt_id": "rcp_rich",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "estimated_credits": 2.0,
+                    "actual_credits": 1.5,
+                    "net_credits": 1.5,
+                    "savings": 0.5,
+                    "savings_bonus": 0.0,
+                    "breakdown": {"base": 1.0, "semantic_guard": 0.5},
+                    "byok": {"enabled": false, "discount_applied": 0.0, "discount_rate": 0.0}
+                }
+            }
+        }
+    });
+
+    let meta = extract_meta(&result).expect("should extract rich meta");
+    assert_eq!(meta.receipt.receipt_id, "rcp_rich");
+    assert_eq!(meta.receipt.actual_credits, 1.5);
+}
+
+#[test]
+fn test_extract_meta_compact_dg_fallback() {
+    use datagrout_conduit::extract_meta;
+
+    let result = json!({
+        "data": {"value": 42},
+        "_dg": {
+            "credits": {
+                "charged": 1.0,
+                "estimated": 1.5,
+                "remaining": 98.5,
+                "premium": 0.2,
+                "llm": 0.8
+            },
+            "cache_ref": "ref_abc",
+            "tool": "prism.refract"
+        }
+    });
+
+    let meta = extract_meta(&result).expect("should synthesize from _dg");
+    assert_eq!(meta.receipt.actual_credits, 1.0);
+    assert_eq!(meta.receipt.estimated_credits, 1.5);
+    assert_eq!(meta.receipt.balance_after, Some(98.5));
+}
+
+#[test]
+fn test_extract_meta_legacy_datagrout() {
+    use datagrout_conduit::extract_meta;
+
+    let result = json!({
+        "data": {"value": 42},
+        "_datagrout": {
+            "receipt": {
+                "receipt_id": "rcp_legacy",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "estimated_credits": 1.0,
+                "actual_credits": 1.0,
+                "net_credits": 1.0,
+                "savings": 0.0,
+                "savings_bonus": 0.0,
+                "breakdown": {},
+                "byok": {"enabled": false, "discount_applied": 0.0, "discount_rate": 0.0}
+            }
+        }
+    });
+
+    let meta = extract_meta(&result).expect("should extract legacy meta");
+    assert_eq!(meta.receipt.receipt_id, "rcp_legacy");
+}
+
+#[test]
+fn test_extract_meta_none_when_absent() {
+    use datagrout_conduit::extract_meta;
+
+    let result = json!({"data": {"value": 42}});
+    assert!(extract_meta(&result).is_none());
+}
+
+#[test]
+fn test_extract_meta_rich_takes_priority() {
+    use datagrout_conduit::extract_meta;
+
+    let result = json!({
+        "_meta": {
+            "datagrout": {
+                "receipt": {
+                    "receipt_id": "rcp_rich",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "estimated_credits": 2.0,
+                    "actual_credits": 2.0,
+                    "net_credits": 2.0,
+                    "savings": 0.0,
+                    "savings_bonus": 0.0,
+                    "breakdown": {},
+                    "byok": {"enabled": false, "discount_applied": 0.0, "discount_rate": 0.0}
+                }
+            }
+        },
+        "_dg": {
+            "credits": {"charged": 1.0, "estimated": 1.0}
+        }
+    });
+
+    let meta = extract_meta(&result).expect("should prefer rich format");
+    assert_eq!(meta.receipt.receipt_id, "rcp_rich");
+    assert_eq!(meta.receipt.actual_credits, 2.0);
+}
+
+// ─── Warden tests ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_canary_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"warden\.canary"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client
+        .warden()
+        .canary(json!({"action": "delete_all"}))
+        .await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_verify_intent_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"warden\.intent"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client
+        .warden()
+        .verify_intent(json!({"action": "send_email", "context": "user requested"}))
+        .await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+// ─── Deliverables tests ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_register_deliverable_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(
+            r#"deliverables\.register"#.to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client
+        .deliverables()
+        .register(json!({"type": "report", "content": "Q1 results"}))
+        .await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+// ─── Ephemerals tests ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_list_cache_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"ephemerals\.list"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client.ephemerals().list(json!({})).await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+// ─── Logic cell extended tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_hydrate_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"logic\.hydrate"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client
+        .logic()
+        .hydrate(json!({"source": "external_db"}))
+        .await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_export_cell_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"logic\.export"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client.logic().export_cell(json!({})).await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_worlds_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"logic\.worlds"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client
+        .logic()
+        .worlds(json!({"action": "create", "name": "scenario_a"}))
+        .await;
+    assert!(result.is_ok());
+    m.assert_async().await;
+}
+
+// ─── flow.route() test ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_flow_route_sends_correct_method_name() {
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/")
+        .match_body(mockito::Matcher::Regex(r#"flow\.route"#.to_string()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(ok_body("3"))
+        .create_async()
+        .await;
+    let _m_init = server
+        .mock("POST", "/")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(INIT_BODY)
+        .create_async()
+        .await;
+    let client = mock_client(&server.url());
+    client.connect().await.unwrap();
+    let result = client.flow().route(json!({
+        "payload": {"amount": 5000},
+        "branches": [
+            {"when": [{"field": "amount", "op": "gt", "value": 1000}], "then": "data-grout/flow.into"}
+        ]
+    })).await;
+    assert!(result.is_ok());
     m.assert_async().await;
 }
 
@@ -683,6 +1074,10 @@ async fn test_dg_arbitrary_tool_name() {
     let result = client
         .dg("logic.query", json!({"question": "who are the admins?"}))
         .await;
-    assert!(result.is_ok(), "dg(logic.query) failed: {:?}", result.unwrap_err());
+    assert!(
+        result.is_ok(),
+        "dg(logic.query) failed: {:?}",
+        result.unwrap_err()
+    );
     m.assert_async().await;
 }

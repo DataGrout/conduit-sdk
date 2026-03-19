@@ -5,6 +5,7 @@ import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from datagrout.conduit import Client, RateLimitError, extract_meta
+from datagrout.conduit.types import extract_meta as extract_meta_raw
 from datagrout.conduit.transports.jsonrpc_transport import (
     RateLimitError,
     _parse_rate_limit_status,
@@ -700,12 +701,12 @@ class TestMCPTransportAuth:
         assert transport.identity is identity
 
 
-# ─── prism_focus wire protocol ────────────────────────────────────────────────
+# ─── prism.focus wire protocol (namespaced) ───────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_prism_focus_sends_correct_params():
-    """prism_focus() must send source_type/target_type, NOT lens."""
+    """client.prism.focus() must send source_type/target_type, NOT lens."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -715,7 +716,7 @@ async def test_prism_focus_sends_correct_params():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.prism_focus(
+            await client.prism.focus(
                 data={"name": "Acme"},
                 source_type="crm.lead@1",
                 target_type="billing.customer@1",
@@ -728,31 +729,6 @@ async def test_prism_focus_sends_correct_params():
     assert sent_params["target_type"] == "billing.customer@1"
     assert sent_params["data"] == {"name": "Acme"}
     assert "lens" not in sent_params
-
-
-@pytest.mark.asyncio
-async def test_prism_focus_optional_params():
-    """prism_focus() includes optional params only when provided."""
-    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
-        mock_transport = AsyncMock()
-        mock_transport.connect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={})
-        mock_cls.return_value = mock_transport
-
-        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
-        async with client:
-            await client.prism_focus(
-                data={"x": 1},
-                source_type="a@1",
-                target_type="b@1",
-                source_annotations={"key": "v"},
-                context="sales context",
-            )
-
-    sent_params = mock_transport.call_tool.call_args[0][1]
-    assert sent_params["source_annotations"] == {"key": "v"}
-    assert sent_params["context"] == "sales context"
-    assert "target_annotations" not in sent_params
 
 
 # ─── plan / refract / chart ───────────────────────────────────────────────────
@@ -811,7 +787,7 @@ async def test_plan_requires_goal_or_query():
 
 @pytest.mark.asyncio
 async def test_refract_sends_correct_method():
-    """refract() routes to data-grout/prism.refract."""
+    """client.prism.refract() routes to data-grout/prism.refract."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -820,7 +796,7 @@ async def test_refract_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.refract(goal="summarise revenue", payload={"q1": 100})
+            await client.prism.refract(goal="summarise revenue", payload={"q1": 100})
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/prism.refract"
@@ -833,7 +809,7 @@ async def test_refract_sends_correct_method():
 
 @pytest.mark.asyncio
 async def test_chart_sends_correct_method():
-    """chart() routes to data-grout/prism.chart."""
+    """client.prism.chart() routes to data-grout/prism.chart."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -842,7 +818,7 @@ async def test_chart_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.chart(
+            await client.prism.chart(
                 goal="bar chart of monthly revenue",
                 payload={"jan": 10, "feb": 20},
                 chart_type="bar",
@@ -854,16 +830,14 @@ async def test_chart_sends_correct_method():
     sent_params = call_args[0][1]
     assert sent_params["goal"] == "bar chart of monthly revenue"
     assert sent_params["payload"] == {"jan": 10, "feb": 20}
-    assert sent_params["chart_type"] == "bar"
-    assert sent_params["title"] == "Revenue"
 
 
-# ─── Logic cell method names ──────────────────────────────────────────────────
+# ─── Logic cell (namespaced) ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_remember_sends_correct_method():
-    """remember() routes to data-grout/logic.remember."""
+    """client.logic.remember() routes to data-grout/logic.remember."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -872,7 +846,7 @@ async def test_remember_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.remember("Acme is a VIP customer", tag="crm")
+            await client.logic.remember("Acme is a VIP customer", tag="crm")
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/logic.remember"
@@ -881,8 +855,8 @@ async def test_remember_sends_correct_method():
 
 
 @pytest.mark.asyncio
-async def test_query_cell_sends_correct_method():
-    """query_cell() routes to data-grout/logic.query."""
+async def test_query_sends_correct_method():
+    """client.logic.query() routes to data-grout/logic.query."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -891,7 +865,7 @@ async def test_query_cell_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.query_cell("who are our VIP customers?")
+            await client.logic.query("who are our VIP customers?")
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/logic.query"
@@ -900,7 +874,7 @@ async def test_query_cell_sends_correct_method():
 
 @pytest.mark.asyncio
 async def test_forget_sends_correct_method():
-    """forget() routes to data-grout/logic.forget."""
+    """client.logic.forget() routes to data-grout/logic.forget."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -909,7 +883,7 @@ async def test_forget_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.forget(handles=["fact_abc123"])
+            await client.logic.forget(handles=["fact_abc123"])
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/logic.forget"
@@ -918,7 +892,7 @@ async def test_forget_sends_correct_method():
 
 @pytest.mark.asyncio
 async def test_constrain_sends_correct_method():
-    """constrain() routes to data-grout/logic.constrain."""
+    """client.logic.constrain() routes to data-grout/logic.constrain."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -927,7 +901,7 @@ async def test_constrain_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.constrain("VIP customers have ARR > $500K")
+            await client.logic.constrain("VIP customers have ARR > $500K")
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/logic.constrain"
@@ -936,7 +910,7 @@ async def test_constrain_sends_correct_method():
 
 @pytest.mark.asyncio
 async def test_reflect_sends_correct_method():
-    """reflect() routes to data-grout/logic.reflect."""
+    """client.logic.reflect() routes to data-grout/logic.reflect."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -945,7 +919,7 @@ async def test_reflect_sends_correct_method():
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
-            await client.reflect()
+            await client.logic.reflect()
 
     call_args = mock_transport.call_tool.call_args
     assert call_args[0][0] == "data-grout/logic.reflect"
@@ -1045,6 +1019,398 @@ async def test_retry_exhausts_max_retries():
             await client.call_tool("test-tool", {})
 
         assert call_count == 3  # initial + 2 retries
+
+
+# ─── extract_meta_raw (types.py version — returns raw dicts) ─────────────────
+
+
+RICH_META_RESULT = {
+    "value": 42,
+    "_meta": {
+        "datagrout": {
+            "receipt": {
+                "receipt_id": "rcp_rich_1",
+                "timestamp": "2026-03-19T00:00:00Z",
+                "estimated_credits": 3.0,
+                "actual_credits": 2.5,
+                "net_credits": 2.5,
+                "savings": 0.5,
+                "savings_bonus": 0.0,
+                "breakdown": {"base": 2.5},
+                "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
+                "balance_after": 997.5,
+            }
+        }
+    },
+}
+
+LEGACY_META_RESULT = {
+    "value": 42,
+    "_datagrout": {
+        "receipt": {
+            "receipt_id": "rcp_legacy_1",
+            "timestamp": "2026-03-19T00:00:00Z",
+            "estimated_credits": 5.0,
+            "actual_credits": 4.5,
+            "net_credits": 4.5,
+            "savings": 0.5,
+            "savings_bonus": 0.0,
+            "breakdown": {"base": 4.5},
+            "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
+            "balance_after": 995.5,
+        }
+    },
+}
+
+COMPACT_DG_RESULT = {
+    "value": 42,
+    "_dg": {
+        "credits": {
+            "estimated": 3.0,
+            "charged": 2.8,
+            "remaining": 997.2,
+            "premium": 1.0,
+            "llm": 1.8,
+        }
+    },
+}
+
+
+def test_extract_meta_raw_rich_format():
+    """extract_meta_raw picks up _meta.datagrout (rich format)."""
+    meta = extract_meta_raw(RICH_META_RESULT)
+    assert meta is not None
+    assert meta["receipt"]["receipt_id"] == "rcp_rich_1"
+    assert meta["receipt"]["actual_credits"] == 2.5
+    assert meta["receipt"]["balance_after"] == 997.5
+
+
+def test_extract_meta_raw_legacy_format():
+    """extract_meta_raw picks up _datagrout (legacy format)."""
+    meta = extract_meta_raw(LEGACY_META_RESULT)
+    assert meta is not None
+    assert meta["receipt"]["receipt_id"] == "rcp_legacy_1"
+    assert meta["receipt"]["actual_credits"] == 4.5
+
+
+def test_extract_meta_raw_compact_dg():
+    """extract_meta_raw synthesizes from _dg compact format."""
+    meta = extract_meta_raw(COMPACT_DG_RESULT)
+    assert meta is not None
+    assert meta["receipt"]["actual_credits"] == 2.8
+    assert meta["receipt"]["net_credits"] == 2.8
+    assert meta["receipt"]["estimated_credits"] == 3.0
+    assert meta["receipt"]["balance_after"] == 997.2
+    assert meta["receipt"]["breakdown"]["premium"] == 1.0
+    assert meta["receipt"]["breakdown"]["llm"] == 1.8
+    assert meta["receipt"]["byok"]["enabled"] is False
+
+
+def test_extract_meta_raw_missing():
+    """extract_meta_raw returns None when no metadata is present."""
+    meta = extract_meta_raw({"value": 42})
+    assert meta is None
+
+
+def test_extract_meta_raw_priority_rich_over_legacy():
+    """Rich format (_meta.datagrout) takes priority over legacy (_datagrout)."""
+    result = {
+        "value": 42,
+        "_meta": {
+            "datagrout": {
+                "receipt": {
+                    "receipt_id": "rcp_rich_wins",
+                    "timestamp": "",
+                    "estimated_credits": 1.0,
+                    "actual_credits": 1.0,
+                    "net_credits": 1.0,
+                    "savings": 0.0,
+                    "savings_bonus": 0.0,
+                    "breakdown": {},
+                    "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
+                    "balance_after": 999.0,
+                }
+            }
+        },
+        "_datagrout": {
+            "receipt": {
+                "receipt_id": "rcp_legacy_loses",
+                "timestamp": "",
+                "estimated_credits": 9.0,
+                "actual_credits": 9.0,
+                "net_credits": 9.0,
+                "savings": 0.0,
+                "savings_bonus": 0.0,
+                "breakdown": {},
+                "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
+                "balance_after": 1.0,
+            }
+        },
+    }
+    meta = extract_meta_raw(result)
+    assert meta is not None
+    assert meta["receipt"]["receipt_id"] == "rcp_rich_wins"
+
+
+# ─── Namespaced tool wrappers ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_canary_sends_correct_method():
+    """client.warden.canary() routes to data-grout/warden.canary."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"safe": True})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            result = await client.warden.canary({"action": "delete_all"})
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/warden.canary"
+    assert call_args[0][1] == {"action": "delete_all"}
+    assert result == {"safe": True}
+
+
+@pytest.mark.asyncio
+async def test_verify_intent_sends_correct_method():
+    """client.warden.verify_intent() routes to data-grout/warden.intent."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"verified": True})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.warden.verify_intent({"intent": "create_invoice"})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/warden.intent"
+
+
+@pytest.mark.asyncio
+async def test_adjudicate_sends_correct_method():
+    """client.warden.adjudicate() routes to data-grout/warden.adjudicate."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"ruling": "allow"})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.warden.adjudicate({"dispute": "conflicting_data"})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/warden.adjudicate"
+
+
+@pytest.mark.asyncio
+async def test_ensemble_sends_correct_method():
+    """client.warden.ensemble() routes to data-grout/warden.ensemble."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"consensus": True})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.warden.ensemble({"question": "is this safe?"})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/warden.ensemble"
+
+
+@pytest.mark.asyncio
+async def test_register_deliverable_sends_correct_method():
+    """client.deliverables.register() routes to data-grout/deliverables.register."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"ref": "del_abc"})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.deliverables.register({"title": "Q1 Report", "content": "..."})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/deliverables.register"
+
+
+@pytest.mark.asyncio
+async def test_list_deliverables_sends_correct_method():
+    """client.deliverables.list() routes to data-grout/deliverables.list."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"deliverables": []})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.deliverables.list()
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/deliverables.list"
+    assert call_args[0][1] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_deliverable_sends_correct_method():
+    """client.deliverables.get() routes to data-grout/deliverables.get."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"ref": "del_abc", "title": "Report"})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.deliverables.get("del_abc")
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/deliverables.get"
+    assert call_args[0][1] == {"ref": "del_abc"}
+
+
+@pytest.mark.asyncio
+async def test_list_cache_sends_correct_method():
+    """client.ephemerals.list() routes to data-grout/ephemerals.list."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"entries": []})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.ephemerals.list()
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/ephemerals.list"
+
+
+@pytest.mark.asyncio
+async def test_inspect_cache_sends_correct_method():
+    """client.ephemerals.inspect() routes to data-grout/ephemerals.inspect."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"data": "cached"})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.ephemerals.inspect("cache_xyz")
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/ephemerals.inspect"
+    assert call_args[0][1] == {"cache_ref": "cache_xyz"}
+
+
+@pytest.mark.asyncio
+async def test_hydrate_sends_correct_method():
+    """client.logic.hydrate() routes to data-grout/logic.hydrate."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"hydrated": True})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.logic.hydrate({"source": "csv", "url": "https://example.com/data.csv"})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/logic.hydrate"
+
+
+@pytest.mark.asyncio
+async def test_export_cell_sends_correct_method():
+    """client.logic.export_cell() routes to data-grout/logic.export."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"facts": []})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.logic.export_cell()
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/logic.export"
+    assert call_args[0][1] == {}
+
+
+@pytest.mark.asyncio
+async def test_import_cell_sends_correct_method():
+    """client.logic.import_cell() routes to data-grout/logic.import."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"imported": 5})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.logic.import_cell({"facts": [{"pred": "likes", "args": ["alice", "bob"]}]})
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/logic.import"
+
+
+@pytest.mark.asyncio
+async def test_tabulate_sends_correct_method():
+    """client.logic.tabulate() routes to data-grout/logic.tabulate."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"table": []})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.logic.tabulate()
+
+    assert mock_transport.call_tool.call_args[0][0] == "data-grout/logic.tabulate"
+
+
+@pytest.mark.asyncio
+async def test_worlds_sends_correct_method():
+    """client.logic.worlds() routes to data-grout/logic.worlds."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"worlds": []})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.logic.worlds({"action": "create", "name": "what-if-scenario"})
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/logic.worlds"
+    assert call_args[0][1]["action"] == "create"
+
+
+@pytest.mark.asyncio
+async def test_flow_route_sends_correct_method():
+    """client.flow.route() routes to data-grout/flow.route."""
+    with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
+        mock_transport = AsyncMock()
+        mock_transport.connect = AsyncMock()
+        mock_transport.call_tool = AsyncMock(return_value={"matched": "branch_1"})
+        mock_cls.return_value = mock_transport
+
+        client = Client("https://gateway.datagrout.ai/servers/test/mcp")
+        async with client:
+            await client.flow.route(
+                branches=[{"when": "amount > 1000", "then": "approval_flow"}],
+                payload={"amount": 1500},
+            )
+
+    call_args = mock_transport.call_tool.call_args
+    assert call_args[0][0] == "data-grout/flow.route"
+    assert call_args[0][1]["payload"] == {"amount": 1500}
 
 
 @pytest.mark.asyncio

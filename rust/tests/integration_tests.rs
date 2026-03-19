@@ -48,7 +48,9 @@ fn build_client(url: &str) -> Client {
         builder = builder.auth_bearer(token);
     }
 
-    builder.build().expect("failed to build integration test client")
+    builder
+        .build()
+        .expect("failed to build integration test client")
 }
 
 /// Returns `true` when an error looks like a transient / expected live-server
@@ -105,10 +107,16 @@ async fn test_connect() {
     let client = build_client(&url);
 
     client.connect().await.expect("connect() failed");
-    assert!(client.is_initialized().await, "client should be initialized after connect()");
+    assert!(
+        client.is_initialized().await,
+        "client should be initialized after connect()"
+    );
 
     client.disconnect().await.expect("disconnect() failed");
-    assert!(!client.is_initialized().await, "client should not be initialized after disconnect()");
+    assert!(
+        !client.is_initialized().await,
+        "client should not be initialized after disconnect()"
+    );
 }
 
 /// `list_tools` returns at least one tool from a live server.
@@ -119,7 +127,10 @@ async fn test_list_tools() {
     client.connect().await.expect("connect() failed");
 
     let tools = assert_ok_or_skip!(client.list_tools().await);
-    assert!(!tools.is_empty(), "expected at least one tool from the server");
+    assert!(
+        !tools.is_empty(),
+        "expected at least one tool from the server"
+    );
 
     // Every tool must have a non-empty name
     for t in &tools {
@@ -167,7 +178,8 @@ async fn test_discover() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.discover()
+        client
+            .discover()
             .query("find recent data")
             .limit(5)
             .execute()
@@ -193,7 +205,8 @@ async fn test_plan() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.plan()
+        client
+            .plan()
             .goal("summarise data in my workspace")
             .execute()
             .await
@@ -210,11 +223,12 @@ async fn test_estimate_cost() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.estimate_cost(
-            "data-grout/discovery.discover",
-            json!({ "query": "test", "limit": 1 }),
-        )
-        .await
+        client
+            .estimate_cost(
+                "data-grout/discovery.discover",
+                json!({ "query": "test", "limit": 1 }),
+            )
+            .await
     );
 
     assert!(!result.is_null(), "estimate_cost result must not be null");
@@ -230,7 +244,9 @@ async fn test_refract() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.refract("count items", json!([1, 2, 3]))
+        client
+            .prism()
+            .refract("count items", json!([1, 2, 3]))
             .execute()
             .await
     );
@@ -246,7 +262,9 @@ async fn test_chart() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.chart("show counts", json!({"a": 1, "b": 2}))
+        client
+            .prism()
+            .chart("show counts", json!({"a": 1, "b": 2}))
             .execute()
             .await
     );
@@ -265,9 +283,15 @@ async fn test_logic_cell_lifecycle() {
 
     // 1. Remember a test fact
     let remember_result = assert_ok_or_skip!(
-        client.remember("sdk_integration_test_fact(conduit_rust_sdk).").await
+        client
+            .logic()
+            .remember("sdk_integration_test_fact(conduit_rust_sdk).")
+            .await
     );
-    assert!(!remember_result.is_null(), "remember result must not be null");
+    assert!(
+        !remember_result.is_null(),
+        "remember result must not be null"
+    );
 
     // Extract handle if the server returns one
     let handle: Option<String> = remember_result
@@ -277,24 +301,31 @@ async fn test_logic_cell_lifecycle() {
         .map(str::to_owned);
 
     // 2. Query — our fact should be retrievable
-    let query_result = assert_ok_or_skip!(
-        client.query_cell("sdk_integration_test_fact").await
+    let query_result = assert_ok_or_skip!(client.logic().query("sdk_integration_test_fact").await);
+    assert!(
+        !query_result.is_null(),
+        "logic().query() result must not be null"
     );
-    assert!(!query_result.is_null(), "query_cell result must not be null");
 
     // 3. Forget by handle (if we got one), otherwise by pattern
     if let Some(h) = handle {
-        let forget_result = assert_ok_or_skip!(client.forget(vec![h]).await);
+        let forget_result = assert_ok_or_skip!(client.logic().forget(vec![h]).await);
         assert!(!forget_result.is_null(), "forget result must not be null");
     } else {
         let forget_result = assert_ok_or_skip!(
-            client.forget_pattern("sdk_integration_test_fact(_).").await
+            client
+                .logic()
+                .forget_pattern("sdk_integration_test_fact(_).")
+                .await
         );
-        assert!(!forget_result.is_null(), "forget_pattern result must not be null");
+        assert!(
+            !forget_result.is_null(),
+            "forget_pattern result must not be null"
+        );
     }
 
     // 4. Reflect — verify the cell is accessible (content is server-dependent)
-    let reflect_result = assert_ok_or_skip!(client.reflect().await);
+    let reflect_result = assert_ok_or_skip!(client.logic().reflect().await);
     assert!(!reflect_result.is_null(), "reflect result must not be null");
 }
 
@@ -308,7 +339,9 @@ async fn test_dg_generic() {
     client.connect().await.expect("connect() failed");
 
     let result = assert_ok_or_skip!(
-        client.dg("discovery.discover", json!({"query": "test", "limit": 1})).await
+        client
+            .dg("discovery.discover", json!({"query": "test", "limit": 1}))
+            .await
     );
 
     assert!(!result.is_null(), "dg() result must not be null");

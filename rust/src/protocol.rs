@@ -105,8 +105,7 @@ pub struct Capabilities {
     pub logging: Option<LoggingCapability>,
     /// Sampling capability
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sampling: Option<SamplingCapability>
-,
+    pub sampling: Option<SamplingCapability>,
     /// Roots capability
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsCapability>,

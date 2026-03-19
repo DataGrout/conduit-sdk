@@ -94,7 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (tool, args) in tasks {
         if spent >= max_budget {
-            println!("⚠️  Budget exhausted ({:.2}/{:.2}). Stopping.", spent, max_budget);
+            println!(
+                "⚠️  Budget exhausted ({:.2}/{:.2}). Stopping.",
+                spent, max_budget
+            );
             break;
         }
 
@@ -102,7 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(meta) = extract_meta(&res) {
             spent += meta.receipt.net_credits;
-            println!("  ✓ {} (spent so far: {:.4}/{:.2})", tool, spent, max_budget);
+            println!(
+                "  ✓ {} (spent so far: {:.4}/{:.2})",
+                tool, spent, max_budget
+            );
         }
     }
 

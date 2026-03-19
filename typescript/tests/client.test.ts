@@ -359,9 +359,185 @@ describe('Client', () => {
   });
 
   it('extractMeta returns null when no _datagrout/_meta in result', () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(extractMeta({ result: 'ok' })).toBeNull();
     expect(extractMeta({})).toBeNull();
     expect(extractMeta(null as any)).toBeNull();
+    consoleSpy.mockRestore();
+  });
+
+  // ─── extractMeta: rich _meta.datagrout format ────────────────────────────────
+
+  it('extractMeta parses rich _meta.datagrout format', () => {
+    const result = {
+      _meta: {
+        datagrout: {
+          receipt: {
+            receipt_id: 'rcp_rich',
+            timestamp: '2026-03-19T00:00:00Z',
+            estimated_credits: 10,
+            actual_credits: 8,
+            net_credits: 8,
+            savings: 2,
+            savings_bonus: 0.5,
+            balance_before: 500,
+            balance_after: 492,
+            breakdown: { base: 6, premium: 2 },
+            byok: { enabled: true, discount_applied: 1, discount_rate: 0.1 },
+          },
+          credit_estimate: {
+            estimated_total: 10,
+            actual_total: 8,
+            net_total: 8,
+            breakdown: { base: 6, premium: 2 },
+          },
+        },
+      },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta).not.toBeNull();
+    expect(meta!.receipt.receiptId).toBe('rcp_rich');
+    expect(meta!.receipt.actualCredits).toBe(8);
+    expect(meta!.receipt.savings).toBe(2);
+    expect(meta!.receipt.savingsBonus).toBe(0.5);
+    expect(meta!.receipt.byok.enabled).toBe(true);
+    expect(meta!.receipt.byok.discountRate).toBe(0.1);
+    expect(meta!.creditEstimate).toBeDefined();
+    expect(meta!.creditEstimate!.estimatedTotal).toBe(10);
+  });
+
+  // ─── extractMeta: compact _dg format ─────────────────────────────────────────
+
+  it('extractMeta synthesizes from compact _dg format', () => {
+    const result = {
+      _dg: {
+        credits: {
+          estimated: 5,
+          charged: 4,
+          remaining: 96,
+          premium: 1.5,
+          llm: 2.5,
+        },
+      },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta).not.toBeNull();
+    expect(meta!.receipt.receiptId).toBe('');
+    expect(meta!.receipt.estimatedCredits).toBe(5);
+    expect(meta!.receipt.actualCredits).toBe(4);
+    expect(meta!.receipt.netCredits).toBe(4);
+    expect(meta!.receipt.balanceAfter).toBe(96);
+    expect(meta!.receipt.breakdown).toEqual({ premium: 1.5, llm: 2.5 });
+    expect(meta!.receipt.byok.enabled).toBe(false);
+    expect(meta!.creditEstimate).toBeUndefined();
+  });
+
+  it('extractMeta handles _dg with minimal credits', () => {
+    const result = {
+      _dg: { credits: { charged: 2 } },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta).not.toBeNull();
+    expect(meta!.receipt.estimatedCredits).toBe(0);
+    expect(meta!.receipt.actualCredits).toBe(2);
+    expect(meta!.receipt.breakdown).toEqual({});
+  });
+
+  it('extractMeta handles _dg with empty credits object', () => {
+    const result = { _dg: {} };
+
+    const meta = extractMeta(result);
+    expect(meta).not.toBeNull();
+    expect(meta!.receipt.estimatedCredits).toBe(0);
+    expect(meta!.receipt.actualCredits).toBe(0);
+  });
+
+  // ─── extractMeta: console.warn on missing metadata ──────────────────────────
+
+  it('extractMeta warns when no metadata found', () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    extractMeta({ result: 'no-meta' });
+
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    expect(consoleSpy.mock.calls[0][0]).toMatch(/No DataGrout metadata found/);
+    expect(consoleSpy.mock.calls[0][0]).toMatch(/Include DG Inline/);
+
+    consoleSpy.mockRestore();
+  });
+
+  // ─── extractMeta: priority order ─────────────────────────────────────────────
+
+  it('extractMeta prefers _meta.datagrout over _datagrout', () => {
+    const result = {
+      _meta: {
+        datagrout: {
+          receipt: {
+            receipt_id: 'rcp_rich',
+            timestamp: 'T1',
+            estimated_credits: 10,
+            actual_credits: 10,
+            net_credits: 10,
+            savings: 0,
+            savings_bonus: 0,
+            breakdown: {},
+            byok: {},
+          },
+        },
+      },
+      _datagrout: {
+        receipt: {
+          receipt_id: 'rcp_legacy',
+          timestamp: 'T2',
+          estimated_credits: 5,
+          actual_credits: 5,
+          net_credits: 5,
+          savings: 0,
+          savings_bonus: 0,
+          breakdown: {},
+          byok: {},
+        },
+      },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta!.receipt.receiptId).toBe('rcp_rich');
+  });
+
+  it('extractMeta prefers _datagrout over _dg', () => {
+    const result = {
+      _datagrout: {
+        receipt: {
+          receipt_id: 'rcp_legacy',
+          timestamp: 'T1',
+          estimated_credits: 5,
+          actual_credits: 5,
+          net_credits: 5,
+          savings: 0,
+          savings_bonus: 0,
+          breakdown: {},
+          byok: {},
+        },
+      },
+      _dg: { credits: { charged: 1 } },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta!.receipt.receiptId).toBe('rcp_legacy');
+    expect(meta!.receipt.actualCredits).toBe(5);
+  });
+
+  it('extractMeta falls through to _dg when rich and legacy are absent', () => {
+    const result = {
+      _dg: { credits: { charged: 3, remaining: 97 } },
+    };
+
+    const meta = extractMeta(result);
+    expect(meta!.receipt.actualCredits).toBe(3);
+    expect(meta!.receipt.balanceAfter).toBe(97);
   });
 
   // ─── Discover ────────────────────────────────────────────────────────────────
@@ -413,15 +589,15 @@ describe('Client', () => {
     expect(session.options).toHaveLength(1);
   });
 
-  // ─── prismFocus wire protocol ─────────────────────────────────────────────────
+  // ─── prism.focus wire protocol (namespaced) ──────────────────────────────────
 
-  it('prismFocus sends source_type and target_type (not lens)', async () => {
+  it('prism.focus sends source_type and target_type (not lens)', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ result: 'focused' }),
     });
 
-    await client.prismFocus({
+    await client.prism.focus({
       data: { value: 42 },
       sourceType: 'raw_json',
       targetType: 'crm_lead',
@@ -441,18 +617,17 @@ describe('Client', () => {
         context: 'sales pipeline',
       })
     );
-    // Must not contain 'lens'
     const calledParams = mock.callTool.mock.calls[0][1];
     expect(calledParams).not.toHaveProperty('lens');
   });
 
-  it('prismFocus omits optional snake_case keys when not provided', async () => {
+  it('prism.focus omits optional snake_case keys when not provided', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({}),
     });
 
-    await client.prismFocus({ data: 'hello', sourceType: 'text', targetType: 'summary' });
+    await client.prism.focus({ data: 'hello', sourceType: 'text', targetType: 'summary' });
 
     const calledParams = mock.callTool.mock.calls[0][1];
     expect(calledParams).not.toHaveProperty('source_annotations');
@@ -506,15 +681,15 @@ describe('Client', () => {
     expect(calledParams).not.toHaveProperty('return_call_handles');
   });
 
-  // ─── refract() ───────────────────────────────────────────────────────────────
+  // ─── prism.refract() (namespaced) ─────────────────────────────────────────────
 
-  it('refract sends data-grout/prism.refract with correct params', async () => {
+  it('prism.refract sends data-grout/prism.refract with correct params', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ output: 'refracted' }),
     });
 
-    await client.refract({ goal: 'summarise', payload: { data: [1, 2, 3] }, verbose: true, chart: false });
+    await client.prism.refract({ goal: 'summarise', payload: { data: [1, 2, 3] }, verbose: true, chart: false });
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/prism.refract',
@@ -527,15 +702,15 @@ describe('Client', () => {
     );
   });
 
-  // ─── chart() ─────────────────────────────────────────────────────────────────
+  // ─── prism.chart() (namespaced) ─────────────────────────────────────────────
 
-  it('chart sends data-grout/prism.chart with snake_case params', async () => {
+  it('prism.chart sends data-grout/prism.chart with snake_case params', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ url: 'chart.png' }),
     });
 
-    await client.chart({
+    await client.prism.chart({
       goal: 'visualise revenue',
       payload: { rows: [] },
       chartType: 'bar',
@@ -557,22 +732,21 @@ describe('Client', () => {
         height: 400,
       })
     );
-    // Must not have camelCase versions
     const calledParams = mock.callTool.mock.calls[0][1];
     expect(calledParams).not.toHaveProperty('chartType');
     expect(calledParams).not.toHaveProperty('xLabel');
     expect(calledParams).not.toHaveProperty('yLabel');
   });
 
-  // ─── Logic cell method names ──────────────────────────────────────────────────
+  // ─── Logic cell (namespaced) ──────────────────────────────────────────────────
 
-  it('remember sends data-grout/logic.remember', async () => {
+  it('logic.remember sends data-grout/logic.remember', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ handles: [], facts: [], count: 0, message: 'ok' }),
     });
 
-    await client.remember('Alice is a VIP customer');
+    await client.logic.remember('Alice is a VIP customer');
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/logic.remember',
@@ -580,13 +754,13 @@ describe('Client', () => {
     );
   });
 
-  it('queryCell sends data-grout/logic.query', async () => {
+  it('logic.query sends data-grout/logic.query', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ results: [], total: 0, description: '', message: 'ok' }),
     });
 
-    await client.queryCell('Who are the VIP customers?');
+    await client.logic.query('Who are the VIP customers?');
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/logic.query',
@@ -594,13 +768,13 @@ describe('Client', () => {
     );
   });
 
-  it('forget sends data-grout/logic.forget', async () => {
+  it('logic.forget sends data-grout/logic.forget', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ retracted: 1, handles: ['h1'], message: 'ok' }),
     });
 
-    await client.forget({ handles: ['h1'] });
+    await client.logic.forget({ handles: ['h1'] });
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/logic.forget',
@@ -608,13 +782,13 @@ describe('Client', () => {
     );
   });
 
-  it('reflect sends data-grout/logic.reflect', async () => {
+  it('logic.reflect sends data-grout/logic.reflect', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ total: 0, message: 'ok' }),
     });
 
-    await client.reflect({ summaryOnly: true });
+    await client.logic.reflect({ summaryOnly: true });
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/logic.reflect',
@@ -622,17 +796,37 @@ describe('Client', () => {
     );
   });
 
-  it('constrain sends data-grout/logic.constrain', async () => {
+  it('logic.constrain sends data-grout/logic.constrain', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     const mock = injectMockTransport(client, {
       callTool: vi.fn().mockResolvedValue({ handle: 'c1', name: 'rule', rule: 'rule', message: 'ok' }),
     });
 
-    await client.constrain('VIP customers have ARR > $500K');
+    await client.logic.constrain('VIP customers have ARR > $500K');
 
     expect(mock.callTool).toHaveBeenCalledWith(
       'data-grout/logic.constrain',
       expect.objectContaining({ rule: 'VIP customers have ARR > $500K' })
+    );
+  });
+
+  it('flow.route sends data-grout/flow.route', async () => {
+    const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
+    const mock = injectMockTransport(client, {
+      callTool: vi.fn().mockResolvedValue({ matched: 'branch_1' }),
+    });
+
+    await client.flow.route({
+      branches: [{ when: 'amount > 1000', then: 'approval_flow' }],
+      payload: { amount: 1500 },
+    });
+
+    expect(mock.callTool).toHaveBeenCalledWith(
+      'data-grout/flow.route',
+      expect.objectContaining({
+        branches: [{ when: 'amount > 1000', then: 'approval_flow' }],
+        payload: { amount: 1500 },
+      })
     );
   });
 

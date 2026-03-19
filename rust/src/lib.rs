@@ -143,6 +143,7 @@
 pub mod client;
 pub mod error;
 pub mod identity;
+pub mod namespaces;
 pub mod oauth;
 pub mod protocol;
 pub mod registration;
@@ -150,23 +151,23 @@ pub mod transport;
 pub mod types;
 
 pub use client::{
-    is_dg_url,
-    ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
+    is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
     GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
 };
 pub use error::{Error, RateLimit, Result};
 pub use identity::ConduitIdentity;
+pub use namespaces::{Deliverables, Ephemerals, Flow, Logic, Prism, Warden};
 pub use oauth::OAuthTokenProvider;
 pub use registration::{
     fetch_dg_ca_cert, generate_keypair, refresh_ca_cert, register_identity, rotate_identity,
-    save_identity_to_dir, DG_CA_URL, DG_SUBSTRATE_ENDPOINT, RegistrationOptions, RenewalOptions,
-    RegistrationResponse, SavedIdentityPaths,
+    save_identity_to_dir, RegistrationOptions, RegistrationResponse, RenewalOptions,
+    SavedIdentityPaths, DG_CA_URL, DG_SUBSTRATE_ENDPOINT,
 };
-pub use transport::{Transport, parse_sse_body};
+pub use transport::{parse_sse_body, Transport};
 pub use types::{
-    Byok, ChartOptions, ChartResult, CreditEstimate, DiscoverOptions, DiscoverResult, GuideOptions,
-    GuideState, PerformOptions, PlanOptions, PlanResult, Receipt, RefractOptions, RefractResult,
-    Tool, ToolMeta, extract_meta,
+    extract_meta, Byok, ChartOptions, ChartResult, CreditEstimate, DiscoverOptions, DiscoverResult,
+    GuideOptions, GuideState, PerformOptions, PlanOptions, PlanResult, Receipt, RefractOptions,
+    RefractResult, Tool, ToolMeta,
 };
 
 /// Re-export commonly used types

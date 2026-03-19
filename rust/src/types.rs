@@ -103,16 +103,84 @@ pub struct ToolMeta {
 
 /// Extract the DataGrout metadata block from a tool-call result.
 ///
-/// Checks `_datagrout` first (current format), then falls back to `_meta`
-/// for backward compatibility with older gateway responses.
+/// Checks sources in priority order:
+/// 1. `_meta.datagrout` — rich format (full receipts, CTCs, breakdown)
+/// 2. `_dg` — compact inline format (credits summary, cache_ref)
+/// 3. `_datagrout` / `_meta` — legacy formats
 ///
-/// Returns `None` when the result contains neither key (e.g. upstream
-/// servers that don't go through the DG gateway).
+/// When only the compact `_dg` format is available, a [`ToolMeta`] is
+/// synthesized from the credit fields present. When no metadata is found
+/// at all, a warning is logged and `None` is returned.
 pub fn extract_meta(result: &Value) -> Option<ToolMeta> {
-    result
+    // 1. Rich format: _meta.datagrout
+    if let Some(dg) = result.get("_meta").and_then(|m| m.get("datagrout")) {
+        if let Ok(meta) = serde_json::from_value::<ToolMeta>(dg.clone()) {
+            return Some(meta);
+        }
+    }
+
+    // 2. Legacy: top-level _datagrout or bare _meta
+    if let Some(meta) = result
         .get("_datagrout")
         .or_else(|| result.get("_meta"))
-        .and_then(|m| serde_json::from_value(m.clone()).ok())
+        .and_then(|m| serde_json::from_value::<ToolMeta>(m.clone()).ok())
+    {
+        return Some(meta);
+    }
+
+    // 3. Compact inline: _dg (synthesize a ToolMeta from credits)
+    if let Some(dg) = result.get("_dg") {
+        return Some(synthesize_from_dg(dg));
+    }
+
+    tracing::warn!(
+        "No DataGrout metadata found in tool result. \
+         Cost tracking data is unavailable. Enable 'Include DG Inline' \
+         or 'Include DataGrout Metadata' in your server settings."
+    );
+    None
+}
+
+fn synthesize_from_dg(dg: &Value) -> ToolMeta {
+    let credits = dg
+        .get("credits")
+        .cloned()
+        .unwrap_or(Value::Object(Default::default()));
+    let charged = credits
+        .get("charged")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let estimated = credits
+        .get("estimated")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let remaining = credits.get("remaining").and_then(|v| v.as_f64());
+
+    let mut breakdown = serde_json::Map::new();
+    if let Some(premium) = credits.get("premium").and_then(|v| v.as_f64()) {
+        breakdown.insert("premium".into(), serde_json::json!(premium));
+    }
+    if let Some(llm) = credits.get("llm").and_then(|v| v.as_f64()) {
+        breakdown.insert("llm".into(), serde_json::json!(llm));
+    }
+
+    ToolMeta {
+        receipt: Receipt {
+            receipt_id: String::new(),
+            transaction_id: None,
+            timestamp: String::new(),
+            estimated_credits: estimated,
+            actual_credits: charged,
+            net_credits: charged,
+            savings: 0.0,
+            savings_bonus: 0.0,
+            balance_before: None,
+            balance_after: remaining,
+            breakdown: Value::Object(breakdown),
+            byok: Byok::default(),
+        },
+        credit_estimate: None,
+    }
 }
 
 /// Discovery options

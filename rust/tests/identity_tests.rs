@@ -79,20 +79,29 @@ fn from_pem_accepts_optional_ca() {
 #[test]
 fn from_pem_rejects_bad_cert() {
     let err = ConduitIdentity::from_pem(BAD_PEM, KEY_PEM, None::<&str>).unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("certificate"), "{err}");
+    assert!(
+        err.to_string().to_lowercase().contains("certificate"),
+        "{err}"
+    );
 }
 
 #[test]
 fn from_pem_rejects_cert_as_key() {
     // Passing a cert where a key is expected
     let err = ConduitIdentity::from_pem(CERT_PEM, CERT_PEM, None::<&str>).unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("private key"), "{err}");
+    assert!(
+        err.to_string().to_lowercase().contains("private key"),
+        "{err}"
+    );
 }
 
 #[test]
 fn from_pem_rejects_bad_key() {
     let err = ConduitIdentity::from_pem(CERT_PEM, BAD_PEM, None::<&str>).unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("private key"), "{err}");
+    assert!(
+        err.to_string().to_lowercase().contains("private key"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -152,9 +161,12 @@ fn from_paths_errors_when_cert_has_bad_content() {
     std::fs::write(&cert_path, BAD_PEM).unwrap();
     std::fs::write(&key_path, KEY_PEM).unwrap();
 
-    let err = ConduitIdentity::from_paths(&cert_path, &key_path, None::<&std::path::Path>)
-        .unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("certificate"), "{err}");
+    let err =
+        ConduitIdentity::from_paths(&cert_path, &key_path, None::<&std::path::Path>).unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("certificate"),
+        "{err}"
+    );
 }
 
 // ─── from_env ────────────────────────────────────────────────────────────────
@@ -320,8 +332,12 @@ fn make_real_identity() -> ConduitIdentity {
     params.distinguished_name = dn;
     let cert = params.self_signed(&key_pair).expect("self-signed cert");
 
-    ConduitIdentity::from_pem(cert.pem().as_bytes(), key_pair.serialize_pem().as_bytes(), None::<&[u8]>)
-        .expect("real cert should load")
+    ConduitIdentity::from_pem(
+        cert.pem().as_bytes(),
+        key_pair.serialize_pem().as_bytes(),
+        None::<&[u8]>,
+    )
+    .expect("real cert should load")
 }
 
 #[tokio::test]

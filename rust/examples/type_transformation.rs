@@ -32,7 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let customer = client
-        .prism_focus()
+        .prism()
+        .focus()
         .data(lead_data.clone())
         .source_type("crm.lead@1")
         .target_type("billing.customer@1")
@@ -48,7 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Transform: Billing Customer → Support Ticket ---");
 
     let ticket = client
-        .prism_focus()
+        .prism()
+        .focus()
         .data(customer.clone())
         .source_type("billing.customer@1")
         .target_type("support.ticket@1")
@@ -65,7 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Lead → Customer → Ticket → Email");
 
     let email = client
-        .prism_focus()
+        .prism()
+        .focus()
         .data(ticket)
         .source_type("support.ticket@1")
         .target_type("email.message@1")

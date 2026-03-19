@@ -113,6 +113,25 @@ defmodule DatagroutConduit.Client do
   end
 
   @doc """
+  Execute multiple tool calls in a single gateway request.
+
+  Each element should be a map with `"tool"` and `"args"` keys.
+  Returns a list of results in the same order as the input calls.
+
+  ## Example
+
+      calls = [
+        %{"tool" => "data-grout/data.count", "args" => %{"data" => [1, 2, 3]}},
+        %{"tool" => "data-grout/data.keys",  "args" => %{"data" => %{"a" => 1}}}
+      ]
+      {:ok, results} = Client.perform_batch(client, calls)
+  """
+  @spec perform_batch(GenServer.server(), list(map())) :: {:ok, list()} | {:error, term()}
+  def perform_batch(client, calls) when is_list(calls) do
+    GenServer.call(client, {:perform_batch, calls}, 120_000)
+  end
+
+  @doc """
   Start or continue a guided execution session.
 
   ## Options
@@ -124,38 +143,6 @@ defmodule DatagroutConduit.Client do
   @spec guide(GenServer.server(), keyword()) :: {:ok, Types.GuideState.t()} | {:error, term()}
   def guide(client, opts) do
     GenServer.call(client, {:guide, opts}, 60_000)
-  end
-
-  @doc """
-  Execute a multi-step workflow plan.
-
-  ## Options
-
-    * `:plan` - Ordered list of tool call step descriptors (required)
-    * `:validate_ctc` - Validate each call against its CTC schema (default: `true`)
-    * `:save_as_skill` - Persist the flow as a reusable skill (default: `false`)
-    * `:input_data` - Runtime input data for the flow (optional)
-  """
-  @spec flow_into(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def flow_into(client, opts) do
-    GenServer.call(client, {:flow_into, opts}, 120_000)
-  end
-
-  @doc """
-  Focus data through a prism transformation.
-
-  ## Options
-
-    * `:data` - The data to transform (required)
-    * `:source_type` - Source type (required)
-    * `:target_type` - Target type (required)
-    * `:source_annotations` - Annotations describing source schema (optional)
-    * `:target_annotations` - Annotations describing target schema (optional)
-    * `:context` - Additional context for the transformation (optional)
-  """
-  @spec prism_focus(GenServer.server(), keyword()) :: {:ok, Types.PrismFocusResult.t()} | {:error, term()}
-  def prism_focus(client, opts) do
-    GenServer.call(client, {:prism_focus, opts}, 60_000)
   end
 
   @doc "Estimate cost of calling a tool without executing it."
@@ -184,198 +171,6 @@ defmodule DatagroutConduit.Client do
   @spec plan(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
   def plan(client, opts) do
     GenServer.call(client, {:plan, opts}, 60_000)
-  end
-
-  @doc """
-  Refract a payload through a goal-directed transformation.
-
-  ## Options
-
-    * `:goal` - Transformation goal (required)
-    * `:payload` - Data to transform (required)
-    * `:verbose` - Include detailed transformation trace
-    * `:chart` - Include chart in output
-  """
-  @spec refract(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def refract(client, opts) do
-    GenServer.call(client, {:refract, opts}, 120_000)
-  end
-
-  @doc """
-  Render a chart from a payload.
-
-  ## Options
-
-    * `:goal` - Chart description (required)
-    * `:payload` - Data to chart (required)
-    * `:format` - Output format (e.g. `"png"`, `"svg"`)
-    * `:chart_type` - Chart type (e.g. `"bar"`, `"line"`)
-    * `:title` - Chart title
-    * `:x_label` - X-axis label
-    * `:y_label` - Y-axis label
-    * `:width` - Width in pixels
-    * `:height` - Height in pixels
-  """
-  @spec chart(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def chart(client, opts) do
-    GenServer.call(client, {:chart, opts}, 60_000)
-  end
-
-  @doc """
-  Generate a document toward a natural-language goal.
-
-  ## Options
-
-    * `:goal` - Natural language description of the content to generate (required)
-    * `:payload` - Input data (optional)
-    * `:format` - Output format: markdown, html, pdf, json (default: markdown)
-    * `:sections` - Optional list of section specs
-  """
-  @spec render(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def render(client, opts) do
-    GenServer.call(client, {:render, opts}, 60_000)
-  end
-
-  @doc """
-  Convert content to another format (no LLM). Supports csv, xlsx, pdf, json, html, markdown, etc.
-
-  ## Options
-
-    * `:content` - Data or string to export (required)
-    * `:format` - Target format (required)
-    * `:style` - Optional styling options
-    * `:metadata` - Optional document metadata
-  """
-  @spec export(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def export(client, opts) do
-    GenServer.call(client, {:export, opts}, 60_000)
-  end
-
-  @doc """
-  Pause workflow for human approval. Use for destructive or policy-gated actions.
-
-  ## Options
-
-    * `:action` - Name of the action (required)
-    * `:details` - Action-specific payload
-    * `:reason` - Why approval is requested
-    * `:context` - Workflow context
-  """
-  @spec request_approval(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def request_approval(client, opts) do
-    GenServer.call(client, {:request_approval, opts}, 60_000)
-  end
-
-  @doc """
-  Request user clarification for missing fields. Pauses until user provides values.
-
-  ## Options
-
-    * `:missing_fields` - List of field names (required)
-    * `:reason` - Why this information is needed (required)
-    * `:current_data` - Data already collected
-    * `:suggestions` - Optional suggestions per field
-    * `:context` - Workflow context
-  """
-  @spec request_feedback(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def request_feedback(client, opts) do
-    GenServer.call(client, {:request_feedback, opts}, 60_000)
-  end
-
-  @doc """
-  List recent tool executions for the current server.
-
-  ## Options
-
-    * `:limit` - Max results (default: 50)
-    * `:offset` - Pagination offset
-    * `:status` - Filter by success, error, timeout
-    * `:refractions_only` - Only refraction executions
-  """
-  @spec execution_history(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def execution_history(client, opts \\ []) do
-    GenServer.call(client, {:execution_history, opts}, 60_000)
-  end
-
-  @doc """
-  Get details and transcript for a specific execution.
-
-  ## Options
-
-    * `:execution_id` - Unique execution ID (required)
-  """
-  @spec execution_details(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def execution_details(client, opts) do
-    GenServer.call(client, {:execution_details, opts}, 60_000)
-  end
-
-  # --- Logic Cell Methods ---
-
-  @doc """
-  Assert a fact or facts into the logic cell.
-
-  ## Options
-
-    * `:statement` - Natural language or fact string (mutually exclusive with `:facts`)
-    * `:facts` - A list of fact strings (mutually exclusive with `:statement`)
-    * `:tag` - Optional tag for grouping facts
-  """
-  @spec remember(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def remember(client, opts) do
-    GenServer.call(client, {:remember, opts}, 60_000)
-  end
-
-  @doc """
-  Query the logic cell.
-
-  ## Options
-
-    * `:question` - Natural language question (mutually exclusive with `:patterns`)
-    * `:patterns` - Query pattern list (mutually exclusive with `:question`)
-    * `:limit` - Maximum number of results
-  """
-  @spec query_cell(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def query_cell(client, opts) do
-    GenServer.call(client, {:query_cell, opts}, 60_000)
-  end
-
-  @doc """
-  Retract facts from the logic cell.
-
-  ## Options
-
-    * `:handles` - List of fact handles to retract (mutually exclusive with `:pattern`)
-    * `:pattern` - Pattern to retract matching facts (mutually exclusive with `:handles`)
-  """
-  @spec forget(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def forget(client, opts) do
-    GenServer.call(client, {:forget, opts}, 60_000)
-  end
-
-  @doc """
-  Assert a constraint rule into the logic cell.
-
-  ## Options
-
-    * `:rule` - Constraint rule text (required; server uses Prolog for evaluation)
-    * `:tag` - Optional tag for grouping constraints
-  """
-  @spec constrain(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def constrain(client, opts) do
-    GenServer.call(client, {:constrain, opts}, 60_000)
-  end
-
-  @doc """
-  Reflect on the current state of the logic cell.
-
-  ## Options
-
-    * `:entity` - Restrict reflection to a specific entity
-    * `:summary_only` - Return only a summary (omit raw facts)
-  """
-  @spec reflect(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
-  def reflect(client, opts \\ []) do
-    GenServer.call(client, {:reflect, opts}, 60_000)
   end
 
   # --- Generic Hook ---
@@ -703,6 +498,22 @@ defmodule DatagroutConduit.Client do
     end
   end
 
+  def handle_call({:perform_batch, calls}, _from, state) do
+    state = maybe_warn_non_dg(state, "perform_batch")
+    {id, state} = next_id(state)
+
+    case call_dg_tool(state, "data-grout/discovery.perform", calls, id) do
+      {:ok, results, state} when is_list(results) ->
+        {:reply, {:ok, results}, state}
+
+      {:ok, result, state} ->
+        {:reply, {:ok, [result]}, state}
+
+      {{:error, _} = err, state} ->
+        {:reply, err, state}
+    end
+  end
+
   def handle_call({:guide, opts}, _from, state) do
     state = maybe_warn_non_dg(state, "guide")
     {id, state} = next_id(state)
@@ -717,56 +528,6 @@ defmodule DatagroutConduit.Client do
       {:ok, result, state} ->
         guide_state = Types.parse_guide_state(result)
         {:reply, {:ok, guide_state}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:flow_into, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "flow_into")
-    {id, state} = next_id(state)
-
-    params =
-      %{
-        "plan" => Keyword.fetch!(opts, :plan),
-        "validate_ctc" => Keyword.get(opts, :validate_ctc, true),
-        "save_as_skill" => Keyword.get(opts, :save_as_skill, false)
-      }
-      |> maybe_put("input_data", Keyword.get(opts, :input_data))
-
-    case call_dg_tool(state, "data-grout/flow.into", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:prism_focus, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "prism_focus")
-    {id, state} = next_id(state)
-
-    params =
-      %{
-        "data" => Keyword.fetch!(opts, :data),
-        "source_type" => Keyword.fetch!(opts, :source_type),
-        "target_type" => Keyword.fetch!(opts, :target_type)
-      }
-      |> maybe_put("source_annotations", Keyword.get(opts, :source_annotations))
-      |> maybe_put("target_annotations", Keyword.get(opts, :target_annotations))
-      |> maybe_put("context", Keyword.get(opts, :context))
-
-    case call_dg_tool(state, "data-grout/prism.focus", params, id) do
-      {:ok, result, state} ->
-        prism = %Types.PrismFocusResult{
-          output: result["output"] || result,
-          source_type: Keyword.get(opts, :source_type),
-          target_type: Keyword.get(opts, :target_type)
-        }
-
-        {:reply, {:ok, prism}, state}
 
       {{:error, _} = err, state} ->
         {:reply, err, state}
@@ -816,221 +577,6 @@ defmodule DatagroutConduit.Client do
         {{:error, _} = err, state} ->
           {:reply, err, state}
       end
-    end
-  end
-
-  def handle_call({:refract, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "refract")
-    {id, state} = next_id(state)
-
-    params =
-      %{
-        "goal" => Keyword.fetch!(opts, :goal),
-        "payload" => Keyword.fetch!(opts, :payload)
-      }
-      |> maybe_put("verbose", Keyword.get(opts, :verbose))
-      |> maybe_put("chart", Keyword.get(opts, :chart))
-
-    case call_dg_tool(state, "data-grout/prism.refract", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:chart, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "chart")
-    {id, state} = next_id(state)
-
-    params =
-      %{
-        "goal" => Keyword.fetch!(opts, :goal),
-        "payload" => Keyword.fetch!(opts, :payload)
-      }
-      |> maybe_put("format", Keyword.get(opts, :format))
-      |> maybe_put("chart_type", Keyword.get(opts, :chart_type))
-      |> maybe_put("title", Keyword.get(opts, :title))
-      |> maybe_put("x_label", Keyword.get(opts, :x_label))
-      |> maybe_put("y_label", Keyword.get(opts, :y_label))
-      |> maybe_put("width", Keyword.get(opts, :width))
-      |> maybe_put("height", Keyword.get(opts, :height))
-
-    case call_dg_tool(state, "data-grout/prism.chart", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:render, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "render")
-    {id, state} = next_id(state)
-    params =
-      %{"goal" => Keyword.fetch!(opts, :goal), "format" => Keyword.get(opts, :format, "markdown")}
-      |> maybe_put("payload", Keyword.get(opts, :payload))
-      |> maybe_put("sections", Keyword.get(opts, :sections))
-    case call_dg_tool(state, "data-grout/prism.render", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:export, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "export")
-    {id, state} = next_id(state)
-    params =
-      %{"content" => Keyword.fetch!(opts, :content), "format" => Keyword.fetch!(opts, :format)}
-      |> maybe_put("style", Keyword.get(opts, :style))
-      |> maybe_put("metadata", Keyword.get(opts, :metadata))
-    case call_dg_tool(state, "data-grout/prism.export", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:request_approval, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "request_approval")
-    {id, state} = next_id(state)
-    params =
-      %{"action" => Keyword.fetch!(opts, :action)}
-      |> maybe_put("details", Keyword.get(opts, :details))
-      |> maybe_put("reason", Keyword.get(opts, :reason))
-      |> maybe_put("context", Keyword.get(opts, :context))
-    case call_dg_tool(state, "data-grout/flow.request-approval", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:request_feedback, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "request_feedback")
-    {id, state} = next_id(state)
-    params =
-      %{"missing_fields" => Keyword.fetch!(opts, :missing_fields), "reason" => Keyword.fetch!(opts, :reason)}
-      |> maybe_put("current_data", Keyword.get(opts, :current_data))
-      |> maybe_put("suggestions", Keyword.get(opts, :suggestions))
-      |> maybe_put("context", Keyword.get(opts, :context))
-    case call_dg_tool(state, "data-grout/flow.request-feedback", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:execution_history, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "execution_history")
-    {id, state} = next_id(state)
-    params =
-      %{"limit" => Keyword.get(opts, :limit, 50), "offset" => Keyword.get(opts, :offset, 0)}
-      |> maybe_put("status", Keyword.get(opts, :status))
-      |> maybe_put("refractions_only", Keyword.get(opts, :refractions_only))
-    case call_dg_tool(state, "data-grout/inspect.execution-history", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:execution_details, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "execution_details")
-    {id, state} = next_id(state)
-    params = %{"execution_id" => Keyword.fetch!(opts, :execution_id)}
-    case call_dg_tool(state, "data-grout/inspect.execution-details", params, id) do
-      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
-      {{:error, _} = err, new_state} -> {:reply, err, new_state}
-    end
-  end
-
-  def handle_call({:remember, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "remember")
-    {id, state} = next_id(state)
-
-    params =
-      %{}
-      |> maybe_put("statement", Keyword.get(opts, :statement))
-      |> maybe_put("facts", Keyword.get(opts, :facts))
-      |> maybe_put("tag", Keyword.get(opts, :tag))
-
-    case call_dg_tool(state, "data-grout/logic.remember", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:query_cell, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "query_cell")
-    {id, state} = next_id(state)
-
-    params =
-      %{}
-      |> maybe_put("question", Keyword.get(opts, :question))
-      |> maybe_put("patterns", Keyword.get(opts, :patterns))
-      |> maybe_put("limit", Keyword.get(opts, :limit))
-
-    case call_dg_tool(state, "data-grout/logic.query", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:forget, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "forget")
-    {id, state} = next_id(state)
-
-    params =
-      %{}
-      |> maybe_put("handles", Keyword.get(opts, :handles))
-      |> maybe_put("pattern", Keyword.get(opts, :pattern))
-
-    case call_dg_tool(state, "data-grout/logic.forget", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:constrain, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "constrain")
-    {id, state} = next_id(state)
-
-    params =
-      %{"rule" => Keyword.fetch!(opts, :rule)}
-      |> maybe_put("tag", Keyword.get(opts, :tag))
-
-    case call_dg_tool(state, "data-grout/logic.constrain", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:reflect, opts}, _from, state) do
-    state = maybe_warn_non_dg(state, "reflect")
-    {id, state} = next_id(state)
-
-    params =
-      %{}
-      |> maybe_put("entity", Keyword.get(opts, :entity))
-      |> maybe_put("summary_only", Keyword.get(opts, :summary_only))
-
-    case call_dg_tool(state, "data-grout/logic.reflect", params, id) do
-      {:ok, result, state} ->
-        {:reply, {:ok, result}, state}
-
-      {{:error, _} = err, state} ->
-        {:reply, err, state}
     end
   end
 

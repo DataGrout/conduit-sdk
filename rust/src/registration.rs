@@ -129,8 +129,8 @@ pub fn generate_keypair(name: &str) -> Result<ConduitIdentity> {
     params.not_after = not_after;
     params.subject_alt_names = vec![];
 
-    let key_pair = KeyPair::generate()
-        .map_err(|e| Error::Other(format!("key generation failed: {e}")))?;
+    let key_pair =
+        KeyPair::generate().map_err(|e| Error::Other(format!("key generation failed: {e}")))?;
 
     let cert = params
         .self_signed(&key_pair)
@@ -235,11 +235,8 @@ pub async fn register_identity(
 
         // Reconstruct the identity with the DG-signed cert + CA cert.
         let ca_bytes = body.ca_cert_pem.as_deref().map(|s| s.as_bytes().to_vec());
-        let identity = ConduitIdentity::from_pem(
-            body.cert_pem.as_bytes(),
-            keypair.key_pem_bytes(),
-            ca_bytes,
-        )?;
+        let identity =
+            ConduitIdentity::from_pem(body.cert_pem.as_bytes(), keypair.key_pem_bytes(), ca_bytes)?;
 
         Ok((identity, body))
     } else {
@@ -287,9 +284,7 @@ pub async fn rotate_identity(
         builder = builder.add_root_certificate(ca_cert);
     }
 
-    let client = builder
-        .build()
-        .map_err(|e| Error::Network(e.to_string()))?;
+    let client = builder.build().map_err(|e| Error::Network(e.to_string()))?;
 
     let url = format!("{}/rotate", opts.endpoint.trim_end_matches('/'));
 
@@ -345,8 +340,7 @@ pub async fn rotate_identity(
 pub const DG_CA_URL: &str = "https://ca.datagrout.ai/ca.pem";
 
 /// Default endpoint for Substrate identity registration.
-pub const DG_SUBSTRATE_ENDPOINT: &str =
-    "https://app.datagrout.ai/api/v1/substrate/identity";
+pub const DG_SUBSTRATE_ENDPOINT: &str = "https://app.datagrout.ai/api/v1/substrate/identity";
 
 /// Fetch the current DataGrout CA certificate from `ca.datagrout.ai`.
 ///

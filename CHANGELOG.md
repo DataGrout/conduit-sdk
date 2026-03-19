@@ -6,6 +6,48 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] - 2026-03-19
+
+### Breaking Changes
+
+- **Namespaced API** — domain-specific methods have moved from flat `client.method()` calls to namespaced accessors. This affects all five languages:
+  - `client.refract()` → `client.prism.refract()`
+  - `client.chart()` → `client.prism.chart()`
+  - `client.prism_focus()` → `client.prism.focus()`
+  - `client.remember()` → `client.logic.remember()`
+  - `client.query_cell()` → `client.logic.query()`
+  - `client.forget()` → `client.logic.forget()`
+  - `client.constrain()` → `client.logic.constrain()`
+  - `client.reflect()` → `client.logic.reflect()`
+  - `client.flow_into()` → `client.flow.run()`
+
+  The `dg(short_name, params)` escape hatch and core methods (`discover`, `plan`, `perform`, `guide`, `estimate_cost`, `call_tool`) remain on the client root.
+
+### Added
+
+- **Namespace modules** — six new sub-namespaces organize domain-specific tools:
+  - **`client.prism`** — `refract()`, `chart()`, `focus()`
+  - **`client.logic`** — `remember()`, `query()`, `forget()`, `constrain()`, `reflect()`, `hydrate()`, `worlds()`, `tabulate()`, `export()`, `import_facts()`
+  - **`client.warden`** — `adjudicate()`, `intent()`, `ensemble()`, `canary()`
+  - **`client.deliverables`** — `register()`, `list()`, `get()`
+  - **`client.ephemerals`** — `list()`, `inspect()`
+  - **`client.flow`** — `run()`, `route()`, `request_approval()`, `request_feedback()`
+- **First-class Warden wrappers** — `adjudicate`, `intent`, `ensemble`, `canary` for policy enforcement and security analysis.
+- **First-class Deliverables wrappers** — `register`, `list`, `get` for managing persistent output artifacts.
+- **First-class Ephemerals wrappers** — `list`, `inspect` for examining transient execution state.
+- **Expanded Logic Cell wrappers** — `hydrate`, `worlds`, `tabulate`, `export`, `import_facts` join the existing `remember`, `query`, `forget`, `constrain`, `reflect`.
+- **Flow orchestration wrappers** — `run` (née `flow_into`), `route`, `request_approval`, `request_feedback` for higher-order workflow composition.
+- **`perform_batch()`** — execute multiple tool calls in a single gateway request. Now available in all five languages (previously only Python and TypeScript).
+- **3-tier metadata fallback** — `extract_meta()` now checks `_meta.datagrout` (rich), `structuredContent._dg` / `_dg` (compact), and `_datagrout` / `_meta` (legacy) in order. Logs a warning when no cost tracking metadata is found.
+- **Higher-order workflow documentation** — README now documents named flows, unnamed flows (`$compute`), conditional routing, and human-in-the-loop patterns.
+
+### Changed
+
+- **README** updated with namespaced API examples across all languages, plus a comprehensive "Higher-Order Workflows" section.
+- **Elixir client** — removed dead `handle_call` clauses that became unreachable after namespace migration.
+
+---
+
 ## [0.1.0] - 2026-03-02
 
 Initial public release of the DataGrout Conduit SDK across five languages: Rust, TypeScript, Python, Elixir, and Ruby.
@@ -39,9 +81,11 @@ Initial public release of the DataGrout Conduit SDK across five languages: Rust,
 - `dg("prism.render", params)` — generate content (articles, reports, HTML, PDF, XLSX) from structured data.
 - `dg("prism.export", params)` — format conversion without LLM (JSON → CSV → XLSX → LaTeX etc.).
 - `dg("prism.paginate", params)` — page through large result sets by `cache_ref` or payload.
-- `dg("prism.code_lens", params)` — transform source code into queryable semantic facts.
-- `dg("prism.diff_analyzer", params)` — analyse code changes for alignment with a stated goal.
-- `dg("prism.code_query", params)` — execute Prolog queries over lensed code facts.
+### Invariant: Semantic Code Analysis
+
+- `dg("invariant.code_lens", params)` — transform source code into queryable semantic facts.
+- `dg("invariant.diff_analyzer", params)` — analyse code changes for alignment with a stated goal.
+- `dg("invariant.code_query", params)` — execute Prolog queries over lensed code facts.
 
 ### Logic Cell (Agent Memory)
 

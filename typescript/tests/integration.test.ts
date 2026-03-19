@@ -815,30 +815,30 @@ describe('Conduit URL integration (CONDUIT_TEST_URL)', () => {
     await expect(client.plan({})).rejects.toBeInstanceOf(ICE);
   });
 
-  test('forget() throws InvalidConfigError when neither handles nor pattern is provided', async () => {
+  test('logic.forget() throws InvalidConfigError when neither handles nor pattern is provided', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     // @ts-ignore
     client.initialized = true;
     const { InvalidConfigError: ICE } = await import('../src/errors');
-    await expect(client.forget({})).rejects.toBeInstanceOf(ICE);
+    await expect(client.logic.forget({})).rejects.toBeInstanceOf(ICE);
   });
 
-  test('remember() throws InvalidConfigError when neither statement nor facts is provided', async () => {
+  test('logic.remember() throws InvalidConfigError when neither statement nor facts is provided', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     // @ts-ignore
     client.initialized = true;
     const { InvalidConfigError: ICE } = await import('../src/errors');
-    await expect(client.remember('')).rejects.toBeInstanceOf(ICE);
-    await expect(client.remember({})).rejects.toBeInstanceOf(ICE);
+    await expect(client.logic.remember('')).rejects.toBeInstanceOf(ICE);
+    await expect(client.logic.remember({})).rejects.toBeInstanceOf(ICE);
   });
 
-  test('queryCell() throws InvalidConfigError when neither question nor patterns is provided', async () => {
+  test('logic.query() throws InvalidConfigError when neither question nor patterns is provided', async () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     // @ts-ignore
     client.initialized = true;
     const { InvalidConfigError: ICE } = await import('../src/errors');
-    await expect(client.queryCell('')).rejects.toBeInstanceOf(ICE);
-    await expect(client.queryCell({})).rejects.toBeInstanceOf(ICE);
+    await expect(client.logic.query('')).rejects.toBeInstanceOf(ICE);
+    await expect(client.logic.query({})).rejects.toBeInstanceOf(ICE);
   });
 
   test('error hierarchy: all Conduit errors extend ConduitError', async () => {

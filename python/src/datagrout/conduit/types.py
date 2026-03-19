@@ -115,3 +115,60 @@ class RateLimitStatus(BaseModel):
             is_limited=is_limited,
             remaining=remaining,
         )
+
+
+def extract_meta(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract DataGrout metadata from a tool-call result.
+
+    Checks sources in priority order:
+    1. ``result["_meta"]["datagrout"]`` — rich format
+    2. ``result["_datagrout"]`` / ``result["_meta"]`` — legacy
+    3. ``result["_dg"]`` — compact inline (synthesized)
+
+    Returns ``None`` when no metadata is found.
+    """
+    import logging
+
+    _log = logging.getLogger("datagrout.conduit")
+
+    # 1. Rich: _meta.datagrout
+    rich = (result.get("_meta") or {}).get("datagrout")
+    if rich and isinstance(rich, dict) and "receipt" in rich:
+        return rich
+
+    # 2. Legacy: _datagrout or bare _meta
+    for key in ("_datagrout", "_meta"):
+        legacy = result.get(key)
+        if legacy and isinstance(legacy, dict) and "receipt" in legacy:
+            return legacy
+
+    # 3. Compact: _dg (synthesize)
+    dg = result.get("_dg")
+    if dg and isinstance(dg, dict):
+        credits = dg.get("credits", {})
+        breakdown = {}
+        if "premium" in credits:
+            breakdown["premium"] = credits["premium"]
+        if "llm" in credits:
+            breakdown["llm"] = credits["llm"]
+        return {
+            "receipt": {
+                "receipt_id": "",
+                "timestamp": "",
+                "estimated_credits": credits.get("estimated", 0.0),
+                "actual_credits": credits.get("charged", 0.0),
+                "net_credits": credits.get("charged", 0.0),
+                "savings": 0.0,
+                "savings_bonus": 0.0,
+                "balance_after": credits.get("remaining"),
+                "breakdown": breakdown,
+                "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
+            }
+        }
+
+    _log.warning(
+        "No DataGrout metadata found in tool result. "
+        "Cost tracking data is unavailable. Enable 'Include DG Inline' "
+        "or 'Include DataGrout Metadata' in your server settings."
+    )
+    return None

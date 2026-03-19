@@ -94,9 +94,51 @@ export interface ToolMeta {
  * routed through the DG gateway).
  */
 export function extractMeta(result: Record<string, any>): ToolMeta | null {
-  const raw = result?._meta?.datagrout ?? result?._datagrout ?? result?._meta;
-  if (!raw?.receipt) return null;
+  // 1. Rich format: _meta.datagrout
+  const rich = result?._meta?.datagrout;
+  if (rich?.receipt) {
+    return buildToolMeta(rich);
+  }
 
+  // 2. Legacy: _datagrout or bare _meta
+  const legacy = result?._datagrout ?? result?._meta;
+  if (legacy?.receipt) {
+    return buildToolMeta(legacy);
+  }
+
+  // 3. Compact inline: _dg (synthesize)
+  const dg = result?._dg;
+  if (dg) {
+    const credits = dg.credits ?? {};
+    const breakdown: Record<string, any> = {};
+    if (credits.premium !== undefined) breakdown.premium = credits.premium;
+    if (credits.llm !== undefined) breakdown.llm = credits.llm;
+
+    return {
+      receipt: {
+        receiptId: '',
+        timestamp: '',
+        estimatedCredits: credits.estimated ?? 0,
+        actualCredits: credits.charged ?? 0,
+        netCredits: credits.charged ?? 0,
+        savings: 0,
+        savingsBonus: 0,
+        balanceAfter: credits.remaining,
+        breakdown,
+        byok: { enabled: false, discountApplied: 0, discountRate: 0 },
+      },
+    };
+  }
+
+  console.warn(
+    '[conduit] No DataGrout metadata found in tool result. ' +
+    'Cost tracking data is unavailable. Enable "Include DG Inline" ' +
+    'or "Include DataGrout Metadata" in your server settings.'
+  );
+  return null;
+}
+
+function buildToolMeta(raw: any): ToolMeta {
   const r = raw.receipt;
   const receipt: Receipt = {
     receiptId: r.receipt_id ?? '',

@@ -9,6 +9,14 @@ from .identity import ConduitIdentity
 from .transports import Transport, MCPTransport, JSONRPCTransport
 from .types import DiscoverResult, PerformResult, GuideState, GuideOptions, ToolInfo
 from .registration import Receipt
+from .namespaces import (
+    PrismNamespace,
+    LogicNamespace,
+    WardenNamespace,
+    DeliverablesNamespace,
+    EphemeralsNamespace,
+    FlowNamespace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +203,38 @@ class Client:
             raise RuntimeError(
                 "Client not initialized. Call connect() first or use 'async with'."
             )
+
+    # ===== Namespace Accessors =====
+
+    @property
+    def prism(self) -> PrismNamespace:
+        """Data transformation, charting, rendering, and type bridging."""
+        return PrismNamespace(self)
+
+    @property
+    def logic(self) -> LogicNamespace:
+        """Persistent agent memory backed by a Prolog logic cell."""
+        return LogicNamespace(self)
+
+    @property
+    def warden(self) -> WardenNamespace:
+        """Safety gates, intent verification, and multi-model consensus."""
+        return WardenNamespace(self)
+
+    @property
+    def deliverables(self) -> DeliverablesNamespace:
+        """Work product registration, listing, and retrieval."""
+        return DeliverablesNamespace(self)
+
+    @property
+    def ephemerals(self) -> EphemeralsNamespace:
+        """Cache listing and inspection."""
+        return EphemeralsNamespace(self)
+
+    @property
+    def flow(self) -> FlowNamespace:
+        """Multi-step orchestration, routing, approvals, and execution history."""
+        return FlowNamespace(self)
 
     async def _send_with_retry(self, fn: Any) -> Any:
         """Wrap a transport call with automatic retry on 'not initialized' errors.
@@ -425,147 +465,6 @@ class Client:
             lambda: self._transport.get_prompt(name, arguments, **kwargs)
         )
 
-    # ===== Logic Cell Extensions =====
-
-    async def remember(
-        self,
-        statement: str,
-        tag: str = "default",
-        facts: Optional[List[Dict[str, Any]]] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Store facts in the agent's persistent logic cell.
-
-        Converts natural language to symbolic facts and stores them durably.
-        The server uses Prolog for storage. Facts persist across sessions and
-        can be queried zero-token.
-
-        Args:
-            statement: Natural language statement to remember
-            tag: Tag/namespace for grouping facts (e.g. 'crm', 'project')
-            facts: Optional pre-structured fact list instead of NL statement
-
-        Returns:
-            Dict with handles, facts, and count
-        """
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"tag": tag, **kwargs}
-        if facts is not None:
-            params["facts"] = facts
-        else:
-            params["statement"] = statement
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/logic.remember", params)
-        )
-
-    async def query_cell(
-        self,
-        question: str,
-        limit: int = 50,
-        patterns: Optional[List[Dict[str, Any]]] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Query the agent's logic cell with natural language.
-
-        Translates question to query patterns and queries the cell.
-        Retrieval itself uses zero tokens.
-
-        Args:
-            question: Natural language question
-            limit: Maximum results
-            patterns: Optional pre-built pattern list
-
-        Returns:
-            Dict with results, total, and description
-        """
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"limit": limit, **kwargs}
-        if patterns is not None:
-            params["patterns"] = patterns
-        else:
-            params["question"] = question
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/logic.query", params)
-        )
-
-    async def forget(
-        self,
-        handles: Optional[List[str]] = None,
-        pattern: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Retract facts from the agent's logic cell.
-
-        Args:
-            handles: Specific fact handles to retract
-            pattern: NL pattern — retract all facts mentioning this text
-
-        Returns:
-            Dict with retracted count and handles
-        """
-        self._ensure_initialized()
-        params: Dict[str, Any] = {**kwargs}
-        if handles:
-            params["handles"] = handles
-        if pattern:
-            params["pattern"] = pattern
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/logic.forget", params)
-        )
-
-    async def reflect(
-        self,
-        entity: Optional[str] = None,
-        summary_only: bool = False,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Reflect on the agent's logic cell — full snapshot or per-entity view.
-
-        Args:
-            entity: Optional entity name to scope reflection
-            summary_only: If True, return only counts
-
-        Returns:
-            Dict with full cell summary or entity-scoped facts
-        """
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"summary_only": summary_only, **kwargs}
-        if entity:
-            params["entity"] = entity
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/logic.reflect", params)
-        )
-
-    async def constrain(
-        self,
-        rule: str,
-        tag: str = "constraint",
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """
-        Store a logical rule or policy in the agent's logic cell.
-
-        Args:
-            rule: Natural language rule (e.g. 'VIP customers have ARR > $500K')
-            tag: Tag/namespace for this constraint
-
-        Returns:
-            Dict with handle, name, and constraint rule text
-        """
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"rule": rule, "tag": tag, **kwargs}
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/logic.constrain", params)
-        )
-
     # ===== DG-awareness helpers =====
 
     def _warn_if_not_dg(self, method: str) -> None:
@@ -729,84 +628,6 @@ class Client:
 
         return GuidedSession(self, result)
 
-    async def flow_into(
-        self,
-        plan: List[Dict[str, Any]],
-        validate_ctc: bool = True,
-        save_as_skill: bool = False,
-        input_data: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Execute multi-step workflow (DataGrout-native).
-
-        Args:
-            plan: List of workflow steps
-            validate_ctc: Generate CTC for formal verification
-            save_as_skill: Save validated workflow as reusable skill
-            input_data: Initial input data for workflow
-
-        Returns:
-            Workflow execution result
-        """
-        self._ensure_initialized()
-        self._warn_if_not_dg("flow_into")
-        params = {
-            "plan": plan,
-            "validate_ctc": validate_ctc,
-            "save_as_skill": save_as_skill,
-            **kwargs,
-        }
-
-        if input_data:
-            params["input_data"] = input_data
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/flow.into", params)
-        )
-
-    async def prism_focus(
-        self,
-        data: Any,
-        source_type: str,
-        target_type: str,
-        source_annotations: Optional[Dict[str, Any]] = None,
-        target_annotations: Optional[Dict[str, Any]] = None,
-        context: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Semantic type transformation (DataGrout-native).
-
-        Args:
-            data: Data to transform
-            source_type: Source type annotation (e.g., "crm.lead@1")
-            target_type: Target type annotation (e.g., "billing.customer@1")
-            source_annotations: Optional extra annotations for the source type
-            target_annotations: Optional extra annotations for the target type
-            context: Optional natural language context hint for the transformation
-
-        Returns:
-            Transformed data
-        """
-        self._warn_if_not_dg("prism_focus")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {
-            "data": data,
-            "source_type": source_type,
-            "target_type": target_type,
-        }
-        if source_annotations:
-            params["source_annotations"] = source_annotations
-        if target_annotations:
-            params["target_annotations"] = target_annotations
-        if context:
-            params["context"] = context
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/prism.focus", params)
-        )
-
     async def plan(
         self,
         goal: Optional[str] = None,
@@ -846,281 +667,6 @@ class Client:
 
         return await self._send_with_retry(
             lambda: self._transport.call_tool("data-grout/discovery.plan", params)
-        )
-
-    async def refract(
-        self,
-        goal: str,
-        payload: Any,
-        verbose: bool = False,
-        chart: bool = False,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Refract (analyse/transform) a payload toward a goal (DataGrout-native).
-
-        Args:
-            goal: Natural language transformation or analysis goal
-            payload: Input data to refract
-            verbose: Return intermediate reasoning steps
-            chart: Include a chart in the output
-
-        Returns:
-            Refracted result
-        """
-        self._warn_if_not_dg("refract")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {
-            "goal": goal,
-            "payload": payload,
-            "verbose": verbose,
-            "chart": chart,
-            **kwargs,
-        }
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/prism.refract", params)
-        )
-
-    async def chart(
-        self,
-        goal: str,
-        payload: Any,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Generate a chart from data (DataGrout-native).
-
-        Args:
-            goal: Natural language description of the desired chart
-            payload: Input data to visualise
-            **kwargs: Optional format, chart_type, title, x_label, y_label,
-                width, height
-
-        Returns:
-            Chart result (format depends on server config)
-        """
-        self._warn_if_not_dg("chart")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"goal": goal, "payload": payload}
-        _CHART_OPTS = (
-            "format", "chart_type", "title", "x_label", "y_label", "width", "height",
-        )
-        for key in _CHART_OPTS:
-            if key in kwargs:
-                params[key] = kwargs.pop(key)
-
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/prism.chart", params)
-        )
-
-    async def render(
-        self,
-        goal: str,
-        payload: Any = None,
-        format: str = "markdown",
-        sections: Optional[List[Dict[str, Any]]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Generate a document toward a natural-language goal (DataGrout-native).
-
-        The server chooses the best rendering strategy for the target format.
-        Supported formats include markdown, html, pdf, json.
-
-        Args:
-            goal: Natural language description of the content to generate
-            payload: Input data to base the content on
-            format: Output format (markdown, html, pdf, json)
-            sections: Optional list of section specs (id, goal, data, type)
-            **kwargs: Additional options passed to the tool
-
-        Returns:
-            Generated content (structure depends on format and server)
-        """
-        self._warn_if_not_dg("render")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"goal": goal, "format": format, **kwargs}
-        if payload is not None:
-            params["payload"] = payload
-        if sections is not None:
-            params["sections"] = sections
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/prism.render", params)
-        )
-
-    async def export(
-        self,
-        content: Any,
-        format: str,
-        style: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Convert content to another format (DataGrout-native).
-
-        Fast format conversion without LLM. Supports pdf, json, csv, xlsx,
-        html, markdown, xml, latex, ndjson, yaml, txt.
-
-        Args:
-            content: Data or string to export
-            format: Target format (e.g. "csv", "xlsx", "pdf")
-            style: Optional styling (theme, page_size, font_size, etc.)
-            metadata: Optional document metadata (title, author, etc.)
-            **kwargs: Format-specific options (e.g. csv_delimiter)
-
-        Returns:
-            Dict with output, format, size_bytes, and metadata
-        """
-        self._warn_if_not_dg("export")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"content": content, "format": format, **kwargs}
-        if style is not None:
-            params["style"] = style
-        if metadata is not None:
-            params["metadata"] = metadata
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool("data-grout/prism.export", params)
-        )
-
-    async def request_approval(
-        self,
-        action: str,
-        details: Optional[Dict[str, Any]] = None,
-        reason: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Pause workflow for human approval (DataGrout-native).
-
-        Use when an operation is destructive or policy requires confirmation.
-        Execution blocks until the user approves, rejects, or modifies.
-
-        Args:
-            action: Name of the action (e.g. "create_invoice", "delete_record")
-            details: Action-specific payload (amount, customer, etc.)
-            reason: Why approval is being requested
-            context: Workflow context (workflow_id, step, etc.)
-            **kwargs: Additional params for the tool
-
-        Returns:
-            Approval result (status, decision, etc.)
-        """
-        self._warn_if_not_dg("request_approval")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"action": action, **kwargs}
-        if details is not None:
-            params["details"] = details
-        if reason is not None:
-            params["reason"] = reason
-        if context is not None:
-            params["context"] = context
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(
-                "data-grout/flow.request-approval", params
-            )
-        )
-
-    async def request_feedback(
-        self,
-        missing_fields: List[str],
-        reason: str,
-        current_data: Optional[Dict[str, Any]] = None,
-        suggestions: Optional[Dict[str, Any]] = None,
-        context: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        Request user clarification for missing fields (DataGrout-native).
-
-        Pauses workflow until the user provides values for the required fields.
-
-        Args:
-            missing_fields: List of field names that need values
-            reason: Why this information is needed
-            current_data: Data already collected (for context)
-            suggestions: Optional suggested options per field
-            context: Workflow context
-            **kwargs: Additional params for the tool
-
-        Returns:
-            Feedback result (status, provided_data, feedback_id)
-        """
-        self._warn_if_not_dg("request_feedback")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {
-            "missing_fields": missing_fields,
-            "reason": reason,
-            **kwargs,
-        }
-        if current_data is not None:
-            params["current_data"] = current_data
-        if suggestions is not None:
-            params["suggestions"] = suggestions
-        if context is not None:
-            params["context"] = context
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(
-                "data-grout/flow.request-feedback", params
-            )
-        )
-
-    async def execution_history(
-        self,
-        limit: int = 50,
-        offset: int = 0,
-        status: Optional[str] = None,
-        refractions_only: bool = False,
-        **kwargs: Any,
-    ) -> Any:
-        """
-        List recent tool executions for the current server (DataGrout-native).
-
-        Args:
-            limit: Max results (default 50, max 500)
-            offset: Pagination offset
-            status: Filter by success, error, or timeout
-            refractions_only: Only show refraction executions
-            **kwargs: Additional params for the tool
-
-        Returns:
-            Dict with executions list, count, limit, offset
-        """
-        self._warn_if_not_dg("execution_history")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {
-            "limit": limit,
-            "offset": offset,
-            "refractions_only": refractions_only,
-            **kwargs,
-        }
-        if status is not None:
-            params["status"] = status
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(
-                "data-grout/inspect.execution-history", params
-            )
-        )
-
-    async def execution_details(self, execution_id: str, **kwargs: Any) -> Any:
-        """
-        Get details and transcript for a specific execution (DataGrout-native).
-
-        Args:
-            execution_id: Unique execution ID (from execution_history or MCP)
-            **kwargs: Additional params for the tool
-
-        Returns:
-            Dict with execution object and found flag
-        """
-        self._warn_if_not_dg("execution_details")
-        self._ensure_initialized()
-        params: Dict[str, Any] = {"execution_id": execution_id, **kwargs}
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(
-                "data-grout/inspect.execution-details", params
-            )
         )
 
     async def dg(

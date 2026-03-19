@@ -248,77 +248,177 @@ Cryptographic proof that workflows are cycle-free, type-safe, policy-compliant, 
 
 ## DataGrout First-Party Tools
 
-Beyond standard MCP `tools/call`, every SDK exposes the full DataGrout server API as typed methods. These use direct JSON-RPC calls to the server — no extra round-trips.
+Beyond standard MCP `tools/call`, every SDK exposes the full DataGrout server API as typed, namespaced methods. Domain-specific tools are organized into six namespaces:
+
+| Namespace | Purpose |
+|-----------|---------|
+| `prism` | Data transformation, charting, rendering, export, type bridging |
+| `logic` | Persistent agent memory backed by a Prolog logic cell |
+| `warden` | Safety gates, intent verification, multi-model consensus |
+| `deliverables` | Work product registration, listing, retrieval |
+| `ephemerals` | Cache management — list and inspect cached results |
+| `flow` | Workflow orchestration, routing, human-in-the-loop, execution history |
+
+Core discovery methods (`discover`, `perform`, `guide`, `plan`, `dg`) remain directly on the client.
 
 ### Discovery & Planning
 
 ```python
-# Find and rank tools by intent
 results = await client.discover(query="find unpaid invoices", limit=5)
-
-# Generate a ranked workflow plan from a goal
 plan = await client.plan(goal="onboard a new enterprise customer")
-
-# Execute a discovered tool with tracking
 result = await client.perform("salesforce@1/get_lead@1", args={"id": "123"})
-
-# Interactive multi-step workflow
 session = await client.guide(goal="create invoice from opportunity")
-
-# Execute the resulting workflow plan
-outcome = await client.flow_into(plan_id=session.plan_id, steps=session.steps)
 ```
 
 ### Prism: Data Transformation & Visualisation
 
 ```python
-# Transform a data payload toward a natural-language goal (plan compiled and cached on first use)
-transformed = await client.refract(goal="group invoices by customer", payload=raw_data)
+transformed = await client.prism.refract(goal="group invoices by customer", payload=raw_data)
 
-# Visualise as a chart (SVG, sparkline, Unicode)
-chart = await client.chart(goal="bar chart of outstanding amounts", payload=invoice_data,
-                           chart_type="bar", x_label="Customer", y_label="Amount (USD)")
+chart = await client.prism.chart(goal="bar chart of outstanding amounts", payload=invoice_data,
+                                 chart_type="bar", x_label="Customer", y_label="Amount (USD)")
 
-# Semantic type bridge between semio types
-focused = await client.prism_focus(data=payload, source_type="invoice_list",
+focused = await client.prism.focus(data=payload, source_type="invoice_list",
                                    target_type="crm_opportunity_list")
 
-# Estimate credits before running an expensive tool
-estimate = await client.estimate_cost("prism.refract", {"goal": "...", "payload": large_data})
+rendered = await client.prism.render(goal="executive summary", payload=data)
+exported = await client.prism.export(content=data, format="csv")
 ```
 
 ### Logic Cell (Agent Memory)
 
 ```python
-# Persist facts across sessions
-await client.remember(statement="Customer Acme Corp has net-30 payment terms")
+await client.logic.remember(statement="Customer Acme Corp has net-30 payment terms")
+facts = await client.logic.query(question="What are Acme Corp's payment terms?")
+await client.logic.forget(handles=[fact.handle])
+await client.logic.constrain(rule="never schedule calls outside business hours")
+snapshot = await client.logic.reflect()
+```
 
-# Query stored facts
-facts = await client.query_cell(question="What are Acme Corp's payment terms?")
+### Warden: Safety & Verification
 
-# Retract a fact by handle
-await client.forget(handles=[fact.handle])
+```python
+check = await client.warden.canary({"action": "delete_all", "scope": "production"})
+intent = await client.warden.verify_intent({"action": "transfer_funds", "amount": 50000})
+verdict = await client.warden.adjudicate({"claim": "user authorized bulk delete"})
+consensus = await client.warden.ensemble({"question": "Is this action safe?", "models": 3})
+```
 
-# Add a rule/policy
-await client.constrain(rule="never schedule calls outside business hours")
+### Flow: Workflow Orchestration
 
-# Introspect all known facts
-snapshot = await client.reflect()
+```python
+outcome = await client.flow.run(plan=[
+    {"tool": "salesforce@1/get_lead@1", "args": {"id": "123"}},
+    {"tool": "quickbooks@1/create_invoice@1", "args": {"$prev.result": True}}
+])
+
+matched = await client.flow.route(
+    branches=[{"when": "amount > 1000", "then": "approval"}, {"when": "True", "then": "auto"}],
+    payload={"amount": 1500}
+)
+
+await client.flow.request_approval(action="delete customer record", reason="GDPR request")
+await client.flow.request_feedback(missing_fields=["email"], reason="Required for notification")
+history = await client.flow.history(limit=20)
+details = await client.flow.details(execution_id="exec-abc123")
+```
+
+### Higher-Order Workflows
+
+DataGrout supports **higher-order workflows** — a functional programming concept where flows are passed as parameters to other tool calls. This enables composable, reusable automation.
+
+#### Named Flows (Skills)
+
+When you save a flow with `save_as_skill=True`, it becomes a named skill that can be referenced by other flows:
+
+```python
+await client.flow.run(
+    plan=[
+        {"tool": "salesforce@1/get_lead@1", "args": {"id": "$input.lead_id"}},
+        {"tool": "data-grout/prism.refract", "args": {"goal": "extract contact info", "payload": "$prev.result"}}
+    ],
+    save_as_skill=True,
+    input_data={"lead_id": "123"}
+)
+```
+
+Once saved, a skill can be invoked by name inside another flow's plan, treating it as a first-class callable:
+
+```python
+await client.flow.run(plan=[
+    {"tool": "my-saved-skill", "args": {"lead_id": "456"}},
+    {"tool": "slack@1/send_message@1", "args": {"channel": "#sales", "text": "$prev.result"}}
+])
+```
+
+#### Unnamed Flows (Inline Plans / Lambdas)
+
+You can embed an unnamed flow inline using `$compute` — the functional equivalent of a lambda or anonymous function:
+
+```python
+await client.flow.run(plan=[
+    {"tool": "data-grout/data.query", "args": {"query": "SELECT * FROM leads WHERE status = 'new'"}},
+    {"tool": "data-grout/prism.refract", "args": {
+        "goal": "enrich each lead",
+        "payload": "$prev.result",
+        "transform": {"$compute": [
+            {"tool": "clearbit@1/enrich@1", "args": {"email": "$item.email"}},
+            {"tool": "data-grout/prism.refract", "args": {"goal": "merge enrichment", "payload": "$prev.result"}}
+        ]}
+    }}
+])
+```
+
+#### Conditional Routing
+
+Use `flow.route` for predicate-based dispatch — routing payloads to different branches based on conditions:
+
+```python
+matched = await client.flow.route(
+    branches=[
+        {"when": "amount > 10000", "then": "high-value-onboarding"},
+        {"when": "amount > 1000", "then": "standard-onboarding"},
+        {"when": "True", "then": "self-serve"}
+    ],
+    payload={"amount": 5000, "customer": "Acme Corp"}
+)
+```
+
+#### Human-in-the-Loop
+
+Insert approval gates or feedback requests at any point in a flow:
+
+```python
+await client.flow.request_approval(
+    action="send bulk email to 10,000 contacts",
+    reason="Campaign launch requires manager approval",
+    details={"template": "spring-promo", "count": 10000}
+)
+
+await client.flow.request_feedback(
+    missing_fields=["billing_email", "tax_id"],
+    reason="Required for invoice generation",
+    suggestions={"billing_email": "finance@acme.com"}
+)
+```
+
+### Deliverables & Ephemerals
+
+```python
+await client.deliverables.register({"type": "report", "title": "Q1 Summary", "content": report})
+items = await client.deliverables.list()
+item = await client.deliverables.get("ref-abc123")
+
+cached = await client.ephemerals.list()
+entry = await client.ephemerals.inspect("cache-ref-xyz")
 ```
 
 ### Generic Hook
 
-For any DataGrout tool not yet covered by a typed method, use the generic `dg()` hook:
+For any DataGrout tool not yet covered by a namespace method, use the generic `dg()` hook:
 
 ```python
-# e.g. generate a report from structured data
-report = await client.dg("prism.render", {"goal": "executive summary", "payload": data})
-
-# Pause for human approval before a destructive step
-await client.dg("flow.request-approval", {"action": "delete customer record", "id": "123"})
-
-# Code analysis
-facts = await client.dg("prism.code_lens", {"source": source_code, "language": "python"})
+facts = await client.dg("invariant.code_lens", {"source": source_code, "language": "python"})
 ```
 
 ---

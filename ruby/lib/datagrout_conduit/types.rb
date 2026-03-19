@@ -90,6 +90,62 @@ module DatagroutConduit
     end
   end
 
+  # Extract DataGrout metadata from a tool-call result hash.
+  #
+  # Checks sources in priority order:
+  # 1. +result["_meta"]["datagrout"]+ — rich format
+  # 2. +result["_datagrout"]+ / +result["_meta"]+ — legacy
+  # 3. +result["_dg"]+ — compact inline (synthesized)
+  #
+  # Returns +nil+ when no metadata is found.
+  def self.extract_meta(result)
+    return nil unless result.is_a?(Hash)
+
+    # 1. Rich: _meta.datagrout
+    rich = result.dig("_meta", "datagrout")
+    if rich.is_a?(Hash) && rich["receipt"]
+      return ToolMeta.from_hash(rich)
+    end
+
+    # 2. Legacy: _datagrout or bare _meta
+    %w[_datagrout _meta].each do |key|
+      legacy = result[key]
+      if legacy.is_a?(Hash) && legacy["receipt"]
+        return ToolMeta.from_hash(legacy)
+      end
+    end
+
+    # 3. Compact: _dg
+    dg = result["_dg"]
+    if dg.is_a?(Hash)
+      credits = dg["credits"] || {}
+      breakdown = {}
+      breakdown["premium"] = credits["premium"] if credits.key?("premium")
+      breakdown["llm"] = credits["llm"] if credits.key?("llm")
+
+      return ToolMeta.new(
+        receipt: Receipt.new(
+          receipt_id: nil,
+          timestamp: nil,
+          estimated_credits: (credits["estimated"] || 0.0).to_f,
+          actual_credits: (credits["charged"] || 0.0).to_f,
+          net_credits: (credits["charged"] || 0.0).to_f,
+          savings: 0.0,
+          savings_bonus: 0.0,
+          balance_after: credits["remaining"]&.to_f,
+          breakdown: breakdown,
+          byok: Byok.new(enabled: false, discount_applied: 0.0, discount_rate: 0.0)
+        ),
+        credit_estimate: nil
+      )
+    end
+
+    warn "[conduit] No DataGrout metadata found in tool result. " \
+         "Cost tracking data is unavailable. Enable 'Include DG Inline' " \
+         "or 'Include DataGrout Metadata' in your server settings."
+    nil
+  end
+
   DiscoveredTool = Struct.new(:name, :description, :input_schema, :score, :integration, :server, keyword_init: true) do
     def self.from_hash(hash)
       hash = hash.transform_keys(&:to_s)

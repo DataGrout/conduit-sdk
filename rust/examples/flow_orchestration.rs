@@ -53,12 +53,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Executing Workflow ---");
     println!("Steps:");
     for (i, step) in plan.iter().enumerate() {
-        println!("  {}. {}", i + 1, step["tool"].as_str().unwrap_or("unknown"));
+        println!(
+            "  {}. {}",
+            i + 1,
+            step["tool"].as_str().unwrap_or("unknown")
+        );
     }
 
     // Execute with CTC validation
     let result = client
-        .flow_into(plan.clone())
+        .flow()
+        .run(plan.clone())
         .validate_ctc(true) // Generate CTC for formal verification
         .save_as_skill(false) // Don't save as reusable skill
         .input_data(json!({}))
@@ -71,15 +76,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(meta) = datagrout_conduit::extract_meta(&result) {
         let r = &meta.receipt;
-        println!("\n📄 Receipt: {} — estimated {:.4} / actual {:.4} / net {:.4} credits",
-            r.receipt_id, r.estimated_credits, r.actual_credits, r.net_credits);
+        println!(
+            "\n📄 Receipt: {} — estimated {:.4} / actual {:.4} / net {:.4} credits",
+            r.receipt_id, r.estimated_credits, r.actual_credits, r.net_credits
+        );
     }
 
     // Example 2: Save as reusable skill
     println!("\n--- Saving as Reusable Skill ---");
 
     let result = client
-        .flow_into(plan)
+        .flow()
+        .run(plan)
         .validate_ctc(true)
         .save_as_skill(true) // Save for reuse
         .execute()

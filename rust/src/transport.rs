@@ -79,9 +79,7 @@ fn build_http_client(identity: Option<&ConduitIdentity>) -> Result<HttpClient> {
         }
 
         if id.needs_rotation(30) {
-            tracing::warn!(
-                "conduit: mTLS certificate expires within 30 days — consider rotating"
-            );
+            tracing::warn!("conduit: mTLS certificate expires within 30 days — consider rotating");
         }
     }
 
@@ -113,9 +111,7 @@ fn build_headers(auth: &AuthConfig) -> header::HeaderMap {
         AuthConfig::Basic { username, password } => {
             let credentials =
                 general_purpose::STANDARD.encode(format!("{}:{}", username, password));
-            if let Ok(value) =
-                header::HeaderValue::from_str(&format!("Basic {}", credentials))
-            {
+            if let Ok(value) = header::HeaderValue::from_str(&format!("Basic {}", credentials)) {
                 headers.insert(header::AUTHORIZATION, value);
             }
         }
@@ -257,7 +253,11 @@ fn check_rate_limit(response: &reqwest::Response) -> Option<Error> {
         RateLimit::PerHour(limit_str.parse().unwrap_or(50))
     };
 
-    Some(Error::RateLimit { retry_after, used, limit })
+    Some(Error::RateLimit {
+        retry_after,
+        used,
+        limit,
+    })
 }
 
 // ─── MCP transport (SSE-based) ──────────────────────────────────────────────
@@ -372,10 +372,7 @@ impl TransportTrait for McpTransport {
         }
 
         if !response.status().is_success() {
-            return Err(Error::network(format!(
-                "HTTP {} error",
-                response.status()
-            )));
+            return Err(Error::network(format!("HTTP {} error", response.status())));
         }
 
         let json_response = parse_response(response).await?;
@@ -508,10 +505,7 @@ impl TransportTrait for JsonRpcTransport {
         }
 
         if !response.status().is_success() {
-            return Err(Error::network(format!(
-                "HTTP {} error",
-                response.status()
-            )));
+            return Err(Error::network(format!("HTTP {} error", response.status())));
         }
 
         let json_response = parse_response(response).await?;
