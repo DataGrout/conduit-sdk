@@ -5,7 +5,7 @@ require_relative "test_helper"
 class DatagroutConduitTest < Minitest::Test
   def test_version
     refute_nil DatagroutConduit::VERSION
-    assert_equal "0.2.0", DatagroutConduit::VERSION
+    assert_equal "0.3.0", DatagroutConduit::VERSION
   end
 
   def test_dg_url_recognizes_datagrout_ai
