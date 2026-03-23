@@ -5,21 +5,21 @@
 Drop-in replacement for standard MCP clients. Swap one import line and your agent gains semantic discovery, cost tracking, mTLS identity management, and OAuth 2.1 — without changing any other code.
 
 [![CI](https://github.com/DataGrout/conduit-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/DataGrout/conduit-sdk/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/datagrout-conduit?label=PyPI&color=3775A9)](https://pypi.org/project/datagrout-conduit)
-[![npm](https://img.shields.io/npm/v/@datagrout/conduit?label=npm&color=CB3837)](https://www.npmjs.com/package/@datagrout/conduit)
-[![crates.io](https://img.shields.io/crates/v/datagrout-conduit?label=crates.io&color=f74c00)](https://crates.io/crates/datagrout-conduit)
+[![PyPI](https://img.shields.io/pypi/v/datagrout-conduit?label=PyPI&color=3572A5)](https://pypi.org/project/datagrout-conduit)
+[![npm](https://img.shields.io/npm/v/@datagrout/conduit?label=npm&color=3178C6)](https://www.npmjs.com/package/@datagrout/conduit)
+[![crates.io](https://img.shields.io/crates/v/datagrout-conduit?label=crates.io&color=DEA584)](https://crates.io/crates/datagrout-conduit)
 [![Hex.pm](https://img.shields.io/hexpm/v/datagrout_conduit?label=hex.pm&color=6E4A7E)](https://hex.pm/packages/datagrout_conduit)
-[![RubyGems](https://img.shields.io/gem/v/datagrout-conduit?label=RubyGems&color=CC342D)](https://rubygems.org/gems/datagrout-conduit)
+[![RubyGems](https://img.shields.io/gem/v/datagrout-conduit?label=RubyGems&color=701516)](https://rubygems.org/gems/datagrout-conduit)
 
 ## Available Languages
 
 | Language | Package | Install |
 |----------|---------|---------|
-| **Python** | `datagrout-conduit` | `pip install datagrout-conduit` |
-| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit` |
-| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit` |
+| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.3.0` |
+| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.3.0` |
+| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.3.0` |
 | **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.3.0"}` |
-| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit` |
+| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.3.0` |
 
 ## Quick Start
 

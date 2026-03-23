@@ -2,7 +2,7 @@
 
 Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, and cost tracking.
 
-[![Crates.io](https://img.shields.io/crates/v/datagrout-conduit.svg)](https://crates.io/crates/datagrout-conduit)
+[![Crates.io](https://img.shields.io/crates/v/datagrout-conduit.svg?color=DEA584)](https://crates.io/crates/datagrout-conduit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
 
 ## Features
@@ -20,7 +20,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-datagrout-conduit = "0.1.0"
+datagrout-conduit = "0.3.0"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 ```

@@ -11,7 +11,7 @@ Add `datagrout_conduit` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:datagrout_conduit, "~> 0.1.0"}
+    {:datagrout_conduit, "~> 0.3.0"}
   ]
 end
 ```
