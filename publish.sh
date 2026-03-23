@@ -53,6 +53,21 @@ fi
 echo "New version:     $NEW_VERSION"
 echo ""
 
+# ─── Confirm before continuing ────────────────────────────────────────────────
+
+if [[ -t 0 ]]; then
+  read -r -p "Continue with version bump to $NEW_VERSION? [y/N] " CONFIRM
+  case "${CONFIRM:-}" in
+    y|Y|yes|YES)
+      ;;
+    *)
+      echo "Cancelled."
+      exit 0
+      ;;
+  esac
+  echo ""
+fi
+
 # ─── Version parity check ────────────────────────────────────────────────────
 
 TS_VER=$(grep '"version"' typescript/package.json | head -1 | sed 's/.*"\([0-9][^"]*\)".*/\1/')
@@ -278,14 +293,18 @@ else
   fi
   echo ""
 
-  # Git tag (only if not already tagged)
+  # Git commit + tag after publish
   git add -A
   if ! git diff --cached --quiet; then
     git commit -m "release: v$NEW_VERSION"
   fi
-  if ! git tag -l "v$NEW_VERSION" | grep -q .; then
-    git tag "v$NEW_VERSION"
+
+  if git tag -l "v$NEW_VERSION" | grep -q .; then
+    echo "Local tag v$NEW_VERSION already exists — deleting and recreating it."
+    git tag -d "v$NEW_VERSION"
   fi
+
+  git tag "v$NEW_VERSION"
 
   echo ""
   if [[ ${#FAILED[@]} -eq 0 ]]; then
@@ -294,5 +313,6 @@ else
     echo "Published v$NEW_VERSION with ${#FAILED[@]} failure(s): ${FAILED[*]}"
     echo "Fix the above and re-run the individual publish commands."
   fi
-  echo "Run 'git push && git push --tags' to push the release."
+  echo "Created local git tag v$NEW_VERSION."
+  echo "Run 'git push && git push --tags --force' if you need to replace an existing remote tag."
 fi
