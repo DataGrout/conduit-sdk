@@ -342,6 +342,20 @@ pub const DG_CA_URL: &str = "https://ca.datagrout.ai/ca.pem";
 /// Default endpoint for Substrate identity registration.
 pub const DG_SUBSTRATE_ENDPOINT: &str = "https://app.datagrout.ai/api/v1/substrate/identity";
 
+/// Derive the DG server-scoped identity endpoint from an MCP URL.
+///
+/// Strips `/mcp` and replaces it with `/identity`. Works for both
+/// `.../servers/{uuid}/mcp` and `.../servers/{uuid}/mcp/anything`.
+pub fn derive_identity_endpoint(mcp_url: &str) -> String {
+    let base = if let Some(idx) = mcp_url.find("/mcp") {
+        &mcp_url[..idx]
+    } else {
+        mcp_url.trim_end_matches('/')
+    };
+
+    format!("{}/identity", base)
+}
+
 /// Fetch the current DataGrout CA certificate from `ca.datagrout.ai`.
 ///
 /// This uses the system trust store for TLS (not the DG CA itself), so there

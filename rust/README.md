@@ -213,7 +213,7 @@ For DataGrout URLs (`*.datagrout.ai`), auto-discovery runs silently in `build()`
 
 #### Bootstrapping an mTLS Identity
 
-First-run provisioning — generates a keypair, registers with the DataGrout CA, and saves certs locally. After this, the token is never needed again. Requires the `registration` feature.
+First-run provisioning — generates a keypair, registers against the target server's DG identity endpoint, and saves certs locally. After this, the token is never needed again. Requires the `registration` feature.
 
 ```rust
 // First run: token needed for registration
@@ -231,6 +231,7 @@ let client = ClientBuilder::new()
     .build()?;
 
 // Subsequent runs: no token needed, mTLS auto-discovered
+// and rotated over mTLS when the DG-issued cert nears expiry
 let client = ClientBuilder::new()
     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
     .build()?;

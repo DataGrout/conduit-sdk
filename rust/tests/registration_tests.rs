@@ -5,7 +5,9 @@
 
 use datagrout_conduit::registration::save_identity_to_dir;
 #[cfg(feature = "registration")]
-use datagrout_conduit::registration::{register_identity, RegistrationOptions};
+use datagrout_conduit::registration::{
+    derive_identity_endpoint, register_identity, RegistrationOptions,
+};
 
 // ─── Shared PEM fixtures ──────────────────────────────────────────────────────
 
@@ -75,6 +77,16 @@ fn generate_keypair_rotation_flag_not_set_for_new_cert() {
     assert!(
         !identity.needs_rotation(30),
         "fresh keypair should not need rotation"
+    );
+}
+
+#[cfg(feature = "registration")]
+#[test]
+fn derive_identity_endpoint_from_mcp_url() {
+    let endpoint = derive_identity_endpoint("https://gateway.datagrout.ai/servers/abc/mcp");
+    assert_eq!(
+        endpoint,
+        "https://gateway.datagrout.ai/servers/abc/identity"
     );
 }
 

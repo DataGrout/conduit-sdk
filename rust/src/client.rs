@@ -847,10 +847,16 @@ impl ClientBuilder {
         auth_token: impl Into<String>,
         name: impl Into<String>,
     ) -> crate::error::Result<Self> {
+        let url = self
+            .url
+            .as_deref()
+            .ok_or_else(|| Error::invalid_config("URL must be set before bootstrap_identity"))?
+            .to_string();
+
         self.bootstrap_identity_with_endpoint(
             auth_token,
             name,
-            crate::registration::DG_SUBSTRATE_ENDPOINT,
+            crate::registration::derive_identity_endpoint(&url),
         )
         .await
     }
@@ -865,9 +871,11 @@ impl ClientBuilder {
         substrate_endpoint: impl Into<String>,
     ) -> crate::error::Result<Self> {
         use crate::registration::{
-            default_identity_dir, generate_keypair, register_identity, save_identity_to_dir,
-            RegistrationOptions,
+            default_identity_dir, generate_keypair, register_identity, rotate_identity,
+            save_identity_to_dir, RegistrationOptions, RenewalOptions,
         };
+
+        let endpoint = substrate_endpoint.into();
 
         // Fast path: existing identity that doesn't need rotation.
         if let Some(existing) = ConduitIdentity::try_discover(self.identity_dir.as_deref()) {
@@ -875,13 +883,42 @@ impl ClientBuilder {
                 self.identity = Some(existing);
                 return Ok(self);
             }
+
+            let name_str = name.into();
+            let new_keypair = generate_keypair(&name_str)?;
+            let rotate_opts = RenewalOptions {
+                endpoint: endpoint.clone(),
+                name: name_str.clone(),
+                save_to: self.identity_dir.clone(),
+            };
+
+            let identity = match rotate_identity(&existing, &new_keypair, &rotate_opts).await {
+                Ok((identity, _resp)) => identity,
+                Err(_) => {
+                    let opts = RegistrationOptions {
+                        endpoint: endpoint.clone(),
+                        auth_token: auth_token.into(),
+                        name: name_str,
+                    };
+                    let (identity, _resp) = register_identity(&new_keypair, &opts).await?;
+                    identity
+                }
+            };
+
+            let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
+            if let Some(dir) = save_dir {
+                let _ = save_identity_to_dir(&identity, &dir);
+            }
+
+            self.identity = Some(identity);
+            return Ok(self);
         }
 
         // Slow path: generate and register a new identity.
         let name_str = name.into();
         let keypair = generate_keypair(&name_str)?;
         let opts = RegistrationOptions {
-            endpoint: substrate_endpoint.into(),
+            endpoint,
             auth_token: auth_token.into(),
             name: name_str,
         };

@@ -122,6 +122,7 @@ client = await Client.bootstrap_identity(
 )
 
 # All subsequent runs: mTLS auto-discovered from ~/.conduit/
+# and presented directly to the same server's /mcp endpoint
 client = Client("https://gateway.datagrout.ai/servers/{uuid}/mcp")
 ```
 
@@ -142,11 +143,11 @@ mTLS identities are X.509 certificates signed by the **DataGrout Certificate Aut
 When you call `bootstrap_identity`, here's what happens:
 
 1. The SDK generates an ECDSA P-256 key pair locally — the private key never leaves your machine.
-2. The public key is sent to the DataGrout CA along with a one-time access token.
-3. The CA signs a certificate binding your public key to a Substrate identity (e.g., `CN=conduit-my-agent`).
+2. The public key is sent to the target server's DG identity bootstrap endpoint along with a one-time access token or OAuth machine token.
+3. DataGrout signs a certificate binding your public key to a Substrate identity (e.g., `CN=conduit-my-agent`) and associates it with that specific MCP server.
 4. The signed certificate and CA chain are returned and saved to disk.
 
-From that point on, every request presents the client certificate. The server verifies it against the CA chain — no tokens, no secrets in environment variables, no credentials to rotate manually. The SDK handles certificate renewal automatically before expiry.
+From that point on, every request presents the client certificate. The server verifies it against the CA chain and the registered server-scoped identity — no tokens, no secrets in environment variables, no credentials to rotate manually. The SDK handles certificate renewal automatically before expiry.
 
 The CA private key is stored in an HSM-backed AWS KMS key (FIPS 140-2 Level 2), so the signing key is never exposed in memory or on disk. The CA certificate itself is publicly available at `https://ca.datagrout.ai/ca.pem` for any client that needs to verify the chain independently.
 
