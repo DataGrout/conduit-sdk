@@ -6,6 +6,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.0] - 2026-03-23
+
+### Added
+
+- **Server-scoped DG identity bootstrap** — DG MCP URLs now derive a per-server identity endpoint (`/servers/:server_id/identity`) for certificate registration instead of relying on the legacy global substrate bootstrap route.
+
+### Changed
+
+- **Bootstrap flow for DG URLs** — `bootstrap_identity()` now targets the MCP server's own DG identity registration path, matching the server-side DG CA bootstrap and mTLS acceptance flow.
+- **Identity renewal behavior** — DG-issued identities now attempt mTLS rotation first when a stored certificate is nearing expiry, falling back to token-authenticated re-registration only if rotation fails.
+- **Documentation** — README and Rust README now describe the server-scoped DG bootstrap and rotation behavior more explicitly.
+
+---
+
 ## [0.2.0] - 2026-03-19
 
 ### Breaking Changes
