@@ -238,12 +238,15 @@ fn try_default_picks_up_env_vars() {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("CONDUIT_MTLS_CERT", CERT_PEM);
     std::env::set_var("CONDUIT_MTLS_KEY", KEY_PEM);
+    std::env::remove_var("CONDUIT_MTLS_CA");
+    std::env::remove_var("CONDUIT_IDENTITY_DIR");
 
     let result = ConduitIdentity::try_default();
     assert!(result.is_some());
 
     std::env::remove_var("CONDUIT_MTLS_CERT");
     std::env::remove_var("CONDUIT_MTLS_KEY");
+    std::env::remove_var("CONDUIT_MTLS_CA");
 }
 
 #[test]
@@ -358,7 +361,11 @@ async fn client_builder_accepts_with_identity() {
 async fn client_builder_with_identity_auto_no_certs_no_error() {
     use datagrout_conduit::{ClientBuilder, Transport};
 
+    let _guard = ENV_LOCK.lock().unwrap();
     std::env::remove_var("CONDUIT_MTLS_CERT");
+    std::env::remove_var("CONDUIT_MTLS_KEY");
+    std::env::remove_var("CONDUIT_MTLS_CA");
+    std::env::remove_var("CONDUIT_IDENTITY_DIR");
 
     let result = ClientBuilder::new()
         .url("https://gateway.datagrout.ai/servers/test/mcp")
