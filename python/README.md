@@ -5,7 +5,7 @@ Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, a
 ## Installation
 
 ```bash
-pip install datagrout-conduit==0.3.0
+pip install datagrout-conduit==0.4.0
 ```
 
 ## Quick Start
@@ -133,7 +133,50 @@ client = Client(url)
 
 # JSONRPC — lightweight, stateless, same tools and auth
 client = Client(url, transport="jsonrpc")
+
+# WebSocket — bidirectional push; requires pip install 'datagrout-conduit[ws]'
+client = Client("wss://gateway.datagrout.ai/servers/{uuid}/ws", transport="websocket")
 ```
+
+### WebSocket transport
+
+The WebSocket transport uses the `datagrout-jsonrpc.v1` subprotocol over a single persistent `wss://` connection. All concurrent requests are multiplexed on that connection; responses are correlated by JSON-RPC `id` via `asyncio.Future` with no head-of-line blocking.
+
+```python
+from datagrout.conduit import Client
+
+async with Client(
+    "wss://gateway.datagrout.ai/servers/{uuid}/ws",
+    auth={"bearer": "your-token"},
+    transport="websocket",
+) as client:
+    # Subscribe to server-pushed events
+    sub = await client.subscribe("agents.my-agent-id.events")
+
+    async for event in sub:
+        print(f"{event.event}: {event.data}")
+
+    await client.unsubscribe(sub.id)
+```
+
+Supported topics:
+
+| Topic | Fires when |
+|-------|-----------|
+| `agents.<agent_id>.events` | Agent lifecycle events (plan started, IC completed, grounding failed, …) |
+| `tools.<tool_name>.results` | A specific tool call completes |
+| `tasks.<task_id>.*` | Long-running background task transitions |
+| `flows.<flow_id>.*` | `flow.into` progress and completion |
+| `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
+
+You can also call `await sub.recv()` for manual, one-event-at-a-time consumption:
+
+```python
+event = await sub.recv()
+print(event.event, event.data)
+```
+
+**Reconnection**: after a disconnect, `send_request` raises `RuntimeError("WS transport not connected")`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4.
 
 ## API Reference
 
@@ -143,7 +186,7 @@ client = Client(url, transport="jsonrpc")
 Client(
     url: str,
     auth: dict = None,                    # {"bearer": "..."} or {"client_credentials": {...}}
-    transport: str = "jsonrpc",           # "jsonrpc" or "mcp"
+    transport: str = "jsonrpc",           # "jsonrpc", "mcp", or "websocket"
     use_intelligent_interface: bool = False,
     identity: ConduitIdentity = None,     # explicit mTLS identity
     identity_auto: bool = False,          # auto-discover identity

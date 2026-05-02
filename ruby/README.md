@@ -9,13 +9,13 @@ Connect to remote MCP and JSONRPC servers, invoke tools, discover capabilities w
 Add to your Gemfile:
 
 ```ruby
-gem "datagrout-conduit", "~> 0.3.0"
+gem "datagrout-conduit", "~> 0.4.0"
 ```
 
 Or install directly:
 
 ```sh
-gem install datagrout-conduit -v 0.3.0
+gem install datagrout-conduit -v 0.4.0
 ```
 
 ## Quick Start
@@ -168,7 +168,49 @@ client = DatagroutConduit::Client.new(
 )
 ```
 
-Both transports send JSON-RPC 2.0 requests via HTTP POST. MCP uses the MCP Streamable HTTP framing. Both configure Faraday SSL with mTLS client certificates when an identity is present.
+### WebSocket (`datagrout-jsonrpc.v1`)
+
+```ruby
+client = DatagroutConduit::Client.new(
+  url: "wss://gateway.datagrout.ai/servers/{uuid}/ws",
+  auth: { bearer: "your-token" },
+  transport: :websocket
+)
+client.connect
+```
+
+Bidirectional push over a single `wss://` connection using `websocket-driver ~> 0.7` (the library underlying Rails ActionCable — no EventMachine dependency). A background `Thread` runs the read loop; shared state is protected by a `Mutex`.
+
+#### Push subscriptions
+
+```ruby
+# Subscribe — returns a Subscription with recv + each (Enumerable)
+sub = client.subscribe("agents.my-agent-id.events")
+
+# Block on the next event
+event = sub.recv(timeout: 30)
+puts "#{event.event}: #{event.data.inspect}"
+
+# Or iterate until the subscription is closed
+sub.each do |event|
+  puts "#{event.event}: #{event.data.inspect}"
+end
+
+# Unsubscribe when done
+client.unsubscribe(sub)
+```
+
+Supported topics:
+
+| Topic | Fires when |
+|-------|-----------|
+| `agents.<agent_id>.events` | Agent lifecycle events (plan started, IC completed, grounding failed, …) |
+| `tools.<tool_name>.results` | A specific tool call completes |
+| `tasks.<task_id>.*` | Long-running background task transitions |
+| `flows.<flow_id>.*` | `flow.into` progress and completion |
+| `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
+
+**Reconnection**: after a disconnect, `send_request` and `subscribe` raise `DatagroutConduit::NotInitializedError`. Call `client.connect` again and re-subscribe — subscriptions do not survive reconnects in v0.4.
 
 ## Standard MCP Methods
 

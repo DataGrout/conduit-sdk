@@ -6,6 +6,8 @@ import * as path from 'path';
 import { Transport } from './transports/base';
 import { MCPTransport } from './transports/mcp';
 import { JSONRPCTransport } from './transports/jsonrpc';
+import { WsTransport, Subscription } from './transports/ws';
+export type { Subscription, SubscriptionEvent } from './transports/ws';
 import { ConduitIdentity } from './identity';
 import {
   generateKeypair,
@@ -164,6 +166,13 @@ export class Client {
     const transportType = options.transport || 'mcp';
     if (transportType === 'mcp') {
       this.transport = new MCPTransport(this.url, this.auth, identity);
+    } else if (transportType === 'websocket') {
+      // Rewrite https:// → wss:// (or http:// → ws://) if the caller passed
+      // an HTTP URL so they don't have to think about it.
+      let wsUrl = this.url;
+      if (wsUrl.startsWith('https://')) wsUrl = 'wss://' + wsUrl.slice(8);
+      else if (wsUrl.startsWith('http://')) wsUrl = 'ws://' + wsUrl.slice(7);
+      this.transport = new WsTransport(wsUrl, this.auth, options.timeout, identity);
     } else {
       // When the user passes an MCP URL (ending in /mcp), transparently rewrite
       // the path to the DG JSONRPC endpoint (/rpc).
@@ -449,6 +458,55 @@ export class Client {
   async getPrompt(name: string, args?: Record<string, any>, options?: any): Promise<any> {
     this.ensureInitialized();
     return this.sendWithRetry(() => this.transport.getPrompt(name, args, options));
+  }
+
+  // ===== WebSocket push subscriptions =====
+
+  /**
+   * Subscribe to a server-push topic (WebSocket transport only).
+   *
+   * Requires `transport: 'websocket'` when constructing the client.
+   *
+   * @param topic - Dotted namespace topic, e.g.
+   *   `"agents.my-agent-id.events"` or `"tasks.task-123.*"`.
+   * @returns A {@link Subscription} handle. Consume events with
+   *   {@link Subscription.recv} or an `for await` loop.
+   *
+   * @example
+   * ```ts
+   * const sub = await client.subscribe('agents.my-agent-id.events');
+   * for await (const event of sub) {
+   *   console.log(event.event, event.data);
+   * }
+   * await client.unsubscribe(sub.id);
+   * ```
+   */
+  async subscribe(topic: string): Promise<Subscription> {
+    this.ensureInitialized();
+    if (!(this.transport instanceof WsTransport)) {
+      throw new Error(
+        "subscribe() requires transport: 'websocket'. " +
+          "Reinitialise the client with transport: 'websocket'."
+      );
+    }
+    return (this.transport as WsTransport).subscribe(topic);
+  }
+
+  /**
+   * Cancel a server-side push subscription.
+   *
+   * @param subscriptionId - The `id` from the {@link Subscription} returned
+   *   by {@link subscribe}.
+   */
+  async unsubscribe(subscriptionId: string): Promise<void> {
+    this.ensureInitialized();
+    if (!(this.transport instanceof WsTransport)) {
+      throw new Error(
+        "unsubscribe() requires transport: 'websocket'. " +
+          "Reinitialise the client with transport: 'websocket'."
+      );
+    }
+    return (this.transport as WsTransport).unsubscribe(subscriptionId);
   }
 
   // ===== DG-awareness helpers =====

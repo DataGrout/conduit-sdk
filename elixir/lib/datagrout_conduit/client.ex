@@ -50,6 +50,8 @@ defmodule DatagroutConduit.Client do
     :use_intelligent_interface,
     :dg_warned,
     :mcp_session_id,
+    # Non-nil when using :websocket transport.
+    :ws_pid,
     request_id: 0
   ]
 
@@ -185,6 +187,40 @@ defmodule DatagroutConduit.Client do
   @spec dg(GenServer.server(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def dg(client, tool_short_name, params \\ %{}) do
     GenServer.call(client, {:dg, tool_short_name, params}, 60_000)
+  end
+
+  # --- WebSocket Push Subscriptions ---
+
+  @doc """
+  Subscribe to a server-push topic (WebSocket transport only).
+
+  Requires `transport: :websocket` when starting the client.
+
+  Events arrive as `{:subscription_event, subscription_id, event}` messages
+  in the calling process's mailbox, where `event` is a map with `:event` and
+  `:data` keys.
+
+      {:ok, sub_id} = DatagroutConduit.Client.subscribe(client, "agents.my-agent-id.events")
+      receive do
+        {:subscription_event, ^sub_id, %{event: e, data: d}} -> IO.inspect({e, d})
+      end
+      :ok = DatagroutConduit.Client.unsubscribe(client, sub_id)
+
+  Returns `{:ok, subscription_id}` or `{:error, :not_ws_transport}`.
+  """
+  @spec subscribe(GenServer.server(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def subscribe(client, topic) do
+    GenServer.call(client, {:subscribe, topic}, 15_000)
+  end
+
+  @doc """
+  Cancel a server-side push subscription.
+
+  Requires `transport: :websocket`. Returns `:ok`.
+  """
+  @spec unsubscribe(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def unsubscribe(client, subscription_id) do
+    GenServer.call(client, {:unsubscribe, subscription_id}, 10_000)
   end
 
   # --- Bootstrap ---
@@ -328,29 +364,54 @@ defmodule DatagroutConduit.Client do
 
     use_ii = Keyword.get(opts, :use_intelligent_interface, is_dg)
 
-    transport_mod =
-      Keyword.get(opts, :transport_mod) ||
-        case transport do
-          :jsonrpc -> Transport.JSONRPC
-          _ -> Transport.MCP
-        end
+    if transport == :websocket do
+      ws_opts = [url: url, auth: auth, identity: identity]
 
-    resolved_auth = resolve_auth(auth)
+      case DatagroutConduit.Transport.Ws.start_link(ws_opts) do
+        {:ok, ws_pid} ->
+          state = %__MODULE__{
+            url: url,
+            auth: auth,
+            transport_mod: nil,
+            transport_req: nil,
+            identity: identity,
+            use_intelligent_interface: use_ii,
+            dg_warned: false,
+            ws_pid: ws_pid,
+            request_id: 0
+          }
 
-    {:ok, req} = transport_mod.connect(%{url: url, identity: identity, auth: resolved_auth})
+          {:ok, state}
 
-    state = %__MODULE__{
-      url: url,
-      auth: auth,
-      transport_mod: transport_mod,
-      transport_req: req,
-      identity: identity,
-      use_intelligent_interface: use_ii,
-      dg_warned: false,
-      request_id: 0
-    }
+        {:error, reason} ->
+          {:stop, reason}
+      end
+    else
+      transport_mod =
+        Keyword.get(opts, :transport_mod) ||
+          case transport do
+            :jsonrpc -> Transport.JSONRPC
+            _ -> Transport.MCP
+          end
 
-    {:ok, state}
+      resolved_auth = resolve_auth(auth)
+
+      {:ok, req} = transport_mod.connect(%{url: url, identity: identity, auth: resolved_auth})
+
+      state = %__MODULE__{
+        url: url,
+        auth: auth,
+        transport_mod: transport_mod,
+        transport_req: req,
+        identity: identity,
+        use_intelligent_interface: use_ii,
+        dg_warned: false,
+        ws_pid: nil,
+        request_id: 0
+      }
+
+      {:ok, state}
+    end
   end
 
   @impl true
@@ -441,6 +502,26 @@ defmodule DatagroutConduit.Client do
       {{:error, _} = err, state} ->
         {:reply, err, state}
     end
+  end
+
+  # --- WebSocket Push Handlers ---
+
+  def handle_call({:subscribe, _topic}, _from, %{ws_pid: nil} = state) do
+    {:reply, {:error, :not_ws_transport}, state}
+  end
+
+  def handle_call({:subscribe, topic}, _from, %{ws_pid: ws_pid} = state) do
+    result = DatagroutConduit.Transport.Ws.subscribe(ws_pid, topic)
+    {:reply, result, state}
+  end
+
+  def handle_call({:unsubscribe, _sub_id}, _from, %{ws_pid: nil} = state) do
+    {:reply, {:error, :not_ws_transport}, state}
+  end
+
+  def handle_call({:unsubscribe, sub_id}, _from, %{ws_pid: ws_pid} = state) do
+    result = DatagroutConduit.Transport.Ws.unsubscribe(ws_pid, sub_id)
+    {:reply, result, state}
   end
 
   # --- DG Extension Handlers (direct JSON-RPC methods) ---
@@ -624,6 +705,13 @@ defmodule DatagroutConduit.Client do
   end
 
   defp unwrap_content(raw), do: raw
+
+  defp send_rpc(%{ws_pid: ws_pid} = state, method, params, _id) when not is_nil(ws_pid) do
+    case DatagroutConduit.Transport.Ws.send_request(ws_pid, method, params) do
+      {:ok, result} -> {:ok, result, state}
+      {:error, _} = err -> {err, state}
+    end
+  end
 
   defp send_rpc(state, method, params, id) do
     auth = resolve_auth(state.auth)

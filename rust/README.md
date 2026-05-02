@@ -8,6 +8,7 @@ Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, a
 ## Features
 
 - **MCP Protocol Compliance**: Full JSON-RPC 2.0 over HTTP/SSE support
+- **WebSocket Transport**: Bidirectional push over `datagrout-jsonrpc.v1`; subscribe/unsubscribe to server-pushed events with no polling
 - **mTLS Identity**: Auto-discovery, bootstrap, and rotation of client certificates
 - **OAuth 2.1**: Built-in `client_credentials` token management with auto-refresh
 - **DataGrout Extensions**: Semantic discovery, guided workflows, cost tracking
@@ -20,7 +21,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-datagrout-conduit = "0.3.0"
+datagrout-conduit = "0.4.0"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 ```
@@ -141,6 +142,65 @@ let client = ClientBuilder::new()
 - Stateless requests
 - Easier debugging
 - Lower overhead
+
+### WebSocket Transport (`datagrout-jsonrpc.v1`)
+
+The recommended transport for any client that needs bidirectional push — tool execution results, Logic Cell rule fires, Governor percept events, and cross-agent fact assertions — without a polling loop.
+
+```rust
+use datagrout_conduit::{ClientBuilder, Transport};
+
+let client = ClientBuilder::new()
+    .url("wss://gateway.datagrout.ai/servers/{uuid}/ws")
+    .transport(Transport::WebSocket)
+    .auth_bearer("your-token")
+    .build()?;
+
+client.connect().await?;
+```
+
+#### Push subscriptions
+
+```rust
+// Subscribe to a topic before or after the triggering call
+let mut sub = client.subscribe("agents.my-agent-id.events").await?;
+
+// Server pushes arrive as JSON-RPC notification frames
+while let Ok(event) = sub.recv().await {
+    println!("event: {} data: {}", event.event, event.data);
+}
+
+// Unsubscribe when done
+client.unsubscribe("agents.my-agent-id.events").await?;
+```
+
+Supported topic namespaces:
+
+| Topic | Fires when |
+|-------|-----------|
+| `agents.<agent_id>.events` | Any agent lifecycle event (plan started, IC completed, grounding failed, …) |
+| `tools.<tool_name>.results` | A specific tool call completes |
+| `tasks.<task_id>.*` | Long-running background task transitions |
+| `flows.<flow_id>.*` | `flow.into` progress and completion |
+| `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
+
+**Features:**
+- Single mTLS connection multiplexed for all requests
+- Concurrent requests correlated by JSON-RPC `id` — no head-of-line blocking
+- Subscriptions survive concurrent tool calls on the same socket
+- Server-initiated notifications arrive via Tokio `broadcast` channel — multiple consumers supported
+- Reconnection is caller-driven in v0.4; a supervised auto-reconnect wrapper is on the roadmap
+
+#### Wire protocol
+
+- **Subprotocol**: `datagrout-jsonrpc.v1` (negotiated at upgrade)
+- **Connect URL**: `wss://<gateway>/servers/<uuid>/ws`
+- **Frame format**: JSON-RPC 2.0, text frames only
+- **Auth**: `Authorization: Bearer <token>` in the upgrade headers (same as HTTP transport); mTLS client cert presented at TLS handshake when identity is configured
+
+#### Fallback for non-WS clients
+
+Clients that cannot use WebSocket (n8n, Claude Desktop, generic MCP clients) fall back to `tasks.wait@1` — a cooperative long-poll that auto-detaches before host timeout and returns a continuation handle. Same delivery semantics, different transport.
 
 ## Authentication
 
@@ -354,30 +414,33 @@ Benchmarks on M1 Max:
 │  • Extensions        │
 └──────────┬───────────┘
            │
-    ┌──────┴──────┐
-    ▼             ▼
-┌─────────┐  ┌──────────┐
-│   MCP   │  │ JSON-RPC │
-│Transport│  │Transport │
-└────┬────┘  └─────┬────┘
-     │             │
-     └──────┬──────┘
+    ┌──────┴──────┬──────────┐
+    ▼             ▼          ▼
+┌─────────┐  ┌──────────┐  ┌──────────┐
+│   MCP   │  │ JSON-RPC │  │    WS    │
+│Transport│  │Transport │  │Transport │
+│  (SSE)  │  │  (HTTP)  │  │  (push)  │
+└────┬────┘  └─────┬────┘  └─────┬────┘
+     │             │              │
+     └──────┬──────┴──────────────┘
             ▼
 ┌───────────────────────┐
 │  DataGrout Gateway    │
-│  (MCP Server)         │
+│  (MCP + JSON-RPC +    │
+│   WebSocket server)   │
 └───────────────────────┘
 ```
 
 ## Comparison with Other Languages
 
-| Feature | Rust | Python | TypeScript |
-|---------|------|--------|------------|
-| **mTLS Identity** | ✅ Full | ✅ Full | ✅ Full |
-| **OAuth 2.1** | ✅ Full | ✅ Full | ✅ Full |
-| **Bootstrap** | ✅ Token + OAuth | ✅ Token + OAuth | ✅ Token |
-| **Type Safety** | ✅ Strong | ⚠️ Runtime | ✅ Compile-time |
-| **Async** | ✅ Tokio | ✅ asyncio | ✅ Promises |
+| Feature | Rust | Python | TypeScript | Elixir | Ruby |
+|---------|------|--------|------------|--------|------|
+| **mTLS Identity** | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
+| **OAuth 2.1** | ✅ Full | ✅ Full | ✅ Full | ✅ Full | ✅ Full |
+| **Bootstrap** | ✅ Token + OAuth | ✅ Token + OAuth | ✅ Token | ✅ Token + OAuth | ✅ Token + OAuth |
+| **WebSocket push** | ✅ v0.4+ | ✅ v0.4+ | ✅ v0.4+ | ✅ v0.4+ | ✅ v0.4+ |
+| **Type Safety** | ✅ Strong | ⚠️ Runtime | ✅ Compile-time | ⚠️ Runtime | ⚠️ Runtime |
+| **Async** | ✅ Tokio | ✅ asyncio | ✅ Promises | ✅ OTP | ✅ Threads |
 
 ## License
 

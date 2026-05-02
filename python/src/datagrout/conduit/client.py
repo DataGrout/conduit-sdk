@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from .identity import ConduitIdentity
-from .transports import Transport, MCPTransport, JSONRPCTransport
+from .transports import Transport, MCPTransport, JSONRPCTransport, WsTransport, Subscription
 from .types import DiscoverResult, PerformResult, GuideState, GuideOptions, ToolInfo
 from .registration import Receipt
 from .namespaces import (
@@ -114,7 +114,11 @@ class Client:
                 DataGrout semantic discovery / execution tools instead of the raw MCP tool
                 list.  Defaults to ``True`` for DataGrout URLs, ``False`` otherwise.
                 Pass explicitly to override.
-            transport: Transport mode ("mcp" or "jsonrpc").
+            transport: Transport mode (``"mcp"``, ``"jsonrpc"``, or ``"websocket"``).
+                WebSocket transport enables bidirectional push subscriptions via
+                :meth:`subscribe` / :meth:`unsubscribe`.  The URL must be a
+                ``wss://`` (or ``ws://``) address; ``https://`` URLs are
+                automatically rewritten to ``wss://``.
             identity: Explicit mTLS identity (client certificate + key).
             identity_auto: Auto-discover an mTLS identity from env vars / ~/.conduit/.
             identity_dir: Custom directory for identity storage/discovery.  Overrides
@@ -168,8 +172,16 @@ class Client:
             # rewrite the path to the DG JSONRPC endpoint (/rpc).
             rpc_url = url[:-4] + "/rpc" if url.endswith("/mcp") else url
             self._transport = JSONRPCTransport(rpc_url, auth=auth, identity=resolved_identity, **kwargs)
+        elif transport == "websocket":
+            # Rewrite http(s):// → ws(s):// if the caller passed an HTTP URL.
+            ws_url = url
+            if url.startswith("https://"):
+                ws_url = "wss://" + url[8:]
+            elif url.startswith("http://"):
+                ws_url = "ws://" + url[7:]
+            self._transport = WsTransport(ws_url, auth=auth, identity=resolved_identity, **kwargs)
         else:
-            raise ValueError(f"Unknown transport: {transport}")
+            raise ValueError(f"Unknown transport: {transport!r}")
 
     async def connect(self) -> None:
         """Establish connection to the server.
@@ -464,6 +476,58 @@ class Client:
         return await self._send_with_retry(
             lambda: self._transport.get_prompt(name, arguments, **kwargs)
         )
+
+    # ===== WebSocket push subscriptions =====
+
+    async def subscribe(self, topic: str) -> Subscription:
+        """Subscribe to a server-push topic (WebSocket transport only).
+
+        Requires ``transport="websocket"`` when constructing the client.
+
+        Args:
+            topic: Dotted namespace topic, e.g.
+                ``"agents.my-agent-id.events"`` or ``"tasks.task-123.*"``.
+
+        Returns:
+            A :class:`~datagrout.conduit.transports.Subscription` handle.
+            Consume events with :meth:`~datagrout.conduit.transports.Subscription.recv`
+            or an ``async for`` loop.
+
+        Raises:
+            RuntimeError: If the current transport does not support subscriptions.
+
+        Example::
+
+            sub = await client.subscribe("agents.my-agent-id.events")
+            async for event in sub:
+                print(event.event, event.data)
+            await client.unsubscribe(sub.id)
+        """
+        self._ensure_initialized()
+        if not isinstance(self._transport, WsTransport):
+            raise RuntimeError(
+                "subscribe() requires transport='websocket'. "
+                "Reinitialise the client with transport='websocket'."
+            )
+        return await self._transport.subscribe(topic)
+
+    async def unsubscribe(self, subscription_id: str) -> None:
+        """Cancel a server-side push subscription.
+
+        Args:
+            subscription_id: The ``id`` from the :class:`~datagrout.conduit.transports.Subscription`
+                returned by :meth:`subscribe`.
+
+        Raises:
+            RuntimeError: If the current transport does not support subscriptions.
+        """
+        self._ensure_initialized()
+        if not isinstance(self._transport, WsTransport):
+            raise RuntimeError(
+                "unsubscribe() requires transport='websocket'. "
+                "Reinitialise the client with transport='websocket'."
+            )
+        await self._transport.unsubscribe(subscription_id)
 
     # ===== DG-awareness helpers =====
 

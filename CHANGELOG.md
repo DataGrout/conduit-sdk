@@ -6,6 +6,55 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.0] - 2026-04-30
+
+### Added (all languages)
+
+WebSocket transport (`datagrout-jsonrpc.v1`) is now available in all five SDK languages, completing feature parity across the SDK matrix.
+
+### Added (Rust)
+
+- **WebSocket transport** — `Transport::WebSocket` over `wss://`, implementing the `datagrout-jsonrpc.v1` subprotocol. Single mTLS connection multiplexed for all requests; concurrent requests correlated by JSON-RPC `id` with no head-of-line blocking.
+- **Push subscriptions** — `client.subscribe(topic)` / `client.unsubscribe(topic)` for server-initiated notification delivery via Tokio `broadcast` channel. Supported topics: `agents.<id>.events`, `tools.<tool>.results`, `tasks.<task_id>.*`, `flows.<flow_id>.*`, `governor.<server_uuid>`.
+- **`WsTransport`** struct (`ws_transport.rs`) — full send/receive loop, outbound frame queue, per-subscription broadcast channel registry, connect/disconnect lifecycle with no orphan tasks.
+- **8 integration tests** for the WS transport — subprotocol negotiation, bearer token forwarding in upgrade headers, concurrent request multiplexing, subscribe + server-pushed notification + unsubscribe round-trip, server error propagation, connect/disconnect hygiene. All run against a local mock `datagrout-jsonrpc.v1` server using `tokio-tungstenite`.
+
+### Added (Python)
+
+- **WebSocket transport** — `WsTransport` class using `websockets` (asyncio-native). Single `wss://` connection multiplexed across all concurrent requests; correlated by JSON-RPC `id` via `asyncio.Future`. Install extra: `pip install 'datagrout-conduit[ws]'`.
+- **Push subscriptions** — `client.subscribe(topic)` returns an async-iterable `Subscription`. Iterate with `async for event in sub` or call `await sub.recv()`. Unsubscribe with `client.unsubscribe(sub.id)`.
+- **Async read loop** — background `asyncio.Task` drains the WebSocket; all response routing and subscription delivery happen without blocking the caller.
+- **34 unit tests** for `WsTransport` — frame injection via mock protocol, pending-future routing, subscription delivery, malformed JSON handling, disconnect cleanup, and auth header generation.
+
+### Added (TypeScript)
+
+- **WebSocket transport** — `WsTransport` class using the `ws` package (`ws` npm). Single `wss://` connection multiplexed via a `Map<string, { resolve, reject }>` pending table. Specify `transport: 'websocket'` when constructing the client.
+- **Push subscriptions** — `client.subscribe(topic)` returns a `Subscription` with an `AsyncIterator` interface. Iterate with `for await (const event of sub)` or call `await sub.recv()`. Close with `client.unsubscribe(sub.id)`.
+- **Background reader** — WebSocket `'message'` handler routes frames; subscription events are pushed to per-subscription `AsyncQueue` with backpressure via configurable buffer (default 256).
+- **28 unit tests** for `WsTransport` — message injection, pending resolution, subscription routing, error propagation, URL rewriting, and disconnect cleanup.
+
+### Added (Elixir)
+
+- **WebSocket transport** — `DatagroutConduit.Transport.Ws` GenServer over `:gun` (OTP-native HTTP/2 + WS client). Single connection with per-request reply tracking via `GenServer.call`. Start with `transport: :websocket` option.
+- **Push subscriptions** — `DatagroutConduit.Client.subscribe/2` returns `{:ok, sub_id}`. Server-pushed events arrive as `{:subscription_event, sub_id, event}` messages in the subscribing process's mailbox. Unsubscribe with `DatagroutConduit.Client.unsubscribe/2`.
+- **`Ws.Conn`** — thin `websocket_client` wrapper that handles the WS frame loop, routes notifications by subscription ID, and forwards events to registered subscriber PIDs.
+- **32 unit tests** for `Transport.Ws` — message injection, subscription delivery, error propagation, reconnect semantics, and client delegate methods.
+
+### Added (Ruby)
+
+- **WebSocket transport** — `DatagroutConduit::Transport::Ws` class using `websocket-driver ~> 0.7` (the library underlying Rails ActionCable). Single `wss://` connection with `Thread::Queue`-based blocking semantics; no EventMachine dependency. Specify `transport: :websocket` when constructing the client.
+- **Push subscriptions** — `client.subscribe(topic)` returns a `Subscription` with `recv(timeout:)` and `each` (Enumerable). Block on `sub.recv` or iterate with `sub.each { |event| ... }`. Unsubscribe with `client.unsubscribe(sub)`.
+- **Background read thread** — dedicated `Thread` runs the `read_loop` and calls `@driver.parse`; all response routing happens in the reader thread with `Mutex`-protected shared state.
+- **34 unit tests** for `Transport::Ws` — frame injection, pending routing, subscription delivery, integer id coercion, disconnect cleanup, auth header generation, and Subscription lifecycle.
+
+### Changed
+
+- **READMEs** — WebSocket transport section added to all five language READMEs; top-level README transport table updated to reflect full WS parity.
+- **Rust README comparison table** — WebSocket push row updated from `🔜 Planned` to `✅ v0.4+` for Python, TypeScript, Elixir, and Ruby.
+- **Version**: `0.3.0` → `0.4.0`
+
+---
+
 ## [0.3.0] - 2026-03-23
 
 ### Added

@@ -60,6 +60,16 @@ Cargo.lock
 .tool-versions
 .DS_Store
 
-# Lock files — consumers generate their own
+# ─── Elixir ───────────────────────────────────────────────────────────────────
+elixir/_build/
+elixir/deps/
+elixir/doc/
+elixir/*.ez
+elixir/*.lock
+
+# ─── Ruby ─────────────────────────────────────────────────────────────────────
+ruby/*.gem
+
+# ─── Lock files — consumers generate their own ────────────────────────────────
 package-lock.json
 Gemfile.lock

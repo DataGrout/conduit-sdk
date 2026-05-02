@@ -17,6 +17,13 @@ pub enum Transport {
     Mcp,
     /// JSON-RPC over HTTP POST
     JsonRpc,
+    /// JSON-RPC 2.0 over WebSocket (`datagrout-jsonrpc.v1` subprotocol).
+    ///
+    /// Bidirectional; supports server-pushed notifications via
+    /// `subscribe`/`unsubscribe` topic methods. Recommended for any client
+    /// that wants real-time agent / tool / governor events without
+    /// polling. See [`crate::ws_transport`] for protocol details.
+    Ws,
 }
 
 /// Authentication configuration

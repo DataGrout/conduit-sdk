@@ -1,7 +1,7 @@
 defmodule DatagroutConduit.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/DataGrout/conduit-sdk"
 
   def project do
@@ -31,6 +31,7 @@ defmodule DatagroutConduit.MixProject do
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:castore, "~> 1.0"},
+      {:websockex, "~> 0.4"},
       {:mox, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]

@@ -15,11 +15,11 @@ Drop-in replacement for standard MCP clients. Swap one import line and your agen
 
 | Language | Package | Install |
 |----------|---------|---------|
-| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.3.0` |
-| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.3.0` |
-| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.3.0` |
-| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.3.0"}` |
-| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.3.0` |
+| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.4.0` |
+| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.4.0` |
+| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.4.0` |
+| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.4.0"}` |
+| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.4.0` |
 
 ## Quick Start
 
@@ -155,12 +155,13 @@ The CA private key is stored in an HSM-backed AWS KMS key (FIPS 140-2 Level 2), 
 
 ## Transport Modes
 
-DataGrout exposes the same interface — the same tools, same schemas, same features — over both transports. mTLS, OAuth 2.1, and bearer token authentication all work identically regardless of which transport you choose.
+DataGrout exposes the same interface — the same tools, same schemas, same features — over all three transports. mTLS, OAuth 2.1, and bearer token authentication all work identically regardless of which transport you choose.
 
 | Transport | Protocol | Use When |
 |-----------|----------|----------|
 | `mcp` (default) | MCP over Streamable HTTP / SSE | Full MCP protocol — streaming, notifications, drop-in compatible |
 | `jsonrpc` | JSON-RPC 2.0 over HTTP POST | Simpler protocol, stateless, one request = one response |
+| `websocket` | JSON-RPC 2.0 over WebSocket (`datagrout-jsonrpc.v1`) | Bidirectional push — subscribe to server-initiated events without polling |
 
 ```python
 # MCP (default) — full protocol compliance, streaming support
@@ -168,9 +169,15 @@ client = Client(url)
 
 # JSONRPC — same tools, same auth, simpler protocol
 client = Client(url, transport="jsonrpc")
+
+# WebSocket — bidirectional push subscriptions
+client = Client("wss://gateway.datagrout.ai/servers/{uuid}/ws", transport="websocket")
+sub = await client.subscribe("agents.my-agent-id.events")
+async for event in sub:
+    print(event.event, event.data)
 ```
 
-The entire MCP interface is also available over JSONRPC — same tools, same arguments, same responses. JSONRPC can be a good fit for lightweight agents that don't need streaming or server-pushed notifications.
+The WebSocket transport uses the `datagrout-jsonrpc.v1` subprotocol. A single `wss://` connection is multiplexed for all concurrent requests; subscriptions survive parallel tool calls on the same socket. All three transports support the full tool surface — the difference is delivery model: HTTP (pull) vs. WebSocket (push).
 
 ---
 

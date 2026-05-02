@@ -1,6 +1,6 @@
 {
   "name": "@datagrout/conduit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Production-ready MCP client with mTLS, OAuth 2.1, and semantic discovery",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -45,10 +45,12 @@
     "url": "https://github.com/DataGrout/conduit-sdk/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",

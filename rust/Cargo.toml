@@ -1,6 +1,6 @@
 [package]
 name = "datagrout-conduit"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["DataGrout <hello@datagrout.ai>"]
@@ -44,6 +44,13 @@ url = "2.5"
 # SSE (Server-Sent Events) support
 eventsource-stream = "0.2"
 futures = "0.3"
+futures-util = "0.3"
+
+# WebSocket transport (datagrout-jsonrpc.v1 over wss-mTLS)
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.22", features = ["ring"], default-features = false }
+rustls-pemfile = "2.1"
+webpki-roots = "0.26"
 
 # Base64 for basic auth
 base64 = "0.21"

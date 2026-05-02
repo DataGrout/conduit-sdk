@@ -28,7 +28,7 @@ from .registration import (
     rotate_identity,
     save_identity,
 )
-from .transports import Transport, MCPTransport, JSONRPCTransport
+from .transports import Transport, MCPTransport, JSONRPCTransport, WsTransport, Subscription, SubscriptionEvent
 from .transports.jsonrpc_transport import RateLimitError
 from .types import (
     DiscoverResult,
@@ -38,7 +38,7 @@ from .types import (
     RateLimitStatus,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # Client
@@ -85,4 +85,8 @@ __all__ = [
     "Transport",
     "MCPTransport",
     "JSONRPCTransport",
+    "WsTransport",
+    # WebSocket push
+    "Subscription",
+    "SubscriptionEvent",
 ]

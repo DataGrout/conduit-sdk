@@ -3,6 +3,8 @@
  */
 
 export { Client, GuidedSession, isDgUrl } from './client';
+export type { Subscription, SubscriptionEvent } from './transports/ws';
+export { WsTransport, SUBPROTOCOL as WS_SUBPROTOCOL } from './transports/ws';
 export { ConduitIdentity, fetchWithIdentity } from './identity';
 export type { MtlsConfig } from './identity';
 export { OAuthTokenProvider, deriveTokenEndpoint } from './oauth';
@@ -37,4 +39,4 @@ export {
 export { extractMeta } from './types';
 export type * from './types';
 
-export const version = '0.1.0';
+export const version = '0.4.0';

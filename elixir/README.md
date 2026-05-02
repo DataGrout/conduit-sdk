@@ -11,7 +11,7 @@ Add `datagrout_conduit` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:datagrout_conduit, "~> 0.3.0"}
+    {:datagrout_conduit, "~> 0.4.0"}
   ]
 end
 ```
@@ -165,6 +165,45 @@ Sends HTTP POST with JSON-RPC 2.0 bodies and MCP-specific headers. Handles both 
 ```
 
 Standard JSON-RPC 2.0 over HTTP POST.
+
+### WebSocket (`datagrout-jsonrpc.v1`)
+
+```elixir
+{:ok, client} = DatagroutConduit.Client.start_link(
+  url: "wss://gateway.datagrout.ai/servers/{uuid}/ws",
+  auth: {:bearer, "your-token"},
+  transport: :websocket
+)
+```
+
+Bidirectional push over a single `wss://` connection. Uses `:gun` (OTP-native) for the WebSocket frame loop. Concurrent requests are multiplexed; subscription events are delivered to the subscribing process's mailbox.
+
+#### Push subscriptions
+
+```elixir
+# Subscribe — events arrive as {:subscription_event, sub_id, event} messages
+{:ok, sub_id} = DatagroutConduit.Client.subscribe(client, "agents.my-agent-id.events")
+
+receive do
+  {:subscription_event, ^sub_id, event} ->
+    IO.inspect(event)
+end
+
+# Unsubscribe when done
+:ok = DatagroutConduit.Client.unsubscribe(client, sub_id)
+```
+
+Supported topics:
+
+| Topic | Fires when |
+|-------|-----------|
+| `agents.<agent_id>.events` | Agent lifecycle events (plan started, IC completed, grounding failed, …) |
+| `tools.<tool_name>.results` | A specific tool call completes |
+| `tasks.<task_id>.*` | Long-running background task transitions |
+| `flows.<flow_id>.*` | `flow.into` progress and completion |
+| `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
+
+**Reconnection**: after a disconnect, `subscribe/2` and `send_request/3` return `{:error, :not_connected}`. Restart the client GenServer and re-subscribe — subscriptions do not survive reconnects in v0.4.
 
 ## MCP Protocol Methods
 

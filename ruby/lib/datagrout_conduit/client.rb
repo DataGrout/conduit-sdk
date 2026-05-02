@@ -13,6 +13,23 @@ module DatagroutConduit
 
     attr_reader :transport, :server_info, :use_intelligent_interface
 
+    # Subscribe to a server-push topic over a WebSocket transport.
+    # Returns a {DatagroutConduit::Transport::Ws::Subscription}.
+    # Raises RuntimeError when transport is not :websocket.
+    def subscribe(topic)
+      raise "subscribe() requires transport: :websocket" unless @transport.is_a?(Transport::Ws)
+
+      @transport.subscribe(topic)
+    end
+
+    # Cancel a push subscription.
+    # Accepts a Subscription object or a subscription ID string.
+    def unsubscribe(subscription)
+      raise "unsubscribe() requires transport: :websocket" unless @transport.is_a?(Transport::Ws)
+
+      @transport.unsubscribe(subscription)
+    end
+
     def initialize(url:, auth: {}, transport: :mcp, identity: nil, identity_dir: nil,
                    use_intelligent_interface: nil, max_retries: 3, logger: nil, disable_mtls: false)
       @url = url
@@ -389,8 +406,13 @@ module DatagroutConduit
         # transport, transparently rewrite the path to the DG JSONRPC endpoint.
         rpc_url = @url.end_with?("/mcp") ? @url.sub(%r{/mcp$}, "/rpc") : @url
         Transport::JsonRpc.new(url: rpc_url, auth: @auth, identity: @identity)
+      when :websocket, "websocket"
+        ws_url = @url
+                   .sub(/\Ahttps:\/\//, "wss://")
+                   .sub(/\Ahttp:\/\//, "ws://")
+        Transport::Ws.new(url: ws_url, auth: @auth, identity: @identity)
       else
-        raise ConfigError, "Unknown transport: #{@transport_mode}. Use :mcp or :jsonrpc."
+        raise ConfigError, "Unknown transport: #{@transport_mode}. Use :mcp, :jsonrpc, or :websocket."
       end
     end
 

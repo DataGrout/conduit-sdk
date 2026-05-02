@@ -149,6 +149,7 @@ pub mod protocol;
 pub mod registration;
 pub mod transport;
 pub mod types;
+pub mod ws_transport;
 
 pub use client::{
     is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
@@ -168,6 +169,9 @@ pub use types::{
     extract_meta, Byok, ChartOptions, ChartResult, CreditEstimate, DiscoverOptions, DiscoverResult,
     GuideOptions, GuideState, PerformOptions, PlanOptions, PlanResult, Receipt, RefractOptions,
     RefractResult, Tool, ToolMeta,
+};
+pub use ws_transport::{
+    NotificationEvent, Subscription, WsTransport, SUBPROTOCOL as WS_SUBPROTOCOL,
 };
 
 /// Re-export commonly used types

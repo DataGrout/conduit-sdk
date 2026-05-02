@@ -5,7 +5,7 @@ Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, a
 ## Installation
 
 ```bash
-npm install @datagrout/conduit@0.3.0
+npm install @datagrout/conduit@0.4.0
 ```
 
 ## Quick Start
@@ -158,7 +158,57 @@ const client = new Client({ url });
 
 // JSONRPC — lightweight, stateless, same tools and auth
 const client = new Client({ url, transport: 'jsonrpc' });
+
+// WebSocket — bidirectional push
+const client = new Client({
+  url: 'wss://gateway.datagrout.ai/servers/{uuid}/ws',
+  transport: 'websocket',
+});
 ```
+
+### WebSocket transport
+
+The WebSocket transport uses the `datagrout-jsonrpc.v1` subprotocol over a single persistent `wss://` connection. Concurrent requests are multiplexed; responses correlated by JSON-RPC `id` via `Map<string, { resolve, reject }>`.
+
+```typescript
+import { Client } from '@datagrout/conduit';
+
+const client = new Client({
+  url: 'wss://gateway.datagrout.ai/servers/{uuid}/ws',
+  auth: { bearer: 'your-token' },
+  transport: 'websocket',
+});
+await client.connect();
+
+// Subscribe to server-pushed events
+const sub = await client.subscribe('agents.my-agent-id.events');
+
+for await (const event of sub) {
+  console.log(event.event, event.data);
+}
+
+await client.unsubscribe(sub.id);
+await client.disconnect();
+```
+
+You can also call `await sub.recv()` for one-event-at-a-time consumption:
+
+```typescript
+const event = await sub.recv();
+console.log(event.event, event.data);
+```
+
+Supported topics:
+
+| Topic | Fires when |
+|-------|-----------|
+| `agents.<agent_id>.events` | Agent lifecycle events (plan started, IC completed, grounding failed, …) |
+| `tools.<tool_name>.results` | A specific tool call completes |
+| `tasks.<task_id>.*` | Long-running background task transitions |
+| `flows.<flow_id>.*` | `flow.into` progress and completion |
+| `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
+
+**Reconnection**: after a disconnect, calls raise `NotInitializedError`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4.
 
 ## API Reference
 
@@ -168,7 +218,7 @@ const client = new Client({ url, transport: 'jsonrpc' });
 new Client(options: {
   url: string;
   auth?: { bearer?: string; apiKey?: string; clientCredentials?: {...} };
-  transport?: 'mcp' | 'jsonrpc';
+  transport?: 'mcp' | 'jsonrpc' | 'websocket';
   useIntelligentInterface?: boolean;
   identity?: ConduitIdentity;
   identityAuto?: boolean;

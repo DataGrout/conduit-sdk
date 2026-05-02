@@ -6,6 +6,7 @@ use crate::oauth::OAuthTokenProvider;
 use crate::protocol::*;
 use crate::transport::{AuthConfig, JsonRpcTransport, McpTransport, Transport, TransportTrait};
 use crate::types::*;
+use crate::ws_transport::WsTransport;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,6 +23,35 @@ pub fn is_dg_url(url: &str) -> bool {
         // Allow integration tests running against localhost to signal they are
         // connected to a DataGrout server via an env var.
         || std::env::var("CONDUIT_IS_DG").is_ok()
+}
+
+/// Rewrite an HTTP-style DG URL (`/mcp` or `/rpc` suffix) into a `wss://…/ws`
+/// URL suitable for the WebSocket transport. Already-`ws[s]://` URLs are
+/// returned untouched.
+pub(crate) fn rewrite_to_ws(url: &str) -> String {
+    if url.starts_with("ws://") || url.starts_with("wss://") {
+        return url.to_string();
+    }
+
+    let scheme_swap = if let Some(rest) = url.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        url.to_string()
+    };
+
+    // Swap a trailing /mcp or /rpc for /ws so callers can keep their existing
+    // base URL configuration.
+    if let Some(stripped) = scheme_swap.strip_suffix("/mcp") {
+        format!("{stripped}/ws")
+    } else if let Some(stripped) = scheme_swap.strip_suffix("/rpc") {
+        format!("{stripped}/ws")
+    } else if scheme_swap.ends_with("/ws") {
+        scheme_swap
+    } else {
+        format!("{}/ws", scheme_swap.trim_end_matches('/'))
+    }
 }
 
 /// High-level MCP + DataGrout client.
@@ -1031,6 +1061,14 @@ impl ClientBuilder {
                     auth,
                     identity_ref,
                 )?)
+            }
+            Transport::Ws => {
+                // Caller may pass an HTTPS-style URL (`/mcp` or `/rpc` suffix)
+                // and we'll transparently switch to the matching WS endpoint
+                // (`/ws`) over `wss://`. This lets the same base URL drive
+                // every transport.
+                let ws_url = rewrite_to_ws(&url);
+                Box::new(WsTransport::with_identity(ws_url, auth, identity_ref)?)
             }
         };
 
