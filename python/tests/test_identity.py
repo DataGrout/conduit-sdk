@@ -336,7 +336,7 @@ class TestRotation:
 
     def test_needs_rotation_handles_naive_datetime(self) -> None:
         """Naive datetimes are treated as UTC."""
-        past_naive = datetime.utcnow() - timedelta(seconds=1)
+        past_naive = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
         identity = ConduitIdentity.from_pem(CERT_PEM, KEY_PEM).with_expiry(past_naive)
         assert identity.needs_rotation(0) is True
 

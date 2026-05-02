@@ -232,7 +232,7 @@ defmodule DatagroutConduit.Transport.Ws do
 
     cond do
       Map.has_key?(state.pending_subscribe, str_id) ->
-        {topic, caller_pid, from} = Map.fetch!(state.pending_subscribe, str_id)
+        {_topic, caller_pid, from} = Map.fetch!(state.pending_subscribe, str_id)
         pending_subscribe = Map.delete(state.pending_subscribe, str_id)
 
         if err = msg["error"] do

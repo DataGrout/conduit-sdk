@@ -147,7 +147,6 @@ interface PendingSubscribe {
 export class WsTransport extends Transport {
   private readonly _url: string;
   private readonly _auth?: AuthConfig;
-  private readonly _identity?: ConduitIdentity;
 
   private _ws: WebSocket | null = null;
   private _nextId = 0;
@@ -156,7 +155,7 @@ export class WsTransport extends Transport {
   private readonly _pendingSubscribe = new Map<string, PendingSubscribe>();
   private readonly _subscriptions = new Map<string, Subscription>();
 
-  constructor(url: string, auth?: AuthConfig, _timeout?: number, identity?: ConduitIdentity) {
+  constructor(url: string, auth?: AuthConfig, _timeout?: number, _identity?: ConduitIdentity) {
     super();
 
     const scheme = new URL(url).protocol.replace(':', '');
@@ -166,7 +165,6 @@ export class WsTransport extends Transport {
 
     this._url = url;
     this._auth = auth;
-    this._identity = identity;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -186,7 +184,7 @@ export class WsTransport extends Transport {
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = (ev: Event) =>
-        reject(new Error(`WS connect failed: ${(ev as ErrorEvent).message ?? 'unknown'}`));
+        reject(new Error(`WS connect failed: ${(ev as any).message ?? 'unknown'}`));
     });
 
     ws.onmessage = (ev: MessageEvent) => this._handleMessage(ev.data);

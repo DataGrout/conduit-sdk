@@ -221,6 +221,7 @@ export interface GuideState {
 
 export interface AuthConfig {
   bearer?: string;
+  apiKey?: string;
   basic?: {
     username: string;
     password: string;
@@ -287,7 +288,7 @@ export interface ClientOptions {
    * @default false
    */
   disableMtls?: boolean;
-  transport?: 'mcp' | 'jsonrpc';
+  transport?: 'mcp' | 'jsonrpc' | 'websocket';
   timeout?: number;
   /**
    * Maximum number of automatic retries on "server not initialized" errors.

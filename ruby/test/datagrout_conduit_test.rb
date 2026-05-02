@@ -128,9 +128,11 @@ class DatagroutConduitTest < Minitest::Test
   end
 
   def test_extract_meta_returns_nil_for_no_meta
-    assert_nil DatagroutConduit.extract_meta({})
-    assert_nil DatagroutConduit.extract_meta({ "value" => 42 })
-    assert_nil DatagroutConduit.extract_meta(nil)
+    assert_output(nil, /No DataGrout metadata/) do
+      assert_nil DatagroutConduit.extract_meta({})
+      assert_nil DatagroutConduit.extract_meta({ "value" => 42 })
+      assert_nil DatagroutConduit.extract_meta(nil)
+    end
   end
 
   def test_extract_meta_with_symbol_keys

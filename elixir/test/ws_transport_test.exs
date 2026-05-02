@@ -10,27 +10,9 @@ defmodule DatagroutConduit.Transport.WsTest do
 
   use ExUnit.Case, async: true
 
-  import Mox
-
   alias DatagroutConduit.Transport.Ws
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
-
-  # Start a WS GenServer with a stub conn_pid (not a real WebSockex process).
-  # We inject frames directly via `send/2`.
-  defp start_ws_with_stub do
-    # We bypass the init by manually setting state via :sys.replace_state.
-    {:ok, pid} =
-      GenServer.start_link(Ws, %Ws{
-        conn_pid: self(),
-        pending: %{},
-        pending_subscribe: %{},
-        subscriptions: %{},
-        next_id: 0
-      })
-
-    pid
-  end
 
   defp inject_frame(pid, payload) do
     send(pid, {:ws_frame, Jason.encode!(payload)})
@@ -252,14 +234,6 @@ defmodule DatagroutConduit.Transport.WsTest do
 
   describe "to_ws_url / build_headers (via init logic)" do
     test "URL rewriting: https → wss" do
-      state = %Ws{
-        conn_pid: self(),
-        pending: %{},
-        pending_subscribe: %{},
-        subscriptions: %{},
-        next_id: 0
-      }
-
       ws_url =
         "https://gateway.datagrout.ai/servers/test/ws"
         |> String.replace_prefix("https://", "wss://")
