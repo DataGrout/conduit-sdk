@@ -227,9 +227,13 @@ fn from_env_errors_when_cert_set_but_key_missing() {
 
 #[test]
 fn try_default_returns_none_when_unconfigured() {
-    // Ensure env vars are not set
+    let _guard = ENV_LOCK.lock().unwrap();
+    // Clear cert env vars so from_env() doesn't pick up a stray value.
     std::env::remove_var("CONDUIT_MTLS_CERT");
-    // The function may still find ~/.conduit/ if it exists, so just verify it doesn't panic.
+    std::env::remove_var("CONDUIT_MTLS_KEY");
+    std::env::remove_var("CONDUIT_IDENTITY_DIR");
+    // The function may still find ~/.conduit/ if it exists on this machine —
+    // only verify it doesn't panic, not the exact return value.
     let _ = ConduitIdentity::try_default();
 }
 
