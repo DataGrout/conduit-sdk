@@ -1187,11 +1187,17 @@ impl ClientBuilder {
 
         let creds = crate::onramp::register(&http, &opts)
             .await
-            .map_err(|e| Error::Onramp { stage: "registration", source: e })?;
+            .map_err(|e| Error::Onramp {
+                stage: "registration",
+                source: e,
+            })?;
 
         let token = crate::onramp::exchange_token(&http, &creds)
             .await
-            .map_err(|e| Error::Onramp { stage: "token_exchange", source: e })?;
+            .map_err(|e| Error::Onramp {
+                stage: "token_exchange",
+                source: e,
+            })?;
 
         // Persist credentials so cert-loss recovery works on future startups.
         if let Some(d) = dir {
@@ -1216,7 +1222,11 @@ impl ClientBuilder {
         // Route through bootstrap_identity{,_with_endpoint} which handles
         // identity registration and URL resolution.
         match creds.mcp_url {
-            Some(ref url) => self.url(url).bootstrap_identity(token, opts.agent_name).await,
+            Some(ref url) => {
+                self.url(url)
+                    .bootstrap_identity(token, opts.agent_name)
+                    .await
+            }
             None => {
                 self.bootstrap_identity_with_endpoint(token, opts.agent_name, DG_SUBSTRATE_ENDPOINT)
                     .await
@@ -1330,8 +1340,7 @@ impl ClientBuilder {
         token_url: impl Into<String>,
         name: impl Into<String>,
     ) -> crate::error::Result<Self> {
-        let provider =
-            OAuthTokenProvider::new(client_id, client_secret, token_url.into(), None);
+        let provider = OAuthTokenProvider::new(client_id, client_secret, token_url.into(), None);
         let http = reqwest::Client::new();
         let token = provider.get_token(&http).await?;
         self.bootstrap_identity(token, name).await

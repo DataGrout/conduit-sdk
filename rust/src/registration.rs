@@ -696,7 +696,10 @@ mod tests {
             try_load_credentials(Some(tmp.path())).expect("credentials should be loadable");
         assert_eq!(loaded.client_id, "agt_abc123");
         assert_eq!(loaded.client_secret, "sk_xyz789");
-        assert_eq!(loaded.token_url, "https://app.datagrout.ai/servers/abc/oauth/token");
+        assert_eq!(
+            loaded.token_url,
+            "https://app.datagrout.ai/servers/abc/oauth/token"
+        );
     }
 
     #[test]

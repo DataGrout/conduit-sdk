@@ -168,7 +168,7 @@ class OnrampTest < Minitest::Test
     DatagroutConduit::Onramp.register_only(bare_opts)
 
     assert_not_requested :post, ONRAMP_URL,
-      body: hash_including("agent_type" => anything)
+      body: hash_including("agent_type" => /\S+/)
   end
 
   def test_register_only_raises_on_init_rejected

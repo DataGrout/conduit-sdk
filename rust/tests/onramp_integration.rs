@@ -108,7 +108,10 @@ mod bootstrap_tests {
             .expect("onramp handshake should succeed");
 
         assert!(!creds.client_id.is_empty(), "client_id must be non-empty");
-        assert!(!creds.client_secret.is_empty(), "client_secret must be non-empty");
+        assert!(
+            !creds.client_secret.is_empty(),
+            "client_secret must be non-empty"
+        );
         assert!(
             creds.token_url.starts_with("http"),
             "token_url must be a URL, got: {}",
@@ -186,11 +189,20 @@ mod bootstrap_tests {
 
         client.connect().await.expect("connect should succeed");
 
-        let tools = client.list_tools().await.expect("list_tools should succeed");
+        let tools = client
+            .list_tools()
+            .await
+            .expect("list_tools should succeed");
 
-        assert!(!tools.is_empty(), "tool list should be non-empty after connect");
+        assert!(
+            !tools.is_empty(),
+            "tool list should be non-empty after connect"
+        );
 
-        eprintln!("[onramp] full bootstrap OK — {} tools available", tools.len());
+        eprintln!(
+            "[onramp] full bootstrap OK — {} tools available",
+            tools.len()
+        );
     }
 
     /// Verify the mTLS identity files land on disk after bootstrap_onramp.
@@ -221,10 +233,17 @@ mod bootstrap_tests {
                 .unwrap()
                 .permissions()
                 .mode();
-            assert_eq!(key_mode & 0o777, 0o600, "identity_key.pem must be mode 0600");
+            assert_eq!(
+                key_mode & 0o777,
+                0o600,
+                "identity_key.pem must be mode 0600"
+            );
         }
 
-        eprintln!("[onramp] identity persisted OK — dir={}", tmp.path().display());
+        eprintln!(
+            "[onramp] identity persisted OK — dir={}",
+            tmp.path().display()
+        );
     }
 
     /// bootstrap_onramp persists the server URL alongside the identity files.
@@ -283,7 +302,10 @@ mod bootstrap_tests {
             .build()
             .expect("first build should succeed");
 
-        assert!(identity_files_present(tmp.path()), "identity files must exist before second run");
+        assert!(
+            identity_files_present(tmp.path()),
+            "identity files must exist before second run"
+        );
         assert!(
             try_read_server_url(Some(tmp.path())).is_some(),
             "server_url must be saved before second run"
@@ -297,7 +319,10 @@ mod bootstrap_tests {
             .build()
             .expect("second build without URL or credentials should succeed");
 
-        client2.connect().await.expect("second client connect should succeed");
+        client2
+            .connect()
+            .await
+            .expect("second client connect should succeed");
 
         eprintln!("[onramp] zero-config restart OK — URL and identity auto-discovered");
     }
@@ -331,7 +356,10 @@ mod bootstrap_tests {
             .build()
             .expect("build() should recover URL from identity_dir without with_identity_auto");
 
-        client2.connect().await.expect("second client connect should succeed");
+        client2
+            .connect()
+            .await
+            .expect("second client connect should succeed");
 
         eprintln!("[onramp] build() URL recovery OK");
     }
@@ -413,7 +441,10 @@ mod bootstrap_tests {
             .build()
             .expect("build without explicit URL should succeed after short-circuit");
 
-        client2.connect().await.expect("connect should succeed after short-circuit");
+        client2
+            .connect()
+            .await
+            .expect("connect should succeed after short-circuit");
 
         eprintln!("[onramp] short-circuit URL recovery OK");
     }
@@ -446,8 +477,7 @@ mod bootstrap_tests {
 
         // Simulate cert loss — delete the identity files.
         std::fs::remove_file(tmp.path().join("identity.pem")).expect("remove identity.pem");
-        std::fs::remove_file(tmp.path().join("identity_key.pem"))
-            .expect("remove identity_key.pem");
+        std::fs::remove_file(tmp.path().join("identity_key.pem")).expect("remove identity_key.pem");
 
         assert!(
             !tmp.path().join("identity.pem").exists(),
@@ -513,9 +543,15 @@ mod bootstrap_tests {
             .build()
             .expect("build should succeed");
 
-        client.connect().await.expect("connect after cert recovery should succeed");
+        client
+            .connect()
+            .await
+            .expect("connect after cert recovery should succeed");
 
-        let tools = client.list_tools().await.expect("list_tools should succeed");
+        let tools = client
+            .list_tools()
+            .await
+            .expect("list_tools should succeed");
         assert!(!tools.is_empty());
 
         eprintln!("[onramp] cert-loss connectable OK — {} tools", tools.len());
@@ -540,8 +576,14 @@ mod bootstrap_tests {
         let creds = try_load_credentials(Some(tmp.path()))
             .expect("credentials.json must exist after bootstrap");
 
-        assert!(creds.client_id.starts_with("agt_"), "client_id must have agt_ prefix");
-        assert!(!creds.client_secret.is_empty(), "client_secret must be non-empty");
+        assert!(
+            creds.client_id.starts_with("agt_"),
+            "client_id must have agt_ prefix"
+        );
+        assert!(
+            !creds.client_secret.is_empty(),
+            "client_secret must be non-empty"
+        );
         assert!(
             creds.token_url.starts_with("http"),
             "token_url must be a URL, got: {}",
@@ -558,7 +600,10 @@ mod bootstrap_tests {
             assert_eq!(mode & 0o777, 0o600, "credentials.json must be mode 0600");
         }
 
-        eprintln!("[onramp] credentials persisted OK — client_id={}", creds.client_id);
+        eprintln!(
+            "[onramp] credentials persisted OK — client_id={}",
+            creds.client_id
+        );
     }
 
     // ─── rotation_days configuration ─────────────────────────────────────────
@@ -644,7 +689,10 @@ mod bootstrap_tests {
 
         client.connect().await.expect("connect should succeed");
 
-        let tools = client.list_tools().await.expect("list_tools should succeed");
+        let tools = client
+            .list_tools()
+            .await
+            .expect("list_tools should succeed");
 
         assert!(!tools.is_empty(), "tool list should be non-empty");
 

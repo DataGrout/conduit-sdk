@@ -58,9 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Path A — one-liner bootstrap:");
-    let builder = ClientBuilder::new()
-        .bootstrap_onramp(opts.clone())
-        .await?;
+    let builder = ClientBuilder::new().bootstrap_onramp(opts.clone()).await?;
 
     let client = builder.build()?;
     client.connect().await?;
@@ -81,8 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nPath B — manual onramp + identity bootstrap:");
 
     // Step 1: two-step handshake → provisional OAuth credentials.
-    let (creds, token) =
-        datagrout_conduit::onramp::register_and_exchange(&opts).await?;
+    let (creds, token) = datagrout_conduit::onramp::register_and_exchange(&opts).await?;
 
     println!("  Registered:  client_id={}", creds.client_id);
     println!("  Scopes:      {:?}", creds.scopes);
@@ -96,9 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 2: use the access token to bootstrap mTLS identity.
     // The identity is registered with the DG CA and saved to ~/.conduit/.
     // Subsequent runs auto-discover it — no token or secret needed.
-    let url = creds.mcp_url.as_deref().unwrap_or(
-        "https://app.datagrout.ai/servers/example/mcp",
-    );
+    let url = creds
+        .mcp_url
+        .as_deref()
+        .unwrap_or("https://app.datagrout.ai/servers/example/mcp");
 
     let client = ClientBuilder::new()
         .url(url)

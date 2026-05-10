@@ -236,7 +236,10 @@ pub(crate) async fn register(
 
     let resp = http
         .post(&complete_url)
-        .header("Authorization", format!("Bearer {}", init_resp.session_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", init_resp.session_token),
+        )
         .send()
         .await
         .map_err(|e| OnrampError::Http(format!("onramp complete request failed: {e}")))?;
@@ -353,8 +356,14 @@ mod tests {
         let creds: OnrampCredentials = serde_json::from_value(json).unwrap();
         assert_eq!(creds.client_id, "agt_abc123");
         assert_eq!(creds.client_secret, "sk_xyz789");
-        assert_eq!(creds.mcp_url.as_deref(), Some("https://app.datagrout.ai/servers/abc/mcp"));
-        assert_eq!(creds.rpc_url.as_deref(), Some("https://app.datagrout.ai/servers/abc/rpc"));
+        assert_eq!(
+            creds.mcp_url.as_deref(),
+            Some("https://app.datagrout.ai/servers/abc/mcp")
+        );
+        assert_eq!(
+            creds.rpc_url.as_deref(),
+            Some("https://app.datagrout.ai/servers/abc/rpc")
+        );
         assert_eq!(creds.scopes, ["mcp:read", "tools:call"]);
         assert_eq!(creds.expires_in, 2592000);
     }
@@ -371,8 +380,14 @@ mod tests {
         });
         let creds: OnrampCredentials = serde_json::from_value(json).unwrap();
         assert_eq!(creds.client_id, "agt_abc123");
-        assert!(creds.mcp_url.is_none(), "mcp_url should be None when absent");
-        assert!(creds.rpc_url.is_none(), "rpc_url should be None when absent");
+        assert!(
+            creds.mcp_url.is_none(),
+            "mcp_url should be None when absent"
+        );
+        assert!(
+            creds.rpc_url.is_none(),
+            "rpc_url should be None when absent"
+        );
     }
 
     #[test]

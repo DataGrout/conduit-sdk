@@ -85,6 +85,10 @@ defmodule DatagroutConduit.Onramp do
     ]
   end
 
+  # In test env, inject Req.Test plug so Req.Test.stub/2 can intercept HTTP calls.
+  # This is a compile-time constant so it has zero overhead in production.
+  @req_plug_opts if Mix.env() == :test, do: [plug: {Req.Test, __MODULE__}], else: []
+
   @doc """
   Perform the onramp handshake and return provisional OAuth credentials.
 
@@ -115,13 +119,13 @@ defmodule DatagroutConduit.Onramp do
   @doc false
   @spec exchange_token(OnrampCredentials.t()) :: {:ok, String.t()} | {:error, term()}
   def exchange_token(%OnrampCredentials{} = creds) do
-    case Req.post(creds.token_url,
-           form: %{
-             "grant_type" => "client_credentials",
-             "client_id" => creds.client_id,
-             "client_secret" => creds.client_secret
-           }
-         ) do
+    form = %{
+      "grant_type" => "client_credentials",
+      "client_id" => creds.client_id,
+      "client_secret" => creds.client_secret
+    }
+
+    case Req.post(creds.token_url, @req_plug_opts ++ [form: form]) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         {:ok, body["access_token"]}
 
@@ -144,7 +148,7 @@ defmodule DatagroutConduit.Onramp do
       |> maybe_put("intended_use", opts.intended_use)
       |> maybe_put("access_code", opts.access_code)
 
-    case Req.post("#{base}/onramp", json: body) do
+    case Req.post("#{base}/onramp", @req_plug_opts ++ [json: body]) do
       {:ok, %Req.Response{status: status, body: b}} when status in 200..299 ->
         do_complete(base, b["session_token"])
 
@@ -158,7 +162,7 @@ defmodule DatagroutConduit.Onramp do
 
   defp do_complete(base, session_token) do
     case Req.post("#{base}/onramp/complete",
-           headers: [{"authorization", "Bearer #{session_token}"}]
+           @req_plug_opts ++ [headers: [{"authorization", "Bearer #{session_token}"}]]
          ) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok,
