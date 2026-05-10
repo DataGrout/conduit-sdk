@@ -5,7 +5,7 @@ Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, a
 ## Installation
 
 ```bash
-pip install datagrout-conduit==0.4.0
+pip install datagrout-conduit==0.5.0
 ```
 
 ## Quick Start

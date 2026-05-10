@@ -28,9 +28,7 @@
 
 use crate::error::{Error, Result};
 use crate::identity::ConduitIdentity;
-use serde::Deserialize;
-#[cfg(feature = "registration")]
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -74,6 +72,13 @@ pub struct RegistrationResponse {
     pub registered_at: String,
     /// ISO-8601 expiry of the certificate (typically 30 days).
     pub valid_until: Option<String>,
+    /// MCP endpoint provisioned for this agent during registration.
+    ///
+    /// Set when the identity registration also creates (or resolves) the
+    /// agent's dedicated server. Use this as the `url` for all subsequent
+    /// [`ClientBuilder`][crate::client::ClientBuilder] calls.
+    #[serde(default)]
+    pub mcp_url: Option<String>,
 }
 
 /// What [`save_identity_to_dir`] writes to disk.
@@ -493,4 +498,250 @@ pub fn default_identity_dir() -> Option<PathBuf> {
     std::env::var("HOME")
         .ok()
         .map(|h| PathBuf::from(h).join(".conduit"))
+}
+
+// ─── Server URL persistence ───────────────────────────────────────────────────
+
+const SERVER_URL_FILE: &str = "server_url";
+
+/// Persist the MCP server URL alongside the identity files.
+///
+/// Writes `{dir}/server_url` as plain text. Called automatically by
+/// [`ClientBuilder::bootstrap_onramp`][crate::client::ClientBuilder::bootstrap_onramp]
+/// and [`ClientBuilder::bootstrap_identity`][crate::client::ClientBuilder::bootstrap_identity]
+/// so that subsequent sessions can reconstruct the URL without any external
+/// configuration — enabling truly zero-config restarts via
+/// [`ClientBuilder::with_identity_auto`][crate::client::ClientBuilder::with_identity_auto].
+///
+/// Creates `dir` if it does not exist.
+pub fn save_server_url(dir: impl AsRef<Path>, url: &str) -> Result<()> {
+    let dir = dir.as_ref();
+    std::fs::create_dir_all(dir)
+        .map_err(|e| Error::Other(format!("failed to create identity dir: {e}")))?;
+    std::fs::write(dir.join(SERVER_URL_FILE), url)
+        .map_err(|e| Error::Other(format!("failed to write server_url: {e}")))?;
+    Ok(())
+}
+
+/// Try to read a previously-saved MCP server URL from an identity directory.
+///
+/// Returns `None` when `dir` is `None`, the file does not exist, the file is
+/// empty, or the file cannot be read (e.g. permissions).  Leading and trailing
+/// whitespace is stripped so the file is safe to edit by hand.
+pub fn try_read_server_url(dir: Option<&Path>) -> Option<String> {
+    let path = dir?.join(SERVER_URL_FILE);
+    std::fs::read_to_string(&path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+// ─── Credential persistence ───────────────────────────────────────────────────
+
+const CREDENTIALS_FILE: &str = "credentials.json";
+
+/// OAuth credentials persisted alongside the mTLS identity.
+///
+/// Saved automatically by
+/// [`ClientBuilder::bootstrap_onramp`][crate::client::ClientBuilder::bootstrap_onramp]
+/// on first registration.  On subsequent runs — even if the cert files were
+/// deleted — these credentials allow the SDK to re-register a fresh cert for
+/// the **same machine account** without going through the onramp flow again and
+/// creating a new account.
+///
+/// The file (`credentials.json`) is written with `0600` permissions on Unix.
+/// Treat it with the same care as the private key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedCredentials {
+    /// OAuth client ID for this agent (`agt_…`).
+    pub client_id: String,
+    /// OAuth client secret. Treat as a secret — shown once during onramp.
+    pub client_secret: String,
+    /// Full URL of the OAuth token endpoint.
+    pub token_url: String,
+    /// Unix epoch seconds (as a decimal string) of when these credentials were saved.
+    pub saved_at: String,
+}
+
+/// Persist OAuth credentials to `{dir}/credentials.json` (mode 0600 on Unix).
+///
+/// The file is overwritten atomically on every call — callers don't need to
+/// check whether it already exists.
+pub fn save_credentials(dir: impl AsRef<Path>, creds: &SavedCredentials) -> Result<()> {
+    let dir = dir.as_ref();
+    std::fs::create_dir_all(dir)
+        .map_err(|e| Error::Other(format!("failed to create identity dir: {e}")))?;
+
+    let json = serde_json::to_string_pretty(creds)
+        .map_err(|e| Error::Other(format!("failed to serialise credentials: {e}")))?;
+
+    let path = dir.join(CREDENTIALS_FILE);
+    std::fs::write(&path, json)
+        .map_err(|e| Error::Other(format!("failed to write credentials: {e}")))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| Error::Other(format!("failed to set credentials permissions: {e}")))?;
+    }
+
+    Ok(())
+}
+
+/// Try to load previously-saved OAuth credentials from an identity directory.
+///
+/// Returns `None` when `dir` is `None`, the file does not exist, or the file
+/// cannot be parsed.  Logs a warning if the file exists but is malformed.
+pub fn try_load_credentials(dir: Option<&Path>) -> Option<SavedCredentials> {
+    let path = dir?.join(CREDENTIALS_FILE);
+    let json = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<SavedCredentials>(&json) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(
+                "credentials.json at {} is malformed and will be ignored: {e}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_and_read_server_url_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_server_url(tmp.path(), "https://app.datagrout.ai/servers/abc/mcp").unwrap();
+        let recovered = try_read_server_url(Some(tmp.path()));
+        assert_eq!(
+            recovered.as_deref(),
+            Some("https://app.datagrout.ai/servers/abc/mcp")
+        );
+    }
+
+    #[test]
+    fn try_read_server_url_returns_none_for_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(try_read_server_url(Some(tmp.path())).is_none());
+    }
+
+    #[test]
+    fn try_read_server_url_returns_none_when_dir_is_none() {
+        assert!(try_read_server_url(None).is_none());
+    }
+
+    #[test]
+    fn try_read_server_url_trims_whitespace() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(SERVER_URL_FILE),
+            "  https://example.com/servers/xyz/mcp\n",
+        )
+        .unwrap();
+        assert_eq!(
+            try_read_server_url(Some(tmp.path())).as_deref(),
+            Some("https://example.com/servers/xyz/mcp")
+        );
+    }
+
+    #[test]
+    fn try_read_server_url_returns_none_for_empty_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(SERVER_URL_FILE), "   ").unwrap();
+        assert!(try_read_server_url(Some(tmp.path())).is_none());
+    }
+
+    #[test]
+    fn save_server_url_creates_dir_if_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("a").join("b").join("c");
+        // Dir does not exist yet — save_server_url must create it.
+        save_server_url(&nested, "https://app.datagrout.ai/servers/x/mcp").unwrap();
+        assert!(nested.join(SERVER_URL_FILE).exists());
+    }
+
+    #[test]
+    fn save_server_url_overwrites_previous_value() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_server_url(tmp.path(), "https://old.example.com/mcp").unwrap();
+        save_server_url(tmp.path(), "https://new.example.com/mcp").unwrap();
+        assert_eq!(
+            try_read_server_url(Some(tmp.path())).as_deref(),
+            Some("https://new.example.com/mcp")
+        );
+    }
+
+    // ─── Credential persistence ───────────────────────────────────────────
+
+    fn sample_creds() -> SavedCredentials {
+        SavedCredentials {
+            client_id: "agt_abc123".into(),
+            client_secret: "sk_xyz789".into(),
+            token_url: "https://app.datagrout.ai/servers/abc/oauth/token".into(),
+            saved_at: "1746662400".into(),
+        }
+    }
+
+    #[test]
+    fn save_and_load_credentials_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_credentials(tmp.path(), &sample_creds()).unwrap();
+        let loaded =
+            try_load_credentials(Some(tmp.path())).expect("credentials should be loadable");
+        assert_eq!(loaded.client_id, "agt_abc123");
+        assert_eq!(loaded.client_secret, "sk_xyz789");
+        assert_eq!(loaded.token_url, "https://app.datagrout.ai/servers/abc/oauth/token");
+    }
+
+    #[test]
+    fn try_load_credentials_returns_none_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(try_load_credentials(Some(tmp.path())).is_none());
+    }
+
+    #[test]
+    fn try_load_credentials_returns_none_when_dir_is_none() {
+        assert!(try_load_credentials(None).is_none());
+    }
+
+    #[test]
+    fn save_credentials_overwrites_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        save_credentials(tmp.path(), &sample_creds()).unwrap();
+        let updated = SavedCredentials {
+            client_id: "agt_NEW".into(),
+            client_secret: "sk_NEW".into(),
+            token_url: "https://app.datagrout.ai/servers/new/oauth/token".into(),
+            saved_at: "1746666000".into(),
+        };
+        save_credentials(tmp.path(), &updated).unwrap();
+        let loaded = try_load_credentials(Some(tmp.path())).unwrap();
+        assert_eq!(loaded.client_id, "agt_NEW");
+    }
+
+    #[test]
+    fn try_load_credentials_returns_none_for_malformed_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(CREDENTIALS_FILE), "not json at all").unwrap();
+        assert!(try_load_credentials(Some(tmp.path())).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn save_credentials_sets_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        save_credentials(tmp.path(), &sample_creds()).unwrap();
+        let mode = std::fs::metadata(tmp.path().join(CREDENTIALS_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "credentials.json must be mode 0600");
+    }
 }

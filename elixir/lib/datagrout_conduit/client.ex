@@ -320,6 +320,61 @@ defmodule DatagroutConduit.Client do
     end
   end
 
+  @doc """
+  Bootstrap by performing the autonomous DG onramp flow.
+
+  The all-in-one flow: onramp (no prior credentials required) →
+  OAuth token exchange → mTLS identity registration and persistence.
+
+  On subsequent runs the saved mTLS identity is auto-discovered and
+  no credentials are needed.
+
+  ## Options
+
+    * `:opts` - `%DatagroutConduit.Onramp.OnrampOptions{}` (required)
+    * `:url` - MCP server URL; required when the onramp response omits `mcp_url`
+    * `:name` - Human-readable identity label (default: `"conduit-client"`)
+    * `:identity_dir` - Custom directory for identity persistence
+    * All other options from `bootstrap_identity/1`
+  """
+  @spec bootstrap_onramp(keyword()) :: {:ok, pid()} | {:error, term()}
+  def bootstrap_onramp(opts) do
+    {onramp_opts, opts} = Keyword.pop!(opts, :opts)
+    {url, opts} = Keyword.pop(opts, :url)
+    {name, opts} = Keyword.pop(opts, :name, "conduit-client")
+    {identity_dir, _opts_rest} = Keyword.pop_lazy(opts, :identity_dir, fn ->
+      DatagroutConduit.Registration.default_identity_dir()
+    end)
+
+    existing = DatagroutConduit.Identity.try_discover(override_dir: identity_dir)
+
+    if existing && !DatagroutConduit.Identity.needs_rotation?(existing) do
+      if is_nil(url), do: {:error, :url_required_for_existing_identity}, else:
+        start_link(Keyword.merge(opts, [url: url, identity: existing]))
+    else
+      case DatagroutConduit.Onramp.register_and_exchange(onramp_opts) do
+        {:ok, {creds, token}} ->
+          mcp_url = creds.mcp_url || url
+
+          if is_nil(mcp_url) do
+            {:error, :url_required_when_mcp_url_absent}
+          else
+            bootstrap_identity(
+              Keyword.merge(opts, [
+                url: mcp_url,
+                auth_token: token,
+                name: name,
+                identity_dir: identity_dir
+              ])
+            )
+          end
+
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
   defp do_register(auth_token, name, identity_dir, endpoint) do
     alias DatagroutConduit.Registration
 

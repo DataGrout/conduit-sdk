@@ -104,6 +104,38 @@ module DatagroutConduit
       bootstrap_identity(url: url, auth_token: token, name: name, identity_dir: identity_dir)
     end
 
+    # Bootstrap by performing the autonomous DG onramp flow.
+    #
+    # The all-in-one flow: onramp (no prior credentials required) →
+    # OAuth token exchange → mTLS identity registration and persistence.
+    #
+    # On subsequent runs the saved mTLS identity is auto-discovered and
+    # no credentials are needed.
+    #
+    # @param opts [DatagroutConduit::Onramp::OnrampOptions]
+    # @param url [String, nil] MCP server URL; required when +opts.mcp_url+ is absent
+    # @param name [String] human-readable identity label
+    # @param identity_dir [String, nil] custom identity storage directory
+    # @return [Client] unconnected client; call +#connect+ before use
+    def self.bootstrap_onramp(opts:, url: nil, name: "conduit-client", identity_dir: nil)
+      dir = identity_dir || Registration.default_identity_dir || File.join(Dir.home, ".conduit")
+
+      # Fast path: existing valid identity.
+      identity = Identity.try_discover(override_dir: dir)
+      if identity && !identity.needs_rotation?
+        raise ArgumentError, "'url' must be provided when an existing identity is reused" if url.nil?
+        return new(url: url, identity: identity)
+      end
+
+      # Slow path: full onramp flow.
+      creds, token = Onramp.register_and_exchange(opts)
+
+      mcp_url = creds.mcp_url || url
+      raise ArgumentError, "'url' must be provided when mcp_url is absent from onramp response" if mcp_url.nil?
+
+      bootstrap_identity(url: mcp_url, auth_token: token, name: name, identity_dir: identity_dir)
+    end
+
     def connect
       @transport.connect
 

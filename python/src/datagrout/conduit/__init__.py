@@ -28,6 +28,13 @@ from .registration import (
     rotate_identity,
     save_identity,
 )
+from .onramp import (
+    OnrampOptions,
+    OnrampCredentials,
+    OnrampError,
+    register_only,
+    register_and_exchange,
+)
 from .transports import Transport, MCPTransport, JSONRPCTransport, WsTransport, Subscription, SubscriptionEvent
 from .transports.jsonrpc_transport import RateLimitError
 from .types import (
@@ -38,7 +45,7 @@ from .types import (
     RateLimitStatus,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     # Client
@@ -70,6 +77,12 @@ __all__ = [
     "register_identity",
     "rotate_identity",
     "save_identity",
+    # Onramp — autonomous agent self-registration
+    "OnrampOptions",
+    "OnrampCredentials",
+    "OnrampError",
+    "register_only",
+    "register_and_exchange",
     # OAuth 2.1
     "OAuthTokenProvider",
     "derive_token_endpoint",

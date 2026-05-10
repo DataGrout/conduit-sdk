@@ -276,6 +276,71 @@ export class Client {
     });
   }
 
+  /**
+   * Register autonomously with DG and bootstrap an mTLS identity.
+   *
+   * The all-in-one flow: onramp (no prior credentials required) →
+   * OAuth token exchange → mTLS identity registration and persistence.
+   *
+   * On subsequent runs the saved mTLS identity is auto-discovered and
+   * no credentials are needed.
+   *
+   * @param options.opts         - Onramp registration options.
+   * @param options.url          - MCP server URL. Required if the onramp
+   *                               response does not include `mcpUrl`.
+   * @param options.identityDir  - Custom identity storage directory.
+   *
+   * @example
+   * ```ts
+   * import { Client } from './client';
+   * import type { OnrampOptions } from './onramp';
+   *
+   * const client = await Client.bootstrapOnramp({
+   *   opts: {
+   *     gateway: 'https://app.datagrout.ai',
+   *     agentName: 'my-research-agent',
+   *     agentType: 'claude-sonnet-4-6',
+   *   },
+   * });
+   * await client.connect();
+   * ```
+   */
+  static async bootstrapOnramp(options: {
+    opts: import('./onramp').OnrampOptions;
+    url?: string;
+    identityDir?: string;
+  }): Promise<Client> {
+    const { _doRegister, _exchangeToken } = await import('./onramp');
+    const dir = options.identityDir || DEFAULT_IDENTITY_DIR;
+
+    // Fast path: existing valid identity.
+    const existing = ConduitIdentity.tryDiscover(dir);
+    if (existing && !existing.needsRotation(7)) {
+      if (!options.url) {
+        throw new Error("'url' must be provided when an existing identity is reused");
+      }
+      return new Client({ url: options.url, identity: existing, identityDir: dir });
+    }
+
+    // Slow path: full onramp flow.
+    const creds = await _doRegister(options.opts);
+    const token = await _exchangeToken(creds);
+
+    const url = creds.mcpUrl ?? options.url;
+    if (!url) {
+      throw new Error(
+        "'url' must be provided when mcpUrl is absent from the onramp response"
+      );
+    }
+
+    return Client.bootstrapIdentity({
+      url,
+      authToken: token,
+      name: options.opts.agentName,
+      identityDir: options.identityDir,
+    });
+  }
+
   // ===== Lifecycle =====
 
   /**

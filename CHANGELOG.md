@@ -6,6 +6,66 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] - 2026-05-09
+
+### Added (all languages)
+
+**Autonomous agent onramp** — zero-credential self-registration for agents that have never been provisioned. Agents can now call a two-step unauthenticated HTTP handshake to receive provisional OAuth credentials, exchange them for an access token, and bootstrap a full mTLS identity in one pass. No API key or pre-provisioned secret required.
+
+### Added (Rust)
+
+- **`OnrampOptions`** struct — `gateway`, `agent_name`, `agent_type?`, `intended_use?`, `access_code?`.
+- **`OnrampCredentials`** struct — `client_id`, `client_secret`, `token_url`, `scopes`, `expires_in`, `mcp_url?`, `rpc_url?`.
+- **`onramp::register_only(opts)`** — two-step handshake returning provisional credentials; no token exchange.
+- **`onramp::register_and_exchange(opts)`** — credentials + immediate OAuth token exchange in one call.
+- **`ClientBuilder::bootstrap_onramp(opts)`** — all-in-one: fast-path check for a saved mTLS identity → onramp → token exchange → `bootstrap_identity`. Subsequent runs auto-discover the saved identity and skip registration entirely.
+- **`rust/examples/bootstrap.rs`** — runnable example showing both Path A (one-liner `bootstrap_onramp`) and Path B (manual `register_and_exchange` + `bootstrap_identity`). Run with `cargo run --example bootstrap --features bootstrap`.
+
+### Added (Python)
+
+- **`OnrampOptions`** dataclass — snake_case fields: `gateway`, `agent_name`, `agent_type`, `intended_use`, `access_code`.
+- **`OnrampCredentials`** dataclass — `client_id`, `client_secret`, `token_url`, `scopes`, `expires_in`, `mcp_url`, `rpc_url`.
+- **`OnrampError`** — raised on non-2xx onramp or token exchange responses.
+- **`register_only(opts)`** / **`register_and_exchange(opts)`** — public async API matching the Rust surface.
+- **`Client.bootstrap_onramp(opts, ...)`** — async classmethod; fast-paths on existing valid identity, otherwise onramp → token → `bootstrap_identity`.
+- All onramp types exported from `datagrout.conduit` top-level package.
+- 11 new pytest tests in `tests/test_onramp.py`.
+
+### Added (TypeScript)
+
+- **`OnrampOptions`** interface — camelCase fields: `gateway`, `agentName`, `agentType?`, `intendedUse?`, `accessCode?`.
+- **`OnrampCredentials`** interface — `clientId`, `clientSecret`, `tokenUrl`, `scopes`, `expiresIn`, `mcpUrl?`, `rpcUrl?`.
+- **`registerOnly(opts)`** / **`registerAndExchange(opts)`** — public async API; `registerAndExchange` returns `[OnrampCredentials, string]`.
+- **`Client.bootstrapOnramp({ opts, url?, identityDir? })`** — static async method; fast-paths on existing valid identity.
+- Internal `_doRegister` / `_exchangeToken` exported for test access.
+- All types and functions exported from `@datagrout/conduit`.
+- 18 new vitest tests in `tests/onramp.test.ts`.
+
+### Added (Ruby)
+
+- **`DatagroutConduit::Onramp::OnrampOptions`** Struct — snake_case: `gateway`, `agent_name`, `agent_type`, `intended_use`, `access_code`.
+- **`DatagroutConduit::Onramp::OnrampCredentials`** Struct — `client_id`, `client_secret`, `token_url`, `scopes`, `expires_in`, `mcp_url`, `rpc_url`.
+- **`DatagroutConduit::Onramp::OnrampError`** — raised on non-2xx responses.
+- **`Onramp.register_only(opts)`** / **`Onramp.register_and_exchange(opts)`** — synchronous class methods; `register_and_exchange` returns `[creds, token]`.
+- **`Client.bootstrap_onramp(opts:, url: nil, name:, identity_dir: nil)`** — fast-paths on existing valid identity; falls back to onramp → token → `bootstrap_identity`.
+- 9 new minitest tests in `test/onramp_test.rb`.
+
+### Added (Elixir)
+
+- **`DatagroutConduit.Onramp.OnrampOptions`** struct — `gateway`, `agent_name`, `agent_type`, `intended_use`, `access_code`.
+- **`DatagroutConduit.Onramp.OnrampCredentials`** struct — `client_id`, `client_secret`, `token_url`, `scopes`, `expires_in`, `mcp_url`, `rpc_url`.
+- **`Onramp.register_only/1`** — `{:ok, %OnrampCredentials{}}` or `{:error, reason}`.
+- **`Onramp.register_and_exchange/1`** — `{:ok, {%OnrampCredentials{}, token}}` or `{:error, reason}`.
+- **`Onramp.exchange_token/1`** — public for composing custom flows.
+- **`DatagroutConduit.Client.bootstrap_onramp/1`** — keyword-list API (`opts:`, `url:`, `name:`, `identity_dir:`); returns `{:ok, pid}` or `{:error, reason}`.
+- 15 new ExUnit tests in `test/onramp_test.exs`.
+
+### Changed
+
+- **Version**: `0.4.0` → `0.5.0`
+
+---
+
 ## [0.4.0] - 2026-04-30
 
 ### Added (all languages)

@@ -674,6 +674,9 @@ pub struct ClientBuilder {
     /// Pending OAuth credentials resolved into `AuthConfig::ClientCredentials`
     /// during `build()` once the URL is known.
     _pending_oauth_creds: Option<(String, String, Option<String>, Option<String>)>,
+    /// Days before cert expiry at which proactive rotation is triggered.
+    /// Defaults to 7 — rotate when the cert has fewer than 7 days remaining.
+    rotation_days: u64,
 }
 
 impl Default for ClientBuilder {
@@ -688,6 +691,7 @@ impl Default for ClientBuilder {
             disable_mtls: false,
             identity_dir: None,
             _pending_oauth_creds: None,
+            rotation_days: 7,
         }
     }
 }
@@ -792,8 +796,31 @@ impl ClientBuilder {
     /// Checks `identity_dir` (if set) → env vars → `CONDUIT_IDENTITY_DIR` →
     /// `~/.conduit/` → `.conduit/` in the cwd.  If nothing is found this is
     /// a no-op: the client falls back to token auth silently.
+    ///
+    /// Also reads the saved `server_url` file from the same directory so that
+    /// agents bootstrapped with [`bootstrap_onramp`](Self::bootstrap_onramp) can
+    /// reconnect without knowing their URL in advance:
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // First run: bootstrap_onramp saves identity + server_url to ~/.conduit/.
+    /// // Subsequent runs: both are recovered automatically.
+    /// let client = ClientBuilder::new()
+    ///     .with_identity_auto()
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn with_identity_auto(mut self) -> Self {
         self.identity = ConduitIdentity::try_discover(self.identity_dir.as_deref());
+        // Mirror the discovery order for the URL: explicit identity_dir first,
+        // then the default ~/.conduit/ fallback.
+        if self.url.is_none() {
+            let default = crate::registration::default_identity_dir();
+            let dir = self.identity_dir.as_deref().or(default.as_deref());
+            self.url = crate::registration::try_read_server_url(dir);
+        }
         self
     }
 
@@ -806,6 +833,21 @@ impl ClientBuilder {
     /// [`bootstrap_identity`](Self::bootstrap_identity).
     pub fn identity_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
         self.identity_dir = Some(dir.into());
+        self
+    }
+
+    /// Set how many days before cert expiry to trigger proactive rotation.
+    ///
+    /// The default is **7 days** — the cert is rotated when it has fewer than
+    /// this many days of validity remaining.  Agents with strict uptime
+    /// requirements may want a higher value; agents that are short-lived can
+    /// reduce it to avoid unnecessary rotation traffic.
+    ///
+    /// This threshold is checked by
+    /// [`bootstrap_identity`](Self::bootstrap_identity) and
+    /// [`bootstrap_onramp`](Self::bootstrap_onramp) on every startup.
+    pub fn rotation_days(mut self, days: u64) -> Self {
+        self.rotation_days = days;
         self
     }
 
@@ -902,14 +944,14 @@ impl ClientBuilder {
     ) -> crate::error::Result<Self> {
         use crate::registration::{
             default_identity_dir, generate_keypair, register_identity, rotate_identity,
-            save_identity_to_dir, RegistrationOptions, RenewalOptions,
+            save_identity_to_dir, save_server_url, RegistrationOptions, RenewalOptions,
         };
 
         let endpoint = substrate_endpoint.into();
 
         // Fast path: existing identity that doesn't need rotation.
         if let Some(existing) = ConduitIdentity::try_discover(self.identity_dir.as_deref()) {
-            if !existing.needs_rotation(7) {
+            if !existing.needs_rotation(self.rotation_days) {
                 self.identity = Some(existing);
                 return Ok(self);
             }
@@ -936,8 +978,12 @@ impl ClientBuilder {
             };
 
             let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
-            if let Some(dir) = save_dir {
-                let _ = save_identity_to_dir(&identity, &dir);
+            if let Some(ref dir) = save_dir {
+                let _ = save_identity_to_dir(&identity, dir);
+                // Re-save the URL so the file stays current after rotation.
+                if let Some(ref url) = self.url {
+                    let _ = save_server_url(dir, url);
+                }
             }
 
             self.identity = Some(identity);
@@ -952,17 +998,230 @@ impl ClientBuilder {
             auth_token: auth_token.into(),
             name: name_str,
         };
-        let (identity, _resp) = register_identity(&keypair, &opts).await?;
-
-        // Persist so future runs auto-discover without any token.
-        let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
-
-        if let Some(dir) = save_dir {
-            let _ = save_identity_to_dir(&identity, &dir);
-        }
+        let (identity, reg_resp) = register_identity(&keypair, &opts).await?;
 
         self.identity = Some(identity);
+
+        // When the registration response includes an mcp_url (server was
+        // provisioned during this call), set it on the builder so the caller
+        // doesn't need to know the URL in advance.
+        if self.url.is_none() {
+            if let Some(mcp_url) = reg_resp.mcp_url {
+                self.url = Some(mcp_url);
+            }
+        }
+
+        // Persist identity and URL so future runs are zero-config.
+        let save_dir = self.identity_dir.clone().or_else(default_identity_dir);
+        if let Some(ref dir) = save_dir {
+            if let Some(ref id) = self.identity {
+                let _ = save_identity_to_dir(id, dir);
+            }
+            if let Some(ref url) = self.url {
+                let _ = save_server_url(dir, url);
+            }
+        }
+
         Ok(self)
+    }
+
+    /// Full autonomous onboarding: onramp handshake + mTLS identity bootstrap.
+    ///
+    /// The most hands-off path for machine-native DG access. No credentials are
+    /// required upfront — the agent presents identity metadata and receives a
+    /// fully-authenticated mTLS [`Client`] in return.
+    ///
+    /// Internally chains:
+    /// 1. Two-step onramp handshake → provisional `client_id` + `client_secret`.
+    /// 2. OAuth `client_credentials` grant → access token.
+    /// 3. [`bootstrap_identity`](Self::bootstrap_identity) → DG-CA-signed cert persisted to disk.
+    ///
+    /// After the first run the mTLS identity is saved to `~/.conduit/` (or
+    /// `identity_dir` if set), so subsequent builds auto-discover it without
+    /// any credentials.
+    ///
+    /// Requires the `bootstrap` feature flag.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use datagrout_conduit::{ClientBuilder, onramp::OnrampOptions};
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // First run: autonomous registration, no prior credentials needed.
+    /// let client = ClientBuilder::new()
+    ///     .bootstrap_onramp(OnrampOptions {
+    ///         gateway: "https://app.datagrout.ai".into(),
+    ///         agent_name: "my-research-agent".into(),
+    ///         agent_type: Some("claude-sonnet-4-6".into()),
+    ///         intended_use: None,
+    ///         access_code: None,
+    ///     })
+    ///     .await?
+    ///     .build()?;
+    ///
+    /// // Subsequent runs: identity auto-discovered, no credentials needed.
+    /// let client = ClientBuilder::new()
+    ///     .with_identity_auto()
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "bootstrap")]
+    pub async fn bootstrap_onramp(
+        mut self,
+        opts: crate::onramp::OnrampOptions,
+    ) -> crate::error::Result<Self> {
+        use crate::registration::{
+            default_identity_dir, derive_identity_endpoint, generate_keypair, rotate_identity,
+            save_credentials, save_identity_to_dir, save_server_url, try_load_credentials,
+            try_read_server_url, RenewalOptions, SavedCredentials, DG_SUBSTRATE_ENDPOINT,
+        };
+
+        let identity_dir_owned = self.identity_dir.clone();
+        let default_dir = default_identity_dir();
+        let dir: Option<&std::path::Path> =
+            identity_dir_owned.as_deref().or(default_dir.as_deref());
+
+        // ── Fast path A: non-expiring cert on disk ──────────────────────────
+        // Skip everything. No new account, no network call.
+        if let Some(existing) =
+            crate::identity::ConduitIdentity::try_discover(self.identity_dir.as_deref())
+        {
+            if !existing.needs_rotation(self.rotation_days) {
+                if self.url.is_none() {
+                    self.url = try_read_server_url(dir);
+                }
+                self.identity = Some(existing);
+                return Ok(self);
+            }
+            // Cert is close to expiry — try mTLS rotation before touching credentials.
+            let name_str = opts.agent_name.clone();
+            if let Ok(new_keypair) = generate_keypair(&name_str) {
+                let endpoint = self
+                    .url
+                    .as_deref()
+                    .map(derive_identity_endpoint)
+                    .unwrap_or_else(|| {
+                        try_read_server_url(dir)
+                            .as_deref()
+                            .map(derive_identity_endpoint)
+                            .unwrap_or_else(|| DG_SUBSTRATE_ENDPOINT.to_string())
+                    });
+                let rotate_opts = RenewalOptions {
+                    endpoint,
+                    name: name_str,
+                    save_to: self.identity_dir.clone(),
+                };
+
+                match rotate_identity(&existing, &new_keypair, &rotate_opts).await {
+                    Ok((identity, _)) => {
+                        // ── Fast path C: mTLS rotation succeeded ──────────
+                        if self.url.is_none() {
+                            self.url = try_read_server_url(dir);
+                        }
+                        if let Some(d) = dir {
+                            let _ = save_identity_to_dir(&identity, d);
+                            if let Some(ref url) = self.url {
+                                let _ = save_server_url(d, url);
+                            }
+                        }
+                        self.identity = Some(identity);
+                        return Ok(self);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "mTLS rotation of expiring cert failed ({}); \
+                             trying credential recovery or fresh onramp",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        // ── Fast path B: cert missing but saved credentials on disk ─────────
+        // Re-register a fresh cert for the same machine account without creating
+        // a new one. If the saved credentials have expired, log a warning and
+        // fall through to a fresh onramp (which will create a new account).
+        if let Some(saved) = try_load_credentials(dir) {
+            let http = reqwest::Client::new();
+            let provider = OAuthTokenProvider::new(
+                &saved.client_id,
+                &saved.client_secret,
+                &saved.token_url,
+                None,
+            );
+
+            match provider.get_token(&http).await {
+                Ok(token) => {
+                    // Recover the server URL from disk (or from what the caller set).
+                    if self.url.is_none() {
+                        self.url = try_read_server_url(dir);
+                    }
+                    let endpoint = self
+                        .url
+                        .as_deref()
+                        .map(derive_identity_endpoint)
+                        .unwrap_or_else(|| DG_SUBSTRATE_ENDPOINT.to_string());
+
+                    return self
+                        .bootstrap_identity_with_endpoint(token, opts.agent_name, endpoint)
+                        .await;
+                }
+                Err(e) => {
+                    // Credentials rejected (likely expired after 30-day TTL).
+                    // Fall through to fresh onramp which will create a new account.
+                    tracing::warn!(
+                        "saved credentials for {} rejected ({}); \
+                         falling back to fresh onramp registration",
+                        saved.client_id,
+                        e
+                    );
+                }
+            }
+        }
+
+        // ── Slow path: full two-step onramp handshake ───────────────────────
+        let http = reqwest::Client::new();
+
+        let creds = crate::onramp::register(&http, &opts)
+            .await
+            .map_err(|e| Error::Onramp { stage: "registration", source: e })?;
+
+        let token = crate::onramp::exchange_token(&http, &creds)
+            .await
+            .map_err(|e| Error::Onramp { stage: "token_exchange", source: e })?;
+
+        // Persist credentials so cert-loss recovery works on future startups.
+        if let Some(d) = dir {
+            let _ = save_credentials(
+                d,
+                &SavedCredentials {
+                    client_id: creds.client_id.clone(),
+                    client_secret: creds.client_secret.clone(),
+                    token_url: creds.token_url.clone(),
+                    saved_at: {
+                        // Use a simple UTC timestamp without pulling in chrono.
+                        let secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        format!("{secs}")
+                    },
+                },
+            );
+        }
+
+        // Route through bootstrap_identity{,_with_endpoint} which handles
+        // identity registration and URL resolution.
+        match creds.mcp_url {
+            Some(ref url) => self.url(url).bootstrap_identity(token, opts.agent_name).await,
+            None => {
+                self.bootstrap_identity_with_endpoint(token, opts.agent_name, DG_SUBSTRATE_ENDPOINT)
+                    .await
+            }
+        }
     }
 
     /// Bootstrap an mTLS identity using OAuth 2.1 `client_credentials`.
@@ -970,6 +1229,34 @@ impl ClientBuilder {
     /// Like [`bootstrap_identity`](Self::bootstrap_identity) but instead of
     /// requiring a pre-obtained token, performs the OAuth token exchange
     /// inline using the provided `client_id` and `client_secret`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    ///     .bootstrap_identity_oauth(
+    ///         "my_client_id",
+    ///         "my_client_secret",
+    ///         "my-laptop",
+    ///     )
+    ///     .await?
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// Bootstrap an mTLS identity using OAuth 2.1 `client_credentials`.
+    ///
+    /// Like [`bootstrap_identity`](Self::bootstrap_identity) but instead of
+    /// requiring a pre-obtained token, performs the OAuth token exchange
+    /// inline using the provided `client_id` and `client_secret`.
+    ///
+    /// The token endpoint is **derived from the MCP URL** (strips `/mcp`, appends
+    /// `/oauth/token`).  Use [`bootstrap_identity_oauth_at`](Self::bootstrap_identity_oauth_at)
+    /// when you have an explicit token endpoint URL and want to avoid the
+    /// derivation heuristic.
     ///
     /// # Example
     ///
@@ -999,11 +1286,54 @@ impl ClientBuilder {
             Error::invalid_config("URL must be set before bootstrap_identity_oauth")
         })?;
         let token_endpoint = OAuthTokenProvider::derive_token_endpoint(url);
+        self.bootstrap_identity_oauth_at(client_id, client_secret, token_endpoint, name)
+            .await
+    }
 
-        let provider = OAuthTokenProvider::new(client_id, client_secret, token_endpoint, None);
+    /// Like [`bootstrap_identity_oauth`](Self::bootstrap_identity_oauth) but
+    /// accepts an explicit `token_url` instead of deriving it from the MCP URL.
+    ///
+    /// Prefer this variant when you have the token URL available directly (e.g.
+    /// from the onramp `token_url` field or a saved credentials file) to avoid
+    /// relying on the URL-structure heuristic.
+    ///
+    /// # Requirements
+    ///
+    /// `.url()` must be set on the builder before calling this method (or the
+    /// URL must be recoverable from a saved `server_url` file).  If the URL is
+    /// absent, [`build`](Self::build) will return
+    /// [`Error::InvalidConfig`](crate::error::Error::InvalidConfig).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::ClientBuilder;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/servers/{uuid}/mcp")
+    ///     .bootstrap_identity_oauth_at(
+    ///         "my_client_id",
+    ///         "my_client_secret",
+    ///         "https://gateway.datagrout.ai/servers/{uuid}/oauth/token",
+    ///         "my-laptop",
+    ///     )
+    ///     .await?
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "registration")]
+    pub async fn bootstrap_identity_oauth_at(
+        self,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        token_url: impl Into<String>,
+        name: impl Into<String>,
+    ) -> crate::error::Result<Self> {
+        let provider =
+            OAuthTokenProvider::new(client_id, client_secret, token_url.into(), None);
         let http = reqwest::Client::new();
         let token = provider.get_token(&http).await?;
-
         self.bootstrap_identity(token, name).await
     }
 
@@ -1011,7 +1341,18 @@ impl ClientBuilder {
     ///
     /// Returns [`Error::InvalidConfig`](crate::error::Error::InvalidConfig)
     /// when required fields (e.g. `url`) are missing.
-    pub fn build(self) -> Result<Client> {
+    pub fn build(mut self) -> Result<Client> {
+        // Last-chance URL recovery: if the caller didn't set a URL explicitly
+        // and didn't call with_identity_auto(), try reading it from the saved
+        // server_url file in identity_dir (or ~/.conduit/).  This allows:
+        //   ClientBuilder::new().identity_dir("/opt/agent/.conduit").build()
+        // to work after a prior bootstrap_onramp run.
+        if self.url.is_none() {
+            let default = crate::registration::default_identity_dir();
+            let dir = self.identity_dir.as_deref().or(default.as_deref());
+            self.url = crate::registration::try_read_server_url(dir);
+        }
+
         let url = self
             .url
             .ok_or_else(|| Error::invalid_config("URL is required"))?;

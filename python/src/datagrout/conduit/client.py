@@ -388,6 +388,72 @@ class Client:
             url, token, name, identity_dir=identity_dir, **client_kwargs
         )
 
+    @classmethod
+    async def bootstrap_onramp(
+        cls,
+        opts: "OnrampOptions",
+        identity_dir: Optional[str] = None,
+        **client_kwargs: Any,
+    ) -> "Client":
+        """Register autonomously with DG and bootstrap an mTLS identity.
+
+        The all-in-one flow: onramp (no prior credentials required) →
+        OAuth token exchange → mTLS identity registration and persistence.
+
+        On subsequent runs the saved mTLS identity is auto-discovered and
+        no credentials are needed.
+
+        Args:
+            opts: Onramp registration options.
+            identity_dir: Custom directory for identity persistence.
+            **client_kwargs: Additional keyword arguments passed to :class:`Client`.
+                Pass ``url=<mcp_url>`` when the onramp response may not include
+                ``mcp_url`` (e.g. when targeting a self-hosted DG instance).
+
+        Example::
+
+            from datagrout.conduit import Client
+            from datagrout.conduit.onramp import OnrampOptions
+
+            client = await Client.bootstrap_onramp(
+                OnrampOptions(
+                    gateway="https://app.datagrout.ai",
+                    agent_name="my-research-agent",
+                    agent_type="claude-sonnet-4-6",
+                )
+            )
+            await client.connect()
+        """
+        from .onramp import OnrampOptions as _Opts, _register, _exchange_token
+        import httpx
+
+        _id_dir = Path(identity_dir) if identity_dir else None
+
+        # Fast path: existing valid identity.
+        existing = ConduitIdentity.try_discover(_id_dir)
+        if existing is not None and not existing.needs_rotation(7):
+            url = client_kwargs.pop("url", None)
+            if url is None:
+                raise ValueError(
+                    "'url' must be provided in client_kwargs when an existing identity is reused"
+                )
+            return cls(url, identity=existing, identity_dir=identity_dir, **client_kwargs)
+
+        # Slow path: full onramp flow.
+        async with httpx.AsyncClient() as http:
+            creds = await _register(http, opts)
+            token = await _exchange_token(http, creds)
+
+        url = creds.mcp_url or client_kwargs.pop("url", None)
+        if url is None:
+            raise ValueError(
+                "'url' must be provided via client_kwargs when mcp_url is absent from the onramp response"
+            )
+
+        return await cls.bootstrap_identity(
+            url, token, name=opts.agent_name, identity_dir=identity_dir, **client_kwargs
+        )
+
     # ===== Standard MCP API (Drop-in Compatible) =====
 
     async def list_tools(self, **kwargs: Any) -> List[Dict[str, Any]]:

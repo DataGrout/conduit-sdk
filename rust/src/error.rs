@@ -131,6 +131,35 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Autonomous onramp registration failed at a specific stage.
+    ///
+    /// `stage` is one of `"registration"` (the two-step HTTP handshake) or
+    /// `"token_exchange"` (the OAuth `client_credentials` grant).  Match on the
+    /// inner [`OnrampError`][crate::onramp::OnrampError] for per-stage handling:
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::error::Error;
+    /// # use datagrout_conduit::onramp::OnrampError;
+    /// # fn handle(e: Error) {
+    /// if let Error::Onramp { stage, source } = e {
+    ///     match source {
+    ///         OnrampError::InitRejected { status: 429, .. } => { /* rate limited */ }
+    ///         OnrampError::CompleteRejected { .. } => { /* session token expired */ }
+    ///         _ => {}
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    #[cfg(feature = "onramp")]
+    #[error("onramp {stage}: {source}")]
+    Onramp {
+        /// Step of the onramp flow that failed (`"registration"` or `"token_exchange"`).
+        stage: &'static str,
+        /// Underlying error from the onramp handshake.
+        #[source]
+        source: crate::onramp::OnrampError,
+    },
+
     /// Catch-all for unexpected errors not covered by the above variants.
     #[error("{0}")]
     Other(String),

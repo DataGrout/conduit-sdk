@@ -151,6 +151,9 @@ pub mod transport;
 pub mod types;
 pub mod ws_transport;
 
+#[cfg(feature = "onramp")]
+pub mod onramp;
+
 pub use client::{
     is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
     GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
@@ -161,8 +164,14 @@ pub use namespaces::{Deliverables, Ephemerals, Flow, Logic, Prism, Warden};
 pub use oauth::OAuthTokenProvider;
 pub use registration::{
     fetch_dg_ca_cert, generate_keypair, refresh_ca_cert, register_identity, rotate_identity,
-    save_identity_to_dir, RegistrationOptions, RegistrationResponse, RenewalOptions,
-    SavedIdentityPaths, DG_CA_URL, DG_SUBSTRATE_ENDPOINT,
+    save_credentials, save_identity_to_dir, save_server_url, try_load_credentials,
+    try_read_server_url, RegistrationOptions, RegistrationResponse, RenewalOptions,
+    SavedCredentials, SavedIdentityPaths, DG_CA_URL, DG_SUBSTRATE_ENDPOINT,
+};
+
+#[cfg(feature = "onramp")]
+pub use onramp::{
+    register_and_exchange, register_only, OnrampCredentials, OnrampError, OnrampOptions,
 };
 pub use transport::{parse_sse_body, Transport};
 pub use types::{

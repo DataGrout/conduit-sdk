@@ -15,11 +15,109 @@ Drop-in replacement for standard MCP clients. Swap one import line and your agen
 
 | Language | Package | Install |
 |----------|---------|---------|
-| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.4.0` |
-| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.4.0` |
-| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.4.0` |
-| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.4.0"}` |
-| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.4.0` |
+| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.5.0` |
+| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.5.0` |
+| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.5.0` |
+| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.5.0"}` |
+| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.5.0` |
+
+## New to DataGrout? Start here.
+
+If you don't have a DataGrout account or server URL yet, the SDK can register you automatically — no browser, no sign-up form.
+
+### Python
+
+```python
+from datagrout.conduit import ClientBuilder
+from datagrout.conduit.onramp import OnrampOptions
+
+# One call: registers your agent, provisions a server, bootstraps mTLS identity.
+# On subsequent runs the identity is auto-discovered from ~/.conduit/ — no token needed.
+client = await ClientBuilder().bootstrap_onramp(OnrampOptions(
+    gateway="https://app.datagrout.ai",
+    agent_name="my-agent",
+    agent_type="claude-sonnet-4-6",
+    intended_use="Summarise documents and extract entities.",
+))
+await client.connect()
+```
+
+### TypeScript
+
+```typescript
+import { ClientBuilder } from '@datagrout/conduit';
+
+const client = await new ClientBuilder()
+  .bootstrapOnramp({
+    gateway: 'https://app.datagrout.ai',
+    agentName: 'my-agent',
+    agentType: 'claude-sonnet-4-6',
+    intendedUse: 'Summarise documents and extract entities.',
+  });
+
+await client.connect();
+```
+
+### Rust
+
+```rust
+use datagrout_conduit::{ClientBuilder, onramp::OnrampOptions};
+
+let client = ClientBuilder::new()
+    .bootstrap_onramp(OnrampOptions {
+        gateway: "https://app.datagrout.ai".into(),
+        agent_name: "my-agent".into(),
+        agent_type: Some("claude-sonnet-4-6".into()),
+        intended_use: Some("Summarise documents and extract entities.".into()),
+        access_code: None,
+    })
+    .await?
+    .build()?;
+
+client.connect().await?;
+```
+
+### Elixir
+
+```elixir
+{:ok, client} = DatagroutConduit.Client.bootstrap_onramp(%{
+  gateway: "https://app.datagrout.ai",
+  agent_name: "my-agent",
+  agent_type: "claude-sonnet-4-6",
+  intended_use: "Summarise documents and extract entities."
+})
+```
+
+### Ruby
+
+```ruby
+client = DatagroutConduit::Client.bootstrap_onramp(
+  gateway: "https://app.datagrout.ai",
+  agent_name: "my-agent",
+  agent_type: "claude-sonnet-4-6",
+  intended_use: "Summarise documents and extract entities."
+)
+client.connect
+```
+
+> **What happens under the hood:**
+> 1. The SDK sends a POST to `/onramp` with your agent metadata.
+> 2. DataGrout returns a short-lived session token.
+> 3. The SDK exchanges the token at `/onramp/complete` to receive OAuth credentials and your provisioned MCP server URL.
+> 4. An ECDSA P-256 key pair is generated locally, the public key is registered with the DataGrout CA, and the signed certificate is saved to `~/.conduit/`.
+> 5. All subsequent runs skip steps 1–4 entirely — the local certificate is presented directly.
+>
+> The private key never leaves your machine. Credentials and the server URL are persisted so cert-loss recovery works automatically on future startups.
+
+If you prefer the Invariant CLI, you can onboard directly from your terminal without writing any code:
+
+```
+invariant onboard
+```
+
+Once you have a server URL, use it as shown in the Quick Start examples below.
+
+---
 
 ## Quick Start
 

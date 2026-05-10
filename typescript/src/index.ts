@@ -39,4 +39,10 @@ export {
 export { extractMeta } from './types';
 export type * from './types';
 
-export const version = '0.4.0';
+export {
+  registerOnly,
+  registerAndExchange,
+} from './onramp';
+export type { OnrampOptions, OnrampCredentials } from './onramp';
+
+export const version = '0.5.0';
