@@ -152,16 +152,13 @@ export class Client {
     this.useIntelligentInterface = options.useIntelligentInterface ?? this.isDg;
     this.maxRetries = options.maxRetries ?? 3;
 
-    // Resolve identity: explicit > identityAuto flag > DG URL auto-discover.
-    // For DG URLs, silently try auto-discovery unless disable_mtls is set.
-    let identity =
+    // Resolve identity: explicit > identityAuto flag.
+    // Auto-discovery is opt-in only — pass identityAuto: true to enable it.
+    const identity =
       options.identity ??
       (options.identityAuto
         ? ConduitIdentity.tryDiscover(options.identityDir) ?? undefined
         : undefined);
-    if (identity === undefined && this.isDg && !options.disableMtls) {
-      identity = ConduitIdentity.tryDiscover(options.identityDir) ?? undefined;
-    }
 
     const transportType = options.transport || 'mcp';
     if (transportType === 'mcp') {

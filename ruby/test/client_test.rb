@@ -235,8 +235,8 @@ class ClientTest < Minitest::Test
     assert client.initialized?
   end
 
-  def test_initialize_with_disable_mtls
-    client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" }, disable_mtls: true)
+  def test_initialize_with_identity_auto
+    client = DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" }, identity_auto: true)
     assert client.use_intelligent_interface
   end
 

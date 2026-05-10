@@ -31,13 +31,15 @@ module DatagroutConduit
     end
 
     def initialize(url:, auth: {}, transport: :mcp, identity: nil, identity_dir: nil,
-                   use_intelligent_interface: nil, max_retries: 3, logger: nil, disable_mtls: false)
+                   use_intelligent_interface: nil, max_retries: 3, logger: nil,
+                   identity_auto: false, disable_mtls: false)
       @url = url
       @auth = auth
       @transport_mode = transport
       @identity = identity
       @identity_dir = identity_dir
-      @disable_mtls = disable_mtls
+      @identity_auto = identity_auto
+      @disable_mtls = disable_mtls  # deprecated, kept for backward compat
       @max_retries = max_retries
       @initialized = false
       @server_info = nil
@@ -450,8 +452,7 @@ module DatagroutConduit
 
     def resolve_identity!
       return if @identity
-      return if @disable_mtls
-      return unless @is_dg
+      return unless @identity_auto
 
       @identity = Identity.try_discover(override_dir: @identity_dir)
     end

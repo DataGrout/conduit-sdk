@@ -667,8 +667,6 @@ pub struct ClientBuilder {
     identity: Option<ConduitIdentity>,
     use_intelligent_interface: Option<bool>,
     max_retries: usize,
-    /// When `true`, never attempt mTLS even on DG URLs.
-    disable_mtls: bool,
     /// Custom directory for identity storage/discovery (overrides `~/.conduit/`).
     identity_dir: Option<std::path::PathBuf>,
     /// Pending OAuth credentials resolved into `AuthConfig::ClientCredentials`
@@ -688,7 +686,6 @@ impl Default for ClientBuilder {
             identity: None,
             use_intelligent_interface: None,
             max_retries: 3,
-            disable_mtls: false,
             identity_dir: None,
             _pending_oauth_creds: None,
             rotation_days: 7,
@@ -867,14 +864,15 @@ impl ClientBuilder {
         self
     }
 
-    /// Disable mTLS even when connecting to a DataGrout URL.
+    /// Clear any mTLS identity, ensuring token-only auth.
     ///
-    /// By default, DG URLs (`*.datagrout.ai`) automatically attempt to discover
-    /// an mTLS identity via the auto-discovery chain.  Call this to opt out —
-    /// useful in environments where you cannot persist certificates to disk or
-    /// where you are intentionally using token-only auth.
+    /// mTLS auto-discovery is opt-in via [`with_identity_auto`](Self::with_identity_auto),
+    /// so calling this is only necessary if an explicit identity was previously set
+    /// and you want to remove it.
+    ///
+    /// This method is kept for backward compatibility; it is otherwise a no-op on
+    /// fresh builders where no identity has been configured.
     pub fn no_mtls(mut self) -> Self {
-        self.disable_mtls = true;
         self.identity = None;
         self
     }
@@ -1384,13 +1382,8 @@ impl ClientBuilder {
                 self.auth.unwrap_or(AuthConfig::None)
             };
 
-        // For DG URLs, silently try auto-discovering an mTLS identity if none was
-        // explicitly set and mTLS wasn't disabled. Non-DG URLs never auto-discover.
-        let identity = if dg && !self.disable_mtls && self.identity.is_none() {
-            ConduitIdentity::try_discover(self.identity_dir.as_deref())
-        } else {
-            self.identity
-        };
+        // Identity is explicit or set via with_identity_auto(); never implicitly discovered.
+        let identity = self.identity;
 
         let identity_ref = identity.as_ref();
 

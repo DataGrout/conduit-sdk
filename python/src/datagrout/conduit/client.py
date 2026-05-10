@@ -120,13 +120,13 @@ class Client:
                 ``wss://`` (or ``ws://``) address; ``https://`` URLs are
                 automatically rewritten to ``wss://``.
             identity: Explicit mTLS identity (client certificate + key).
-            identity_auto: Auto-discover an mTLS identity from env vars / ~/.conduit/.
+            identity_auto: Opt in to auto-discovering an mTLS identity from env vars / ~/.conduit/.
+                mTLS auto-discovery is disabled by default.
             identity_dir: Custom directory for identity storage/discovery.  Overrides
                 the default ``~/.conduit/``.  Useful for running multiple agents on
                 the same machine with distinct identities.
-            disable_mtls: Opt out of automatic mTLS even for DataGrout URLs.
-                Normally, DG URLs silently attempt auto-discovery of an mTLS identity.
-                Set this to ``True`` to use token-only auth.
+            disable_mtls: Deprecated. No-op — mTLS auto-discovery is now opt-in
+                via ``identity_auto``.  Kept for backward compatibility.
             client_id: Shorthand for OAuth ``client_credentials`` auth — client ID.
             client_secret: Shorthand for OAuth ``client_credentials`` auth — secret.
             oauth_scope: Optional scope for OAuth token requests.
@@ -155,13 +155,11 @@ class Client:
         self._initialized = False
         self._max_retries = kwargs.pop("max_retries", 3)
 
-        # Resolve identity: explicit > identity_auto flag > DG URL auto-discover.
-        # For DG URLs, silently try auto-discovery unless disabled or already set.
+        # Resolve identity: explicit > identity_auto flag.
+        # Auto-discovery is opt-in only — pass identity_auto=True to enable it.
         _id_dir = Path(identity_dir) if identity_dir else None
         resolved_identity = identity
         if resolved_identity is None and identity_auto:
-            resolved_identity = ConduitIdentity.try_discover(_id_dir)
-        if resolved_identity is None and self._is_dg and not disable_mtls:
             resolved_identity = ConduitIdentity.try_discover(_id_dir)
 
         # Initialize transport

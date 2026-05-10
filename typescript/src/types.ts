@@ -261,6 +261,9 @@ export interface ClientOptions {
    * `~/.conduit/` before falling back to token auth.  Equivalent to
    * calling `ConduitIdentity.tryDefault()` and passing the result as
    * `identity`.
+   *
+   * mTLS auto-discovery is **opt-in** — this flag must be set to enable it.
+   * DataGrout URLs do not auto-discover an identity by default.
    */
   identityAuto?: boolean;
   /**
@@ -279,13 +282,8 @@ export interface ClientOptions {
    */
   useIntelligentInterface?: boolean;
   /**
-   * Disable automatic mTLS even for DataGrout URLs.
-   *
-   * By default, DG URLs (`*.datagrout.ai`) silently attempt to discover an
-   * mTLS identity from env vars or `~/.conduit/`.  Set to `true` to opt out
-   * and use token-only auth.
-   *
-   * @default false
+   * @deprecated No-op. mTLS auto-discovery is now opt-in via `identityAuto`.
+   * This option is kept for backward compatibility and has no effect.
    */
   disableMtls?: boolean;
   transport?: 'mcp' | 'jsonrpc' | 'websocket';
