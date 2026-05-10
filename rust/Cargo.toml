@@ -107,3 +107,8 @@ path = "examples/cost_tracking.rs"
 [[example]]
 name = "batch_operations"
 path = "examples/batch_operations.rs"
+
+[[example]]
+name = "bootstrap"
+path = "examples/bootstrap.rs"
+required-features = ["onramp", "registration"]

@@ -32,6 +32,7 @@ defmodule DatagroutConduit.MixProject do
       {:jason, "~> 1.4"},
       {:castore, "~> 1.0"},
       {:websockex, "~> 0.4"},
+      {:plug, "~> 1.0", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
