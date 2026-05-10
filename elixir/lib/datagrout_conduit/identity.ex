@@ -44,12 +44,16 @@ defmodule DatagroutConduit.Identity do
   def try_discover(opts \\ []) do
     override_dir = opts[:override_dir]
 
-    with nil <- from_override_dir(override_dir),
-         nil <- from_env_paths(),
-         nil <- from_env_dir(),
-         nil <- from_home_dir(),
-         nil <- from_cwd() do
-      nil
+    if override_dir != nil do
+      # Explicit dir: scoped search only — do not fall through to home dir.
+      from_override_dir(override_dir)
+    else
+      with nil <- from_env_paths(),
+           nil <- from_env_dir(),
+           nil <- from_home_dir(),
+           nil <- from_cwd() do
+        nil
+      end
     end
   end
 

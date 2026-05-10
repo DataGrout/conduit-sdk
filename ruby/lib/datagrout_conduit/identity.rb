@@ -67,31 +67,30 @@ module DatagroutConduit
     # Walk the auto-discovery chain and return the first identity found,
     # or nil if nothing is available.
     def self.try_discover(override_dir: nil)
-      # 1. Override directory
+      # When an explicit directory is given, scope search to that dir only.
       if override_dir
-        id = try_load_from_dir(override_dir)
-        return id if id
+        return try_load_from_dir(override_dir)
       end
 
-      # 2. Environment variables (individual cert/key PEMs)
+      # 1. Environment variables (individual cert/key PEMs)
       id = from_env
       return id if id
 
-      # 3. CONDUIT_IDENTITY_DIR env var
+      # 2. CONDUIT_IDENTITY_DIR env var
       identity_dir = ENV["CONDUIT_IDENTITY_DIR"]
       if identity_dir && !identity_dir.empty?
         id = try_load_from_dir(identity_dir)
         return id if id
       end
 
-      # 4. ~/.conduit/
+      # 3. ~/.conduit/
       home = ENV["HOME"] || ENV["USERPROFILE"]
       if home
         id = try_load_from_dir(File.join(home, ".conduit"))
         return id if id
       end
 
-      # 5. .conduit/ relative to cwd
+      # 4. .conduit/ relative to cwd
       id = try_load_from_dir(File.join(Dir.pwd, ".conduit"))
       return id if id
 
