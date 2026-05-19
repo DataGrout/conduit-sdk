@@ -151,9 +151,7 @@ class WsTransport(Transport):
 
         scheme = urlparse(url).scheme
         if scheme not in ("ws", "wss"):
-            raise ValueError(
-                f"WS transport requires a ws:// or wss:// URL, got {scheme!r}"
-            )
+            raise ValueError(f"WS transport requires a ws:// or wss:// URL, got {scheme!r}")
 
         self._url = url
         self._auth = auth or {}
@@ -314,9 +312,7 @@ class WsTransport(Transport):
         await self._ws.send(json.dumps(request))
         return await fut
 
-    async def call_tool(
-        self, name: str, arguments: Dict[str, Any], **_kwargs: Any
-    ) -> Any:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], **_kwargs: Any) -> Any:
         return await self.send_request("tools/call", {"name": name, "arguments": arguments})
 
     async def list_tools(self, **kwargs: Any) -> Any:
@@ -357,9 +353,7 @@ class WsTransport(Transport):
         elif api_key := auth.get("api_key"):
             headers["X-API-Key"] = str(api_key)
         elif basic := auth.get("basic"):
-            encoded = base64.b64encode(
-                f"{basic['username']}:{basic['password']}".encode()
-            ).decode()
+            encoded = base64.b64encode(f"{basic['username']}:{basic['password']}".encode()).decode()
             headers["Authorization"] = f"Basic {encoded}"
 
         return headers
@@ -421,9 +415,7 @@ class WsTransport(Transport):
                     if fut.done():
                         continue
                     if err := msg.get("error"):
-                        fut.set_exception(
-                            RuntimeError(err.get("message", "Subscribe failed"))
-                        )
+                        fut.set_exception(RuntimeError(err.get("message", "Subscribe failed")))
                     else:
                         result = msg.get("result") or {}
                         sub_id = result.get("subscription") or msg_id
@@ -438,9 +430,7 @@ class WsTransport(Transport):
                     if fut.done():
                         continue
                     if err := msg.get("error"):
-                        fut.set_exception(
-                            RuntimeError(err.get("message", "RPC error"))
-                        )
+                        fut.set_exception(RuntimeError(err.get("message", "RPC error")))
                     else:
                         fut.set_result(msg.get("result"))
 

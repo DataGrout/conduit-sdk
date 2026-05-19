@@ -30,5 +30,7 @@ class DeliverablesNamespace:
         self._client._warn_if_not_dg("deliverables.get")
         self._client._ensure_initialized()
         return await self._client._send_with_retry(
-            lambda: self._client._transport.call_tool("data-grout/deliverables.get", {"ref": ref_id})
+            lambda: self._client._transport.call_tool(
+                "data-grout/deliverables.get", {"ref": ref_id}
+            )
         )

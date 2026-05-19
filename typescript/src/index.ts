@@ -2,12 +2,12 @@
  * DataGrout Conduit SDK for TypeScript/JavaScript
  */
 
-export { Client, GuidedSession, isDgUrl } from './client';
-export type { Subscription, SubscriptionEvent } from './transports/ws';
-export { WsTransport, SUBPROTOCOL as WS_SUBPROTOCOL } from './transports/ws';
-export { ConduitIdentity, fetchWithIdentity } from './identity';
-export type { MtlsConfig } from './identity';
-export { OAuthTokenProvider, deriveTokenEndpoint } from './oauth';
+export { Client, GuidedSession, isDgUrl } from "./client";
+export type { Subscription, SubscriptionEvent } from "./transports/ws";
+export { WsTransport, SUBPROTOCOL as WS_SUBPROTOCOL } from "./transports/ws";
+export { ConduitIdentity, fetchWithIdentity } from "./identity";
+export type { MtlsConfig } from "./identity";
+export { OAuthTokenProvider, deriveTokenEndpoint } from "./oauth";
 export {
   DG_CA_URL,
   DG_SUBSTRATE_ENDPOINT,
@@ -18,7 +18,7 @@ export {
   registerIdentity,
   rotateIdentity,
   saveIdentity,
-} from './registration';
+} from "./registration";
 export type {
   Keypair,
   RegisteredIdentity,
@@ -26,7 +26,7 @@ export type {
   RenewalOptions,
   RotationOptions,
   SavedPaths,
-} from './registration';
+} from "./registration";
 export {
   ConduitError,
   NotInitializedError,
@@ -35,14 +35,11 @@ export {
   NetworkError,
   ServerError,
   InvalidConfigError,
-} from './errors';
-export { extractMeta } from './types';
-export type * from './types';
+} from "./errors";
+export { extractMeta } from "./types";
+export type * from "./types";
 
-export {
-  registerOnly,
-  registerAndExchange,
-} from './onramp';
-export type { OnrampOptions, OnrampCredentials } from './onramp';
+export { registerOnly, registerAndExchange } from "./onramp";
+export type { OnrampOptions, OnrampCredentials } from "./onramp";
 
-export const version = '0.5.0';
+export const version = "0.5.0";

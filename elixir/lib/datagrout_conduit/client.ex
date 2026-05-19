@@ -71,7 +71,8 @@ defmodule DatagroutConduit.Client do
   end
 
   @doc "Calls a tool on the remote server."
-  @spec call_tool(GenServer.server(), String.t(), map()) :: {:ok, Types.ToolResult.t()} | {:error, term()}
+  @spec call_tool(GenServer.server(), String.t(), map()) ::
+          {:ok, Types.ToolResult.t()} | {:error, term()}
   def call_tool(client, name, arguments \\ %{}) do
     GenServer.call(client, {:call_tool, name, arguments}, 120_000)
   end
@@ -83,7 +84,8 @@ defmodule DatagroutConduit.Client do
   end
 
   @doc "Reads a resource from the remote server."
-  @spec read_resource(GenServer.server(), String.t()) :: {:ok, [Types.ResourceContent.t()]} | {:error, term()}
+  @spec read_resource(GenServer.server(), String.t()) ::
+          {:ok, [Types.ResourceContent.t()]} | {:error, term()}
   def read_resource(client, uri) do
     GenServer.call(client, {:read_resource, uri}, 60_000)
   end
@@ -95,7 +97,8 @@ defmodule DatagroutConduit.Client do
   end
 
   @doc "Gets a prompt with the given arguments."
-  @spec get_prompt(GenServer.server(), String.t(), map()) :: {:ok, [Types.PromptMessage.t()]} | {:error, term()}
+  @spec get_prompt(GenServer.server(), String.t(), map()) ::
+          {:ok, [Types.PromptMessage.t()]} | {:error, term()}
   def get_prompt(client, name, arguments \\ %{}) do
     GenServer.call(client, {:get_prompt, name, arguments}, 60_000)
   end
@@ -103,13 +106,15 @@ defmodule DatagroutConduit.Client do
   # --- DataGrout Extensions ---
 
   @doc "Semantic discovery: find tools matching a goal."
-  @spec discover(GenServer.server(), keyword()) :: {:ok, Types.DiscoverResult.t()} | {:error, term()}
+  @spec discover(GenServer.server(), keyword()) ::
+          {:ok, Types.DiscoverResult.t()} | {:error, term()}
   def discover(client, opts) do
     GenServer.call(client, {:discover, opts}, 60_000)
   end
 
   @doc "Execute a tool with DG extensions (demux, refract, chart)."
-  @spec perform(GenServer.server(), String.t(), map(), keyword()) :: {:ok, Types.ToolResult.t()} | {:error, term()}
+  @spec perform(GenServer.server(), String.t(), map(), keyword()) ::
+          {:ok, Types.ToolResult.t()} | {:error, term()}
   def perform(client, tool_name, args \\ %{}, opts \\ []) do
     GenServer.call(client, {:perform, tool_name, args, opts}, 120_000)
   end
@@ -148,7 +153,8 @@ defmodule DatagroutConduit.Client do
   end
 
   @doc "Estimate cost of calling a tool without executing it."
-  @spec estimate_cost(GenServer.server(), String.t(), map()) :: {:ok, Types.CreditEstimate.t()} | {:error, term()}
+  @spec estimate_cost(GenServer.server(), String.t(), map()) ::
+          {:ok, Types.CreditEstimate.t()} | {:error, term()}
   def estimate_cost(client, tool_name, args \\ %{}) do
     GenServer.call(client, {:estimate_cost, tool_name, args}, 30_000)
   end
@@ -246,9 +252,12 @@ defmodule DatagroutConduit.Client do
   def bootstrap_identity(opts) do
     {auth_token, opts} = Keyword.pop(opts, :auth_token)
     {reg_name, opts} = Keyword.pop(opts, :name, "conduit-client")
-    {identity_dir, opts} = Keyword.pop_lazy(opts, :identity_dir, fn ->
-      DatagroutConduit.Registration.default_identity_dir()
-    end)
+
+    {identity_dir, opts} =
+      Keyword.pop_lazy(opts, :identity_dir, fn ->
+        DatagroutConduit.Registration.default_identity_dir()
+      end)
+
     {endpoint, opts} = Keyword.pop(opts, :endpoint)
     {threshold_days, opts} = Keyword.pop(opts, :threshold_days, 7)
 
@@ -293,9 +302,10 @@ defmodule DatagroutConduit.Client do
 
     url = Keyword.fetch!(opts, :url)
 
-    {token_endpoint, opts} = Keyword.pop_lazy(opts, :token_endpoint, fn ->
-      DatagroutConduit.OAuth.derive_token_endpoint(url)
-    end)
+    {token_endpoint, opts} =
+      Keyword.pop_lazy(opts, :token_endpoint, fn ->
+        DatagroutConduit.OAuth.derive_token_endpoint(url)
+      end)
 
     body =
       %{
@@ -342,15 +352,18 @@ defmodule DatagroutConduit.Client do
     {onramp_opts, opts} = Keyword.pop!(opts, :opts)
     {url, opts} = Keyword.pop(opts, :url)
     {name, opts} = Keyword.pop(opts, :name, "conduit-client")
-    {identity_dir, _opts_rest} = Keyword.pop_lazy(opts, :identity_dir, fn ->
-      DatagroutConduit.Registration.default_identity_dir()
-    end)
+
+    {identity_dir, _opts_rest} =
+      Keyword.pop_lazy(opts, :identity_dir, fn ->
+        DatagroutConduit.Registration.default_identity_dir()
+      end)
 
     existing = DatagroutConduit.Identity.try_discover(override_dir: identity_dir)
 
     if existing && !DatagroutConduit.Identity.needs_rotation?(existing) do
-      if is_nil(url), do: {:error, :url_required_for_existing_identity}, else:
-        start_link(Keyword.merge(opts, [url: url, identity: existing]))
+      if is_nil(url),
+        do: {:error, :url_required_for_existing_identity},
+        else: start_link(Keyword.merge(opts, url: url, identity: existing))
     else
       case DatagroutConduit.Onramp.register_and_exchange(onramp_opts) do
         {:ok, {creds, token}} ->
@@ -360,12 +373,12 @@ defmodule DatagroutConduit.Client do
             {:error, :url_required_when_mcp_url_absent}
           else
             bootstrap_identity(
-              Keyword.merge(opts, [
+              Keyword.merge(opts,
                 url: mcp_url,
                 auth_token: token,
                 name: name,
                 identity_dir: identity_dir
-              ])
+              )
             )
           end
 
@@ -495,6 +508,7 @@ defmodule DatagroutConduit.Client do
       {:ok, result, state} ->
         tool_result = %Types.ToolResult{
           content: result["content"] || [],
+          structured_content: result["structuredContent"],
           is_error: result["isError"] == true,
           meta: result["_meta"] || result["_datagrout"] || %{}
         }
@@ -690,7 +704,8 @@ defmodule DatagroutConduit.Client do
     state = maybe_warn_non_dg(state, "plan")
 
     if Keyword.get(opts, :goal) == nil and Keyword.get(opts, :query) == nil do
-      {:reply, {:error, {:invalid_config, "plan() requires at least one of :goal or :query"}}, state}
+      {:reply, {:error, {:invalid_config, "plan() requires at least one of :goal or :query"}},
+       state}
     else
       {id, state} = next_id(state)
 
@@ -752,12 +767,19 @@ defmodule DatagroutConduit.Client do
     end
   end
 
+  # 1. Prefer structuredContent (MCP 2025) — pure JSON map, no decoding needed.
+  defp unwrap_content(%{"structuredContent" => sc}) when not is_nil(sc), do: sc
+
+  # 2. Legacy: content array with JSON-encoded text string.
   defp unwrap_content(%{"content" => [%{"text" => text} | _]}) when is_binary(text) do
     case Jason.decode(text) do
       {:ok, decoded} -> decoded
       _ -> %{"text" => text}
     end
   end
+
+  # 3. Legacy: content array with non-text first item — return as-is.
+  defp unwrap_content(%{"content" => [first | _]}), do: first
 
   defp unwrap_content(raw), do: raw
 
@@ -804,7 +826,9 @@ defmodule DatagroutConduit.Client do
 
   defp resolve_auth({:oauth, provider}) do
     case DatagroutConduit.OAuth.get_token(provider) do
-      {:ok, token} -> {:bearer, token}
+      {:ok, token} ->
+        {:bearer, token}
+
       {:error, reason} ->
         Logger.warning("OAuth token fetch failed: #{inspect(reason)}, proceeding without auth")
         nil

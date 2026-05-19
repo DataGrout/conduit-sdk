@@ -68,10 +68,7 @@ defmodule DatagroutConduit.GuidedSession do
            ) do
         {:ok, %Types.GuideState{} = new_state} ->
           {:ok,
-           %{session |
-             session_id: new_state.session_id || session.session_id,
-             state: new_state
-           }}
+           %{session | session_id: new_state.session_id || session.session_id, state: new_state}}
 
         {:error, _} = err ->
           err

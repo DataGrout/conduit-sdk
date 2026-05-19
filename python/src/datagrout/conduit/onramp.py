@@ -99,6 +99,7 @@ class OnrampError(Exception):
 # Internal helpers (also used by Client.bootstrap_onramp)
 # ---------------------------------------------------------------------------
 
+
 async def _register(http: httpx.AsyncClient, opts: OnrampOptions) -> OnrampCredentials:
     base = opts.gateway.rstrip("/")
 
@@ -112,9 +113,7 @@ async def _register(http: httpx.AsyncClient, opts: OnrampOptions) -> OnrampCrede
 
     resp = await http.post(f"{base}/onramp", json=body)
     if not resp.is_success:
-        raise OnrampError(
-            f"onramp init rejected (HTTP {resp.status_code}): {resp.text}"
-        )
+        raise OnrampError(f"onramp init rejected (HTTP {resp.status_code}): {resp.text}")
 
     session_token = resp.json()["session_token"]
 
@@ -123,9 +122,7 @@ async def _register(http: httpx.AsyncClient, opts: OnrampOptions) -> OnrampCrede
         headers={"Authorization": f"Bearer {session_token}"},
     )
     if not resp.is_success:
-        raise OnrampError(
-            f"onramp complete rejected (HTTP {resp.status_code}): {resp.text}"
-        )
+        raise OnrampError(f"onramp complete rejected (HTTP {resp.status_code}): {resp.text}")
 
     data = resp.json()
     return OnrampCredentials(
@@ -149,15 +146,14 @@ async def _exchange_token(http: httpx.AsyncClient, creds: OnrampCredentials) -> 
         },
     )
     if not resp.is_success:
-        raise OnrampError(
-            f"token exchange failed (HTTP {resp.status_code}): {resp.text}"
-        )
+        raise OnrampError(f"token exchange failed (HTTP {resp.status_code}): {resp.text}")
     return resp.json()["access_token"]
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def register_only(opts: OnrampOptions) -> OnrampCredentials:
     """Perform the onramp handshake and return provisional OAuth credentials.

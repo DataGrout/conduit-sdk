@@ -2,45 +2,72 @@
  * JSONRPC transport implementation
  */
 
-import { Transport } from './base';
-import { ConduitIdentity, fetchWithIdentity } from '../identity';
-import { OAuthTokenProvider } from '../oauth';
-import type { AuthConfig, MCPTool, MCPResource, MCPPrompt, RateLimit, RateLimitStatus } from '../types';
-import { RateLimitError } from '../errors';
+import { Transport } from "./base";
+import { ConduitIdentity, fetchWithIdentity } from "../identity";
+import { OAuthTokenProvider } from "../oauth";
+import type {
+  AuthConfig,
+  MCPTool,
+  MCPResource,
+  MCPPrompt,
+  RateLimit,
+  RateLimitStatus,
+} from "../types";
+import { RateLimitError } from "../errors";
 
 // Re-export for backward compatibility — callers that import RateLimitError
 // directly from this module continue to work unchanged.
 export { RateLimitError };
+// Exported for testing only — prefer transport.callTool() in production code.
+export { unwrapContent };
 
 /**
  * Unwrap the MCP content envelope that wraps tool results from both MCP and
- * JSONRPC transports: `{ "content": [{ "type": "text", "text": "<json>" }] }`.
- * Returns the parsed inner object, or the raw value if no envelope is present.
+ * JSONRPC transports.
+ *
+ * Priority order (MCP 2025):
+ * 1. `result.structuredContent` — pure JSON object, no decoding needed.
+ * 2. `result.content[0].text` parsed as JSON — legacy text-encoded path.
+ * 3. `result.content[0]` as-is — plain-text or non-JSON content item.
+ * 4. `result` unchanged — no content envelope present.
  */
 function unwrapContent(result: any): any {
-  if (result && Array.isArray(result.content) && result.content.length > 0) {
+  if (!result) return result;
+  // 1. Prefer structuredContent (MCP 2025) — pure JSON, no encoding.
+  if (result.structuredContent !== undefined) {
+    return result.structuredContent;
+  }
+  // 2-3. Legacy: content array with JSON-encoded text.
+  if (Array.isArray(result.content) && result.content.length > 0) {
     const first = result.content[0];
-    if (first && typeof first.text === 'string') {
+    if (first && typeof first.text === "string") {
       try {
         return JSON.parse(first.text);
       } catch {
         return { text: first.text };
       }
     }
+    return first;
   }
   return result;
 }
 
 function parseRateLimitError(response: Response): RateLimitError {
-  const used = parseInt(response.headers.get('X-RateLimit-Used') ?? '0', 10) || 0;
-  const limitStr = response.headers.get('X-RateLimit-Limit') ?? '50';
+  const used =
+    parseInt(response.headers.get("X-RateLimit-Used") ?? "0", 10) || 0;
+  const limitStr = response.headers.get("X-RateLimit-Limit") ?? "50";
   const limit: RateLimit =
-    limitStr.toLowerCase() === 'unlimited'
-      ? 'unlimited'
+    limitStr.toLowerCase() === "unlimited"
+      ? "unlimited"
       : { perHour: parseInt(limitStr, 10) || 50 };
-  const isLimited = limit === 'unlimited' ? false : used >= (limit as { perHour: number }).perHour;
+  const isLimited =
+    limit === "unlimited"
+      ? false
+      : used >= (limit as { perHour: number }).perHour;
   const remaining =
-    limit === 'unlimited' ? null : Math.max(0, (limit as { perHour: number }).perHour - used);
+    limit === "unlimited"
+      ? null
+      : Math.max(0, (limit as { perHour: number }).perHour - used);
 
   return new RateLimitError({ used, limit, isLimited, remaining });
 }
@@ -54,7 +81,12 @@ export class JSONRPCTransport extends Transport {
   /** Resolved token provider, present only when `auth.clientCredentials` is set. */
   private oauthProvider?: OAuthTokenProvider;
 
-  constructor(url: string, auth?: AuthConfig, timeout = 30000, identity?: ConduitIdentity) {
+  constructor(
+    url: string,
+    auth?: AuthConfig,
+    timeout = 30000,
+    identity?: ConduitIdentity,
+  ) {
     super();
     this.url = url;
     this.auth = auth;
@@ -62,14 +94,18 @@ export class JSONRPCTransport extends Transport {
     this.timeout = timeout;
 
     if (identity?.needsRotation(30)) {
-      console.warn('[conduit] mTLS certificate expires within 30 days — consider rotating');
+      console.warn(
+        "[conduit] mTLS certificate expires within 30 days — consider rotating",
+      );
     }
 
     if (auth?.clientCredentials) {
       const cc = auth.clientCredentials;
       const tokenEndpoint =
-        cc.tokenEndpoint ?? (() => {
-          const { deriveTokenEndpoint } = require('../oauth') as typeof import('../oauth');
+        cc.tokenEndpoint ??
+        (() => {
+          const { deriveTokenEndpoint } =
+            require("../oauth") as typeof import("../oauth");
           return deriveTokenEndpoint(url);
         })();
       this.oauthProvider = new OAuthTokenProvider({
@@ -93,26 +129,32 @@ export class JSONRPCTransport extends Transport {
     return this._callWithRetry(method, params, false);
   }
 
-  private async _callWithRetry(method: string, params: any, isRetry: boolean): Promise<any> {
+  private async _callWithRetry(
+    method: string,
+    params: any,
+    isRetry: boolean,
+  ): Promise<any> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     // Handle auth — OAuth token fetched asynchronously.
     if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
-      headers['Authorization'] = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     } else if (this.auth?.bearer) {
-      headers['Authorization'] = `Bearer ${this.auth.bearer}`;
+      headers["Authorization"] = `Bearer ${this.auth.bearer}`;
     } else if (this.auth?.basic) {
-      const credentials = btoa(`${this.auth.basic.username}:${this.auth.basic.password}`);
-      headers['Authorization'] = `Basic ${credentials}`;
+      const credentials = btoa(
+        `${this.auth.basic.username}:${this.auth.basic.password}`,
+      );
+      headers["Authorization"] = `Basic ${credentials}`;
     } else if (this.auth?.custom) {
       Object.assign(headers, this.auth.custom);
     }
 
     const request = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: ++this.requestId,
       method,
       params: params || {},
@@ -122,7 +164,7 @@ export class JSONRPCTransport extends Transport {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     const fetchInit: RequestInit = {
-      method: 'POST',
+      method: "POST",
       headers,
       body: JSON.stringify(request),
       signal: controller.signal,
@@ -160,33 +202,41 @@ export class JSONRPCTransport extends Transport {
   }
 
   async listTools(options?: any): Promise<MCPTool[]> {
-    const result = await this.call('tools/list', options);
+    const result = await this.call("tools/list", options);
     return result?.tools || [];
   }
 
-  async callTool(name: string, args: Record<string, any>, options?: any): Promise<any> {
+  async callTool(
+    name: string,
+    args: Record<string, any>,
+    options?: any,
+  ): Promise<any> {
     const params = { name, arguments: args, ...options };
-    const result = await this.call('tools/call', params);
+    const result = await this.call("tools/call", params);
     return unwrapContent(result);
   }
 
   async listResources(options?: any): Promise<MCPResource[]> {
-    const result = await this.call('resources/list', options);
+    const result = await this.call("resources/list", options);
     return result?.resources || [];
   }
 
   async readResource(uri: string, options?: any): Promise<any> {
     const params = { uri, ...options };
-    return await this.call('resources/read', params);
+    return await this.call("resources/read", params);
   }
 
   async listPrompts(options?: any): Promise<MCPPrompt[]> {
-    const result = await this.call('prompts/list', options);
+    const result = await this.call("prompts/list", options);
     return result?.prompts || [];
   }
 
-  async getPrompt(name: string, args?: Record<string, any>, options?: any): Promise<any> {
+  async getPrompt(
+    name: string,
+    args?: Record<string, any>,
+    options?: any,
+  ): Promise<any> {
     const params = { name, arguments: args || {}, ...options };
-    return await this.call('prompts/get', params);
+    return await this.call("prompts/get", params);
   }
 }

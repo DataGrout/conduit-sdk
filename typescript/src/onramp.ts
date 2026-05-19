@@ -78,17 +78,19 @@ export interface OnrampCredentials {
 // ---------------------------------------------------------------------------
 
 /** @internal */
-export async function _doRegister(opts: OnrampOptions): Promise<OnrampCredentials> {
-  const base = opts.gateway.replace(/\/$/, '');
+export async function _doRegister(
+  opts: OnrampOptions,
+): Promise<OnrampCredentials> {
+  const base = opts.gateway.replace(/\/$/, "");
 
   const body: Record<string, string> = { agent_name: opts.agentName };
-  if (opts.agentType) body['agent_type'] = opts.agentType;
-  if (opts.intendedUse) body['intended_use'] = opts.intendedUse;
-  if (opts.accessCode) body['access_code'] = opts.accessCode;
+  if (opts.agentType) body["agent_type"] = opts.agentType;
+  if (opts.intendedUse) body["intended_use"] = opts.intendedUse;
+  if (opts.accessCode) body["access_code"] = opts.accessCode;
 
   const initResp = await fetch(`${base}/onramp`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -101,37 +103,41 @@ export async function _doRegister(opts: OnrampOptions): Promise<OnrampCredential
   const sessionToken = initData.session_token;
 
   const completeResp = await fetch(`${base}/onramp/complete`, {
-    method: 'POST',
+    method: "POST",
     headers: { Authorization: `Bearer ${sessionToken}` },
   });
 
   if (!completeResp.ok) {
     const text = await completeResp.text();
-    throw new Error(`onramp complete rejected (HTTP ${completeResp.status}): ${text}`);
+    throw new Error(
+      `onramp complete rejected (HTTP ${completeResp.status}): ${text}`,
+    );
   }
 
   const data = (await completeResp.json()) as Record<string, any>;
   return {
-    clientId: data['client_id'] as string,
-    clientSecret: data['client_secret'] as string,
-    tokenUrl: data['token_url'] as string,
-    scopes: (data['scopes'] as string[]) ?? [],
-    expiresIn: (data['expires_in'] as number) ?? 0,
-    rpcUrl: data['rpc_url'] as string | undefined,
-    mcpUrl: data['mcp_url'] as string | undefined,
+    clientId: data["client_id"] as string,
+    clientSecret: data["client_secret"] as string,
+    tokenUrl: data["token_url"] as string,
+    scopes: (data["scopes"] as string[]) ?? [],
+    expiresIn: (data["expires_in"] as number) ?? 0,
+    rpcUrl: data["rpc_url"] as string | undefined,
+    mcpUrl: data["mcp_url"] as string | undefined,
   };
 }
 
 /** @internal */
-export async function _exchangeToken(creds: OnrampCredentials): Promise<string> {
+export async function _exchangeToken(
+  creds: OnrampCredentials,
+): Promise<string> {
   const body = new URLSearchParams({
-    grant_type: 'client_credentials',
+    grant_type: "client_credentials",
     client_id: creds.clientId,
     client_secret: creds.clientSecret,
   });
 
   const resp = await fetch(creds.tokenUrl, {
-    method: 'POST',
+    method: "POST",
     body,
   });
 
@@ -158,7 +164,9 @@ export async function _exchangeToken(creds: OnrampCredentials): Promise<string> 
  * @param opts Onramp registration options.
  * @returns `OnrampCredentials` containing `clientId` and `clientSecret`.
  */
-export async function registerOnly(opts: OnrampOptions): Promise<OnrampCredentials> {
+export async function registerOnly(
+  opts: OnrampOptions,
+): Promise<OnrampCredentials> {
   return _doRegister(opts);
 }
 
@@ -172,7 +180,7 @@ export async function registerOnly(opts: OnrampOptions): Promise<OnrampCredentia
  * @returns Tuple of `[OnrampCredentials, accessToken]`.
  */
 export async function registerAndExchange(
-  opts: OnrampOptions
+  opts: OnrampOptions,
 ): Promise<[OnrampCredentials, string]> {
   const creds = await _doRegister(opts);
   const token = await _exchangeToken(creds);

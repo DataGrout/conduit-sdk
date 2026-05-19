@@ -317,8 +317,8 @@ class TestRotation:
     def test_needs_rotation_true_within_threshold(self) -> None:
         soon = datetime.now(tz=timezone.utc) + timedelta(days=10)
         identity = ConduitIdentity.from_pem(CERT_PEM, KEY_PEM).with_expiry(soon)
-        assert identity.needs_rotation(30) is True   # threshold 30d → within
-        assert identity.needs_rotation(5) is False   # threshold 5d → not within
+        assert identity.needs_rotation(30) is True  # threshold 30d → within
+        assert identity.needs_rotation(5) is False  # threshold 5d → not within
 
     def test_needs_rotation_false_when_far_future(self) -> None:
         far = datetime.now(tz=timezone.utc) + timedelta(days=365 * 5)
@@ -474,7 +474,9 @@ class TestJSONRPCTransportWithIdentity:
 
         with (
             patch.object(identity, "build_ssl_context", return_value=mock_ssl_ctx) as mock_build,
-            patch("datagrout.conduit.transports.jsonrpc_transport.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "datagrout.conduit.transports.jsonrpc_transport.httpx.AsyncClient"
+            ) as mock_client_cls,
         ):
             mock_client_cls.return_value = MagicMock()
             await transport.connect()
@@ -562,30 +564,36 @@ class TestClientWithIdentity:
 
         with patch("datagrout.conduit.client.JSONRPCTransport") as mock_cls:
             mock_transport = AsyncMock()
-            mock_transport.call_tool = AsyncMock(return_value={
-                "result": "ok",
-                "_datagrout": {
-                    "receipt": {
-                        "receipt_id": "rcp_mtls_test",
-                        "timestamp": "2026-02-13T00:00:00Z",
-                        "estimated_credits": 1.0,
-                        "actual_credits": 0.9,
-                        "net_credits": 0.9,
-                        "savings": 0.1,
-                        "savings_bonus": 0.0,
-                        "breakdown": {},
-                        "byok": {"enabled": False, "discount_applied": 0.0, "discount_rate": 0.0},
-                        "balance_before": 100.0,
-                        "balance_after": 99.1,
+            mock_transport.call_tool = AsyncMock(
+                return_value={
+                    "result": "ok",
+                    "_datagrout": {
+                        "receipt": {
+                            "receipt_id": "rcp_mtls_test",
+                            "timestamp": "2026-02-13T00:00:00Z",
+                            "estimated_credits": 1.0,
+                            "actual_credits": 0.9,
+                            "net_credits": 0.9,
+                            "savings": 0.1,
+                            "savings_bonus": 0.0,
+                            "breakdown": {},
+                            "byok": {
+                                "enabled": False,
+                                "discount_applied": 0.0,
+                                "discount_rate": 0.0,
+                            },
+                            "balance_before": 100.0,
+                            "balance_after": 99.1,
+                        },
+                        "credit_estimate": {
+                            "estimated_total": 1.0,
+                            "actual_total": 0.9,
+                            "net_total": 0.9,
+                            "breakdown": {},
+                        },
                     },
-                    "credit_estimate": {
-                        "estimated_total": 1.0,
-                        "actual_total": 0.9,
-                        "net_total": 0.9,
-                        "breakdown": {},
-                    },
-                },
-            })
+                }
+            )
             mock_transport.connect = AsyncMock()
             mock_transport.disconnect = AsyncMock()
             mock_cls.return_value = mock_transport

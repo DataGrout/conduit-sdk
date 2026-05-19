@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Client } from '../src/client';
 import { extractMeta } from '../src/types';
-import { RateLimitError } from '../src/transports/jsonrpc';
+import { RateLimitError, unwrapContent } from '../src/transports/jsonrpc';
 
 // ─── Real DG _datagrout receipt fixture (matches gateway output) ─────────────
 
@@ -1014,5 +1014,57 @@ describe('Client', () => {
     injectMockTransport(client);
 
     await expect(client.plan({})).rejects.toThrow(/goal.*query/i);
+  });
+});
+
+// ─── unwrapContent (MCP 2025 structuredContent priority) ─────────────────────
+
+describe('unwrapContent', () => {
+  it('returns structuredContent directly when present', () => {
+    const sc = { docs: [{ ref: 'doc_abc', title: 'My Doc' }] };
+    const result = unwrapContent({
+      structuredContent: sc,
+      content: [{ type: 'text', text: '{"docs":[{"ref":"doc_xyz"}]}' }],
+      isError: false,
+    });
+    expect(result).toBe(sc);
+  });
+
+  it('returns structuredContent even when it is an empty object', () => {
+    const result = unwrapContent({ structuredContent: {} });
+    expect(result).toEqual({});
+  });
+
+  it('falls back to parsing content[0].text as JSON when no structuredContent', () => {
+    const payload = { answer: 42, rows: [1, 2, 3] };
+    const result = unwrapContent({
+      content: [{ type: 'text', text: JSON.stringify(payload) }],
+      isError: false,
+    });
+    expect(result).toEqual(payload);
+  });
+
+  it('returns { text } when content[0].text is not valid JSON', () => {
+    const result = unwrapContent({
+      content: [{ type: 'text', text: 'plain string result' }],
+    });
+    expect(result).toEqual({ text: 'plain string result' });
+  });
+
+  it('returns content[0] as-is when it has no text field', () => {
+    const item = { type: 'image', url: 'https://example.com/img.png' };
+    const result = unwrapContent({ content: [item] });
+    expect(result).toBe(item);
+  });
+
+  it('returns the raw result when neither structuredContent nor content is present', () => {
+    const raw = { custom: 'payload' };
+    const result = unwrapContent(raw);
+    expect(result).toBe(raw);
+  });
+
+  it('returns null/undefined as-is', () => {
+    expect(unwrapContent(null)).toBeNull();
+    expect(unwrapContent(undefined)).toBeUndefined();
   });
 });

@@ -211,7 +211,8 @@ defmodule DatagroutConduit.Transport.Ws do
 
   # ── Message routing ────────────────────────────────────────────────────────
 
-  defp handle_message(%{"id" => nil} = msg, state), do: handle_message(Map.delete(msg, "id"), state)
+  defp handle_message(%{"id" => nil} = msg, state),
+    do: handle_message(Map.delete(msg, "id"), state)
 
   defp handle_message(%{"method" => "notification", "params" => params}, state)
        when not is_map_key(state, :id) do

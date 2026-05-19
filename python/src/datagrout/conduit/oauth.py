@@ -110,8 +110,7 @@ class OAuthTokenProvider:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
-                f"OAuth token endpoint returned {exc.response.status_code}: "
-                f"{exc.response.text}"
+                f"OAuth token endpoint returned {exc.response.status_code}: {exc.response.text}"
             ) from exc
         except httpx.RequestError as exc:
             raise RuntimeError(f"OAuth token request failed: {exc}") from exc

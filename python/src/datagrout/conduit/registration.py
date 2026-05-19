@@ -49,6 +49,7 @@ DEFAULT_IDENTITY_DIR = Path.home() / ".conduit"
 @dataclass
 class Byok:
     """BYOK discount details embedded in a receipt."""
+
     enabled: bool = False
     discount_applied: float = 0.0
     discount_rate: float = 0.0
@@ -60,6 +61,7 @@ class Receipt:
 
     Use :func:`extract_meta` to pull this out of any tool-call result dict.
     """
+
     receipt_id: str
     timestamp: str
     estimated_credits: float
@@ -77,6 +79,7 @@ class Receipt:
 @dataclass
 class CreditEstimate:
     """Pre-execution credit estimate under ``_meta.credit_estimate``."""
+
     estimated_total: float
     actual_total: float
     net_total: float
@@ -94,6 +97,7 @@ class ToolMeta:
         if meta:
             print(f"Charged {meta.receipt.net_credits} credits")
     """
+
     receipt: Receipt
     credit_estimate: Optional[CreditEstimate] = None
 
@@ -156,6 +160,7 @@ def extract_meta(result: dict) -> Optional[ToolMeta]:
 @dataclass
 class RegistrationResponse:
     """Response body from ``POST /api/v1/substrate/identity/register`` or ``/rotate``."""
+
     id: str
     cert_pem: str
     fingerprint: str
@@ -168,6 +173,7 @@ class RegistrationResponse:
 @dataclass
 class SavedIdentityPaths:
     """Paths written by :func:`save_identity`."""
+
     cert_path: Path
     key_path: Path
     ca_path: Optional[Path] = None
@@ -300,11 +306,16 @@ async def register_identity(
 
     # Load the private key from the keypair PEM so we can export the public key.
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
     private_key = load_pem_private_key(keypair.key_pem.encode(), password=None)
-    public_key_pem = private_key.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
+    public_key_pem = (
+        private_key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
 
     url = endpoint.rstrip("/") + "/register"
     async with httpx.AsyncClient() as client:
@@ -369,11 +380,16 @@ async def rotate_identity(
 
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
     private_key = load_pem_private_key(new_keypair.key_pem.encode(), password=None)
-    public_key_pem = private_key.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
+    public_key_pem = (
+        private_key.public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode()
+    )
 
     url = endpoint.rstrip("/") + "/rotate"
     ssl_context = current_identity.build_ssl_context()

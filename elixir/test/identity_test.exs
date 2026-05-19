@@ -46,7 +46,8 @@ defmodule DatagroutConduit.IdentityTest do
     end
 
     test "fails with missing cert" do
-      assert {:error, {:file_not_found, _}} = Identity.from_paths("/nonexistent/cert.pem", "/nonexistent/key.pem")
+      assert {:error, {:file_not_found, _}} =
+               Identity.from_paths("/nonexistent/cert.pem", "/nonexistent/key.pem")
     end
   end
 
@@ -101,11 +102,24 @@ defmodule DatagroutConduit.IdentityTest do
     key_path = Path.join(dir, "key.pem")
     cert_path = Path.join(dir, "cert.pem")
 
-    {_, 0} = System.cmd("openssl", [
-      "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-      "-keyout", key_path, "-out", cert_path,
-      "-days", "365", "-subj", "/CN=conduit-test"
-    ], stderr_to_stdout: true)
+    {_, 0} =
+      System.cmd(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-keyout",
+          key_path,
+          "-out",
+          cert_path,
+          "-days",
+          "365",
+          "-subj",
+          "/CN=conduit-test"
+        ], stderr_to_stdout: true)
 
     cert_pem = File.read!(cert_path)
     key_pem = File.read!(key_path)

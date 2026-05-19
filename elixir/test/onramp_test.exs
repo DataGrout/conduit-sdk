@@ -50,6 +50,7 @@ defmodule DatagroutConduit.OnrampTest do
         intended_use: "extraction",
         access_code: "code123"
       }
+
       assert opts.agent_type == "gpt-4o"
       assert opts.access_code == "code123"
     end
@@ -68,6 +69,7 @@ defmodule DatagroutConduit.OnrampTest do
         mcp_url: "#{@gateway}/servers/abc/mcp",
         rpc_url: "#{@gateway}/servers/abc/rpc"
       }
+
       assert creds.client_id == "agt_abc"
       assert creds.scopes == ["mcp:read"]
       assert creds.expires_in == 2_592_000
@@ -75,8 +77,11 @@ defmodule DatagroutConduit.OnrampTest do
 
     test "mcp_url and rpc_url default to nil" do
       creds = %OnrampCredentials{
-        client_id: "x", client_secret: "y", token_url: @token_url
+        client_id: "x",
+        client_secret: "y",
+        token_url: @token_url
       }
+
       assert is_nil(creds.mcp_url)
       assert is_nil(creds.rpc_url)
     end
@@ -219,7 +224,9 @@ defmodule DatagroutConduit.OnrampTest do
 
     test "returns {:error, ...} on failure" do
       creds = %OnrampCredentials{
-        client_id: "x", client_secret: "y", token_url: @token_url
+        client_id: "x",
+        client_secret: "y",
+        token_url: @token_url
       }
 
       Req.Test.stub(DatagroutConduit.Onramp, fn conn ->

@@ -6,6 +6,91 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] - 2026-05-19
+
+### Added (all languages)
+
+**MCP 2025 `structuredContent` support** — `call_tool` now prefers the
+`structuredContent` field on tool call results when it is present. This field
+carries the actual JSON payload directly (no string-encoding), superseding the
+legacy `content[0].text` path which remains as a fallback for servers that
+predate the MCP 2025 revision.
+
+The unwrap priority is:
+1. `structuredContent` — returned as-is (pure JSON object).
+2. `content[0].text` — parsed as JSON; falls back to `{"text": <value>}` if
+   the text is not valid JSON.
+3. `content[0]` — returned as-is when the first content item has no `text`
+   field (e.g. image content items).
+4. Raw result — returned unchanged when neither envelope is present.
+
+### Changed (Rust)
+
+- **`protocol.rs` — `CallToolResult`**: added `structured_content: Option<Value>`
+  (`#[serde(rename_all = "camelCase")]` so it deserialises from `structuredContent`);
+  `content` now carries `#[serde(default)]` so it is optional on the wire.
+- **`client.rs` — `call_tool`**: prefers `structured_content` → parses
+  `content[0].text` as JSON → returns `content[0]` as-is → returns raw. Removes
+  the previous behaviour of returning the raw content item unchanged.
+- **`client.rs` — `call_dg_tool`**: same priority order applied to the internal
+  DG tool dispatch path.
+
+### Changed (TypeScript)
+
+- **`transports/jsonrpc.ts` — `unwrapContent`**: checks `result.structuredContent`
+  first; falls back to `content[0].text` JSON parse, then `content[0]` as-is.
+  Updated JSDoc to document the four-step priority. `unwrapContent` is now
+  exported (as a testing seam) alongside the existing `RateLimitError` re-export.
+- **`transports/mcp.ts` — `callTool`**: same `structuredContent`-first check
+  applied inline before the content-array fallback.
+
+### Changed (Python)
+
+- **`transports/mcp_transport.py` — `call_tool`**: `structuredContent` key
+  checked first; falls back to `content[0]["text"]` JSON parse, then `content[0]`
+  as-is. Comment updated to document the three-step fallback.
+- **`transports/jsonrpc_transport.py` — `call_tool`**: identical change.
+
+### Changed (Elixir)
+
+- **`types.ex` — `Types.ToolResult`**: added `structured_content: nil` field
+  and corresponding `@type` spec entry.
+- **`client.ex` — `handle_call({:call_tool, …})`**: populates
+  `structured_content: result["structuredContent"]` on the returned `ToolResult`.
+- **`client.ex` — `unwrap_content/1`**: added a first clause matching
+  `%{"structuredContent" => sc}` (non-nil guard) that returns `sc` directly;
+  added a third clause returning `content[0]` as-is for non-text content items.
+
+### Changed (Ruby)
+
+- **`client.rb` — `unwrap_content`**: checks `raw.key?("structuredContent")`
+  first and returns its value; falls back to `content[0]["text"]` JSON parse,
+  then `content[0]` as-is when no `"text"` key is present. Comment updated with
+  full four-step priority documentation.
+
+### Tests
+
+- **Rust** (`src/client.rs`): existing `call_tool` tests cover the new unwrap
+  behaviour; the `protocol.rs` change is covered by the existing serde tests.
+- **TypeScript** (`tests/client.test.ts`): 7 new `describe('unwrapContent')`
+  unit tests covering `structuredContent` priority, JSON parse fallback,
+  non-JSON text fallback, no-text content item, no-envelope passthrough, and
+  null/undefined passthrough.
+- **Python** (`tests/test_client.py`): 5 new parametrised `@pytest.mark.asyncio`
+  tests run against both `MCPTransport` and `JSONRPCTransport` covering the
+  same cases.
+- **Elixir** (`test/client_test.exs`): 6 new ExUnit tests across two `describe`
+  blocks — `call_tool/3 structured_content field` and
+  `dg/3 unwrap_content priority (MCP 2025)`.
+- **Ruby** (`test/client_test.rb`): 6 new minitest tests covering all
+  `unwrap_content` branches.
+
+### Version
+
+`0.5.0` → `0.6.0`
+
+---
+
 ## [0.5.0] - 2026-05-09
 
 ### Added (all languages)

@@ -2,13 +2,13 @@
  * MCP transport implementation using official SDK
  */
 
-import { Transport } from './base';
-import type { AuthConfig, MCPTool, MCPResource, MCPPrompt } from '../types';
-import type { ConduitIdentity } from '../identity';
-import { OAuthTokenProvider, deriveTokenEndpoint } from '../oauth';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Transport } from "./base";
+import type { AuthConfig, MCPTool, MCPResource, MCPPrompt } from "../types";
+import type { ConduitIdentity } from "../identity";
+import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 export class MCPTransport extends Transport {
   private url: string;
@@ -41,14 +41,14 @@ export class MCPTransport extends Transport {
 
     if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
-      headers['Authorization'] = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     } else if (this.auth?.bearer) {
-      headers['Authorization'] = `Bearer ${this.auth.bearer}`;
+      headers["Authorization"] = `Bearer ${this.auth.bearer}`;
     } else if (this.auth?.basic) {
       const encoded = Buffer.from(
-        `${this.auth.basic.username}:${this.auth.basic.password}`
-      ).toString('base64');
-      headers['Authorization'] = `Basic ${encoded}`;
+        `${this.auth.basic.username}:${this.auth.basic.password}`,
+      ).toString("base64");
+      headers["Authorization"] = `Basic ${encoded}`;
     } else if (this.auth?.custom) {
       Object.assign(headers, this.auth.custom);
     }
@@ -57,15 +57,18 @@ export class MCPTransport extends Transport {
   }
 
   async connect(): Promise<void> {
-    if (this.url.startsWith('stdio://')) {
-      const command = this.url.replace('stdio://', '');
-      const parts = command.split(' ');
+    if (this.url.startsWith("stdio://")) {
+      const command = this.url.replace("stdio://", "");
+      const parts = command.split(" ");
 
       this.clientTransport = new StdioClientTransport({
         command: parts[0],
         args: parts.slice(1),
       });
-    } else if (this.url.startsWith('http://') || this.url.startsWith('https://')) {
+    } else if (
+      this.url.startsWith("http://") ||
+      this.url.startsWith("https://")
+    ) {
       const headers = await this.buildHeaders();
 
       const transportOpts: Record<string, any> = {};
@@ -76,27 +79,35 @@ export class MCPTransport extends Transport {
 
       if (this.identity) {
         const id = this.identity;
-        transportOpts.fetcher = (url: string | URL | Request, init?: RequestInit) => {
-          const { fetchWithIdentity } = require('../identity') as typeof import('../identity');
+        transportOpts.fetcher = (
+          url: string | URL | Request,
+          init?: RequestInit,
+        ) => {
+          const { fetchWithIdentity } =
+            require("../identity") as typeof import("../identity");
           return fetchWithIdentity(
-            typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url,
+            typeof url === "string"
+              ? url
+              : url instanceof URL
+                ? url.toString()
+                : url.url,
             init ?? {},
-            id
+            id,
           );
         };
       }
 
       this.clientTransport = new SSEClientTransport(
         new URL(this.url),
-        transportOpts
+        transportOpts,
       );
     } else {
       throw new Error(`Unsupported MCP URL scheme: ${this.url}`);
     }
 
     this.client = new Client(
-      { name: 'datagrout-conduit', version: '0.1.0' },
-      { capabilities: {} }
+      { name: "datagrout-conduit", version: "0.1.0" },
+      { capabilities: {} },
     );
 
     await this.client.connect(this.clientTransport);
@@ -110,7 +121,7 @@ export class MCPTransport extends Transport {
 
   async listTools(options?: any): Promise<MCPTool[]> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.listTools(options);
@@ -122,33 +133,40 @@ export class MCPTransport extends Transport {
     }));
   }
 
-  async callTool(name: string, args: Record<string, any>, options?: any): Promise<any> {
+  async callTool(
+    name: string,
+    args: Record<string, any>,
+    options?: any,
+  ): Promise<any> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.callTool({ name, arguments: args });
 
-    // MCP tool responses wrap the actual result in a content envelope:
-    // { "content": [{ "type": "text", "text": "<json>" }], "isError": false }
-    // Unwrap so callers receive the actual tool output map.
+    // 1. Prefer structuredContent (MCP 2025) — pure JSON, no encoding.
+    if (result?.structuredContent !== undefined) {
+      return result.structuredContent;
+    }
+    // 2-3. Legacy: content array with JSON-encoded text.
     const content = result?.content;
     if (Array.isArray(content) && content.length > 0) {
       const first = content[0];
-      if (first && typeof first.text === 'string') {
+      if (first && typeof first.text === "string") {
         try {
           return JSON.parse(first.text);
         } catch {
           return { text: first.text };
         }
       }
+      return first;
     }
     return result;
   }
 
   async listResources(options?: any): Promise<MCPResource[]> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.listResources();
@@ -162,7 +180,7 @@ export class MCPTransport extends Transport {
 
   async readResource(uri: string, options?: any): Promise<any> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.readResource({ uri });
@@ -171,7 +189,7 @@ export class MCPTransport extends Transport {
 
   async listPrompts(options?: any): Promise<MCPPrompt[]> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.listPrompts();
@@ -182,9 +200,13 @@ export class MCPTransport extends Transport {
     }));
   }
 
-  async getPrompt(name: string, args?: Record<string, any>, options?: any): Promise<any> {
+  async getPrompt(
+    name: string,
+    args?: Record<string, any>,
+    options?: any,
+  ): Promise<any> {
     if (!this.client) {
-      throw new Error('Not connected. Call connect() first.');
+      throw new Error("Not connected. Call connect() first.");
     }
 
     const result = await this.client.getPrompt({ name, arguments: args || {} });

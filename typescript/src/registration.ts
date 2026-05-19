@@ -16,19 +16,20 @@
  * rebuild or re-registration.
  */
 
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import * as crypto from 'crypto';
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
 
 /** Canonical URL for the DataGrout CA certificate. */
-export const DG_CA_URL = 'https://ca.datagrout.ai/ca.pem';
+export const DG_CA_URL = "https://ca.datagrout.ai/ca.pem";
 
 /** Substrate identity registration endpoint. */
-export const DG_SUBSTRATE_ENDPOINT = 'https://app.datagrout.ai/api/v1/substrate/identity';
+export const DG_SUBSTRATE_ENDPOINT =
+  "https://app.datagrout.ai/api/v1/substrate/identity";
 
 /** Default local identity directory. */
-export const DEFAULT_IDENTITY_DIR = path.join(os.homedir(), '.conduit');
+export const DEFAULT_IDENTITY_DIR = path.join(os.homedir(), ".conduit");
 
 // ─── CA cert fetching ──────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ export const DEFAULT_IDENTITY_DIR = path.join(os.homedir(), '.conduit');
  */
 export async function fetchDgCaCert(url: string = DG_CA_URL): Promise<string> {
   const resp = await fetch(url, {
-    headers: { Accept: 'application/x-pem-file, text/plain, */*' },
+    headers: { Accept: "application/x-pem-file, text/plain, */*" },
   });
 
   if (!resp.ok) {
@@ -52,8 +53,10 @@ export async function fetchDgCaCert(url: string = DG_CA_URL): Promise<string> {
 
   const pem = await resp.text();
 
-  if (!pem.includes('-----BEGIN CERTIFICATE-----')) {
-    throw new Error(`Response from ${url} does not look like a PEM certificate`);
+  if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
+    throw new Error(
+      `Response from ${url} does not look like a PEM certificate`,
+    );
   }
 
   return pem;
@@ -72,12 +75,12 @@ export async function fetchDgCaCert(url: string = DG_CA_URL): Promise<string> {
  */
 export async function refreshCaCert(
   identityDir: string = DEFAULT_IDENTITY_DIR,
-  url: string = DG_CA_URL
+  url: string = DG_CA_URL,
 ): Promise<string> {
   const pem = await fetchDgCaCert(url);
   fs.mkdirSync(identityDir, { recursive: true });
-  const caPath = path.join(identityDir, 'ca.pem');
-  fs.writeFileSync(caPath, pem, 'utf8');
+  const caPath = path.join(identityDir, "ca.pem");
+  fs.writeFileSync(caPath, pem, "utf8");
   return caPath;
 }
 
@@ -147,12 +150,15 @@ export interface RegisteredIdentity {
  * Node.js only (`crypto.generateKeyPairSync`).
  */
 export function generateKeypair(): Keypair {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', {
-    namedCurve: 'P-256',
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", {
+    namedCurve: "P-256",
   });
   return {
-    privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
-    publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }) as string,
+    privateKeyPem: privateKey.export({
+      type: "pkcs8",
+      format: "pem",
+    }) as string,
+    publicKeyPem: publicKey.export({ type: "spki", format: "pem" }) as string,
   };
 }
 
@@ -169,17 +175,17 @@ export function generateKeypair(): Keypair {
  */
 export async function registerIdentity(
   keypair: Keypair,
-  opts: RegistrationOptions
+  opts: RegistrationOptions,
 ): Promise<RegisteredIdentity> {
   const { privateKeyPem, publicKeyPem } = keypair;
 
-  const url = opts.endpoint.replace(/\/$/, '') + '/register';
+  const url = opts.endpoint.replace(/\/$/, "") + "/register";
 
   const resp = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
       Authorization: `Bearer ${opts.authToken}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ public_key_pem: publicKeyPem, name: opts.name }),
   });
@@ -207,7 +213,7 @@ export async function registerIdentity(
     id: body.id as string,
     name: body.name as string,
     fingerprint: body.fingerprint as string,
-    registeredAt: (body.registered_at as string) ?? '',
+    registeredAt: (body.registered_at as string) ?? "",
     validUntil: body.valid_until as string,
   };
 }
@@ -235,17 +241,27 @@ export interface RotationOptions {
  *
  * Note: This uses Node.js `https` for mTLS — not compatible with browser environments.
  */
-export async function rotateIdentity(opts: RotationOptions): Promise<RegisteredIdentity> {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+export async function rotateIdentity(
+  opts: RotationOptions,
+): Promise<RegisteredIdentity> {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
 
-  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
-  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+  const publicKeyPem = publicKey.export({
+    type: "spki",
+    format: "pem",
+  }) as string;
+  const privateKeyPem = privateKey.export({
+    type: "pkcs8",
+    format: "pem",
+  }) as string;
 
-  const url = opts.endpoint.replace(/\/$/, '') + '/rotate';
+  const url = opts.endpoint.replace(/\/$/, "") + "/rotate";
 
   // Use Node's https module for mTLS client cert authentication.
-  const https = await import('https');
-  const urlModule = await import('url');
+  const https = await import("https");
+  const urlModule = await import("url");
   const parsed = new urlModule.URL(url);
 
   const responseBody = await new Promise<string>((resolve, reject) => {
@@ -253,27 +269,34 @@ export async function rotateIdentity(opts: RotationOptions): Promise<RegisteredI
       hostname: parsed.hostname,
       port: parsed.port || 443,
       path: parsed.pathname,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       cert: opts.currentCertPem,
       key: opts.currentKeyPem,
     };
 
-    const body = JSON.stringify({ public_key_pem: publicKeyPem, name: opts.name });
+    const body = JSON.stringify({
+      public_key_pem: publicKeyPem,
+      name: opts.name,
+    });
 
     const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', (chunk: string) => { data += chunk; });
-      res.on('end', () => {
+      let data = "";
+      res.on("data", (chunk: string) => {
+        data += chunk;
+      });
+      res.on("end", () => {
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
           resolve(data);
         } else {
-          reject(new Error(`Rotation failed (HTTP ${res.statusCode}): ${data}`));
+          reject(
+            new Error(`Rotation failed (HTTP ${res.statusCode}): ${data}`),
+          );
         }
       });
     });
 
-    req.on('error', reject);
+    req.on("error", reject);
     req.write(body);
     req.end();
   });
@@ -296,7 +319,7 @@ export async function rotateIdentity(opts: RotationOptions): Promise<RegisteredI
     id: respBody.id,
     name: respBody.name,
     fingerprint: respBody.fingerprint,
-    registeredAt: respBody.registered_at ?? '',
+    registeredAt: respBody.registered_at ?? "",
     validUntil: respBody.valid_until,
   };
 }
@@ -319,21 +342,21 @@ export interface SavedPaths {
  */
 export function saveIdentity(
   identity: RegisteredIdentity,
-  directory: string = DEFAULT_IDENTITY_DIR
+  directory: string = DEFAULT_IDENTITY_DIR,
 ): SavedPaths {
   fs.mkdirSync(directory, { recursive: true });
 
-  const certPath = path.join(directory, 'identity.pem');
-  const keyPath = path.join(directory, 'identity_key.pem');
+  const certPath = path.join(directory, "identity.pem");
+  const keyPath = path.join(directory, "identity_key.pem");
 
-  fs.writeFileSync(certPath, identity.certPem, 'utf8');
-  fs.writeFileSync(keyPath, identity.keyPem, { encoding: 'utf8', mode: 0o600 });
+  fs.writeFileSync(certPath, identity.certPem, "utf8");
+  fs.writeFileSync(keyPath, identity.keyPem, { encoding: "utf8", mode: 0o600 });
 
   const result: SavedPaths = { certPath, keyPath };
 
   if (identity.caPem) {
-    const caPath = path.join(directory, 'ca.pem');
-    fs.writeFileSync(caPath, identity.caPem, 'utf8');
+    const caPath = path.join(directory, "ca.pem");
+    fs.writeFileSync(caPath, identity.caPem, "utf8");
     result.caPath = caPath;
   }
 

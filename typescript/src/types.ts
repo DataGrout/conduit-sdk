@@ -10,7 +10,7 @@
  * - `"unlimited"` — authenticated DataGrout users; the gateway never blocks them.
  * - `{ perHour: number }` — unauthenticated callers hitting a per-hour cap.
  */
-export type RateLimit = 'unlimited' | { perHour: number };
+export type RateLimit = "unlimited" | { perHour: number };
 
 /**
  * Parsed rate limit state from a gateway response.
@@ -116,8 +116,8 @@ export function extractMeta(result: Record<string, any>): ToolMeta | null {
 
     return {
       receipt: {
-        receiptId: '',
-        timestamp: '',
+        receiptId: "",
+        timestamp: "",
         estimatedCredits: credits.estimated ?? 0,
         actualCredits: credits.charged ?? 0,
         netCredits: credits.charged ?? 0,
@@ -131,9 +131,9 @@ export function extractMeta(result: Record<string, any>): ToolMeta | null {
   }
 
   console.warn(
-    '[conduit] No DataGrout metadata found in tool result. ' +
-    'Cost tracking data is unavailable. Enable "Include DG Inline" ' +
-    'or "Include DataGrout Metadata" in your server settings.'
+    "[conduit] No DataGrout metadata found in tool result. " +
+      'Cost tracking data is unavailable. Enable "Include DG Inline" ' +
+      'or "Include DataGrout Metadata" in your server settings.',
   );
   return null;
 }
@@ -141,9 +141,9 @@ export function extractMeta(result: Record<string, any>): ToolMeta | null {
 function buildToolMeta(raw: any): ToolMeta {
   const r = raw.receipt;
   const receipt: Receipt = {
-    receiptId: r.receipt_id ?? '',
+    receiptId: r.receipt_id ?? "",
     transactionId: r.transaction_id,
-    timestamp: r.timestamp ?? '',
+    timestamp: r.timestamp ?? "",
     estimatedCredits: r.estimated_credits ?? 0,
     actualCredits: r.actual_credits ?? 0,
     netCredits: r.net_credits ?? 0,
@@ -255,7 +255,7 @@ export interface ClientOptions {
    * Can be set explicitly or discovered automatically via
    * `ConduitIdentity.tryDefault()`.
    */
-  identity?: import('./identity').ConduitIdentity;
+  identity?: import("./identity").ConduitIdentity;
   /**
    * When `true`, auto-discover an mTLS identity from env vars or
    * `~/.conduit/` before falling back to token auth.  Equivalent to
@@ -286,7 +286,7 @@ export interface ClientOptions {
    * This option is kept for backward compatibility and has no effect.
    */
   disableMtls?: boolean;
-  transport?: 'mcp' | 'jsonrpc' | 'websocket';
+  transport?: "mcp" | "jsonrpc" | "websocket";
   timeout?: number;
   /**
    * Maximum number of automatic retries on "server not initialized" errors.
@@ -311,7 +311,7 @@ export interface PerformOptions {
   tool: string;
   args: Record<string, any>;
   demux?: boolean;
-  demuxMode?: 'strict' | 'fuzzy';
+  demuxMode?: "strict" | "fuzzy";
 }
 
 export interface GuideRequestOptions {

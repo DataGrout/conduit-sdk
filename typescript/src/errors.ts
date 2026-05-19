@@ -5,7 +5,7 @@
  * a single `instanceof ConduitError` check, or target specific subclasses.
  */
 
-import type { RateLimitStatus } from './types';
+import type { RateLimitStatus } from "./types";
 
 /**
  * Base class for all errors thrown by the Conduit SDK.
@@ -27,7 +27,7 @@ export class ConduitError extends Error {
  */
 export class NotInitializedError extends ConduitError {
   constructor() {
-    super('Client not initialized. Call connect() first.');
+    super("Client not initialized. Call connect() first.");
   }
 }
 
@@ -46,8 +46,8 @@ export class RateLimitError extends ConduitError {
 
   constructor(status: RateLimitStatus, retryAfter?: number) {
     const limitStr =
-      status.limit === 'unlimited'
-        ? 'unlimited'
+      status.limit === "unlimited"
+        ? "unlimited"
         : `${(status.limit as { perHour: number }).perHour}/hour`;
     super(`Rate limit exceeded (${status.used} / ${limitStr} calls this hour)`);
     this.status = status;
@@ -59,7 +59,7 @@ export class RateLimitError extends ConduitError {
  * Thrown when the server returns HTTP 401 Unauthorized or HTTP 403 Forbidden.
  */
 export class AuthError extends ConduitError {
-  constructor(message = 'Authentication failed') {
+  constructor(message = "Authentication failed") {
     super(message);
   }
 }

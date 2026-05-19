@@ -218,10 +218,12 @@ async def test_list_tools_no_filter_by_default():
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.list_tools = AsyncMock(return_value=[
-            {"name": "salesforce@v1/get_lead@v1", "description": "Get a lead"},
-            {"name": "arbiter_check_policy", "description": "Check policy"},
-        ])
+        mock_transport.list_tools = AsyncMock(
+            return_value=[
+                {"name": "salesforce@v1/get_lead@v1", "description": "Get a lead"},
+                {"name": "arbiter_check_policy", "description": "Check policy"},
+            ]
+        )
         mock_cls.return_value = mock_transport
 
         client = Client(
@@ -244,12 +246,14 @@ async def test_list_tools_filters_integration_tools_when_intelligent_interface()
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.list_tools = AsyncMock(return_value=[
-            {"name": "salesforce@v1/get_lead@v1", "description": "Integration tool"},
-            {"name": "arbiter_check_policy", "description": "DG tool"},
-            {"name": "governor_enable", "description": "DG tool"},
-            {"name": "hubspot@v1/create_contact@v1", "description": "Integration tool"},
-        ])
+        mock_transport.list_tools = AsyncMock(
+            return_value=[
+                {"name": "salesforce@v1/get_lead@v1", "description": "Integration tool"},
+                {"name": "arbiter_check_policy", "description": "DG tool"},
+                {"name": "governor_enable", "description": "DG tool"},
+                {"name": "hubspot@v1/create_contact@v1", "description": "Integration tool"},
+            ]
+        )
         mock_cls.return_value = mock_transport
 
         client = Client(
@@ -368,12 +372,14 @@ async def test_discover():
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={
-            "query_used": "test query",
-            "results": [],
-            "total": 0,
-            "limit": 10,
-        })
+        mock_transport.call_tool = AsyncMock(
+            return_value={
+                "query_used": "test query",
+                "results": [],
+                "total": 0,
+                "limit": 10,
+            }
+        )
         mock_cls.return_value = mock_transport
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
@@ -393,15 +399,17 @@ async def test_guided_session():
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={
-            "session_id": "guide_abc123",
-            "step": "1",
-            "message": "Choose a path",
-            "status": "ready",
-            "options": [{"id": "1.1", "label": "Option 1", "cost": 2.5, "viable": True}],
-            "path_taken": [],
-            "total_cost": 0.0,
-        })
+        mock_transport.call_tool = AsyncMock(
+            return_value={
+                "session_id": "guide_abc123",
+                "step": "1",
+                "message": "Choose a path",
+                "status": "ready",
+                "options": [{"id": "1.1", "label": "Option 1", "cost": 2.5, "viable": True}],
+                "path_taken": [],
+                "total_cost": 0.0,
+            }
+        )
         mock_cls.return_value = mock_transport
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
@@ -423,9 +431,9 @@ async def test_dg_method_warns_on_non_dg_url(recwarn):
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={
-            "query_used": "q", "results": [], "total": 0, "limit": 5
-        })
+        mock_transport.call_tool = AsyncMock(
+            return_value={"query_used": "q", "results": [], "total": 0, "limit": 5}
+        )
         mock_cls.return_value = mock_transport
 
         client = Client("https://my-custom-mcp.example.com/mcp")
@@ -444,17 +452,20 @@ async def test_dg_method_no_warning_on_dg_url(recwarn):
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={
-            "query_used": "q", "results": [], "total": 0, "limit": 5
-        })
+        mock_transport.call_tool = AsyncMock(
+            return_value={"query_used": "q", "results": [], "total": 0, "limit": 5}
+        )
         mock_cls.return_value = mock_transport
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
         async with client:
             await client.discover(query="test")
 
-    dg_warnings = [w for w in recwarn.list if issubclass(w.category, UserWarning)
-                   and "DataGrout-specific" in str(w.message)]
+    dg_warnings = [
+        w
+        for w in recwarn.list
+        if issubclass(w.category, UserWarning) and "DataGrout-specific" in str(w.message)
+    ]
     assert len(dg_warnings) == 0
 
 
@@ -494,18 +505,14 @@ class TestRateLimitStatus:
 
 class TestParseRateLimitStatus:
     def test_parses_capped_headers(self):
-        resp = make_httpx_response(
-            429, {"X-RateLimit-Used": "10", "X-RateLimit-Limit": "50"}
-        )
+        resp = make_httpx_response(429, {"X-RateLimit-Used": "10", "X-RateLimit-Limit": "50"})
         status = _parse_rate_limit_status(resp)
         assert status.used == 10
         assert status.limit == RateLimitPerHour(per_hour=50)
         assert status.remaining == 40
 
     def test_parses_unlimited_header(self):
-        resp = make_httpx_response(
-            429, {"X-RateLimit-Used": "0", "X-RateLimit-Limit": "unlimited"}
-        )
+        resp = make_httpx_response(429, {"X-RateLimit-Used": "0", "X-RateLimit-Limit": "unlimited"})
         status = _parse_rate_limit_status(resp)
         assert status.limit == "unlimited"
 
@@ -600,9 +607,7 @@ async def test_list_tools_pagination_with_plain_list():
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
         mock_transport.disconnect = AsyncMock()
-        mock_transport.list_tools = AsyncMock(
-            return_value=[{"name": "tool_a"}, {"name": "tool_b"}]
-        )
+        mock_transport.list_tools = AsyncMock(return_value=[{"name": "tool_a"}, {"name": "tool_b"}])
         mock_cls.return_value = mock_transport
 
         client = Client(
@@ -1419,9 +1424,14 @@ async def test_discover_sends_min_score():
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
-        mock_transport.call_tool = AsyncMock(return_value={
-            "query_used": "q", "results": [], "total": 0, "limit": 5,
-        })
+        mock_transport.call_tool = AsyncMock(
+            return_value={
+                "query_used": "q",
+                "results": [],
+                "total": 0,
+                "limit": 5,
+            }
+        )
         mock_cls.return_value = mock_transport
 
         client = Client("https://gateway.datagrout.ai/servers/test/mcp")
@@ -1431,3 +1441,80 @@ async def test_discover_sends_min_score():
     sent_params = mock_transport.call_tool.call_args[0][1]
     assert sent_params["min_score"] == 0.5
     assert "minScore" not in sent_params
+
+
+# ─── structuredContent unwrapping (MCP 2025) ─────────────────────────────────
+
+import json as _json
+from datagrout.conduit.transports.mcp_transport import MCPTransport
+from datagrout.conduit.transports.jsonrpc_transport import JSONRPCTransport
+
+
+async def _call_tool_with_result(transport_instance, raw_result):
+    """Helper: mock send_request/_call to return raw_result and call call_tool."""
+    transport_instance._initialized = True
+    transport_instance._session_id = None
+    transport_instance._url = "https://example.com"
+    transport_instance.send_request = AsyncMock(return_value=raw_result)
+    transport_instance._call = AsyncMock(return_value=raw_result)
+    return await transport_instance.call_tool("test-tool", {})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_cls", [MCPTransport, JSONRPCTransport])
+async def test_call_tool_returns_structured_content_when_present(transport_cls):
+    """structuredContent is returned directly, even when content[] is also present."""
+    sc = {"docs": [{"ref": "doc_abc", "title": "My Doc"}]}
+    raw = {
+        "structuredContent": sc,
+        "content": [{"type": "text", "text": '{"docs":[{"ref":"doc_xyz"}]}'}],
+        "isError": False,
+    }
+    t = transport_cls.__new__(transport_cls)
+    result = await _call_tool_with_result(t, raw)
+    assert result == sc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_cls", [MCPTransport, JSONRPCTransport])
+async def test_call_tool_falls_back_to_content_text_parse(transport_cls):
+    """Falls back to parsing content[0].text as JSON when no structuredContent."""
+    payload = {"answer": 42, "rows": [1, 2, 3]}
+    raw = {
+        "content": [{"type": "text", "text": _json.dumps(payload)}],
+        "isError": False,
+    }
+    t = transport_cls.__new__(transport_cls)
+    result = await _call_tool_with_result(t, raw)
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_cls", [MCPTransport, JSONRPCTransport])
+async def test_call_tool_wraps_non_json_text_in_dict(transport_cls):
+    """When content[0].text is not JSON, returns {"text": ...}."""
+    raw = {"content": [{"type": "text", "text": "plain string result"}]}
+    t = transport_cls.__new__(transport_cls)
+    result = await _call_tool_with_result(t, raw)
+    assert result == {"text": "plain string result"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_cls", [MCPTransport, JSONRPCTransport])
+async def test_call_tool_returns_content_item_when_no_text_field(transport_cls):
+    """When content[0] has no text field, returns the content item as-is."""
+    item = {"type": "image", "url": "https://example.com/img.png"}
+    raw = {"content": [item]}
+    t = transport_cls.__new__(transport_cls)
+    result = await _call_tool_with_result(t, raw)
+    assert result == item
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport_cls", [MCPTransport, JSONRPCTransport])
+async def test_call_tool_returns_raw_when_no_envelope(transport_cls):
+    """Returns raw result when neither structuredContent nor content is present."""
+    raw = {"custom": "payload"}
+    t = transport_cls.__new__(transport_cls)
+    result = await _call_tool_with_result(t, raw)
+    assert result == raw

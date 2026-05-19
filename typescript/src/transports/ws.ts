@@ -26,11 +26,11 @@
  * @module
  */
 
-import type { MCPTool, MCPResource, MCPPrompt, AuthConfig } from '../types';
-import type { ConduitIdentity } from '../identity';
-import { Transport } from './base';
+import type { MCPTool, MCPResource, MCPPrompt, AuthConfig } from "../types";
+import type { ConduitIdentity } from "../identity";
+import { Transport } from "./base";
 
-export const SUBPROTOCOL = 'datagrout-jsonrpc.v1';
+export const SUBPROTOCOL = "datagrout-jsonrpc.v1";
 
 /** Maximum events buffered per subscription before the oldest is dropped. */
 const SUBSCRIPTION_BUFFER = 256;
@@ -81,7 +81,7 @@ export class Subscription {
       return Promise.resolve(this._queue.shift()!);
     }
     if (this._closed) {
-      return Promise.reject(new Error('Subscription closed'));
+      return Promise.reject(new Error("Subscription closed"));
     }
     return new Promise<SubscriptionEvent>((resolve, reject) => {
       this._waiters.push(resolve);
@@ -114,7 +114,7 @@ export class Subscription {
 
   _close(): void {
     this._closed = true;
-    const err = new Error('Subscription closed');
+    const err = new Error("Subscription closed");
     for (const reject of this._rejecters) {
       reject(err);
     }
@@ -155,12 +155,19 @@ export class WsTransport extends Transport {
   private readonly _pendingSubscribe = new Map<string, PendingSubscribe>();
   private readonly _subscriptions = new Map<string, Subscription>();
 
-  constructor(url: string, auth?: AuthConfig, _timeout?: number, _identity?: ConduitIdentity) {
+  constructor(
+    url: string,
+    auth?: AuthConfig,
+    _timeout?: number,
+    _identity?: ConduitIdentity,
+  ) {
     super();
 
-    const scheme = new URL(url).protocol.replace(':', '');
-    if (scheme !== 'ws' && scheme !== 'wss') {
-      throw new Error(`WS transport requires a ws:// or wss:// URL, got ${scheme}://`);
+    const scheme = new URL(url).protocol.replace(":", "");
+    if (scheme !== "ws" && scheme !== "wss") {
+      throw new Error(
+        `WS transport requires a ws:// or wss:// URL, got ${scheme}://`,
+      );
     }
 
     this._url = url;
@@ -184,13 +191,15 @@ export class WsTransport extends Transport {
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = (ev: Event) =>
-        reject(new Error(`WS connect failed: ${(ev as any).message ?? 'unknown'}`));
+        reject(
+          new Error(`WS connect failed: ${(ev as any).message ?? "unknown"}`),
+        );
     });
 
     ws.onmessage = (ev: MessageEvent) => this._handleMessage(ev.data);
-    ws.onerror = (_ev: Event) => this._failAll('WS connection error');
+    ws.onerror = (_ev: Event) => this._failAll("WS connection error");
     ws.onclose = () => {
-      this._failAll('WS connection closed');
+      this._failAll("WS connection closed");
       this._ws = null;
     };
 
@@ -201,7 +210,7 @@ export class WsTransport extends Transport {
     const ws = this._ws;
     this._ws = null;
 
-    this._failAll('WS connection closed');
+    this._failAll("WS connection closed");
 
     if (ws !== null) {
       try {
@@ -227,7 +236,12 @@ export class WsTransport extends Transport {
 
     return new Promise<Subscription>((resolve, reject) => {
       this._pendingSubscribe.set(id, { topic, resolve, reject });
-      this._send({ jsonrpc: '2.0', id, method: 'subscribe', params: { topic } });
+      this._send({
+        jsonrpc: "2.0",
+        id,
+        method: "subscribe",
+        params: { topic },
+      });
     });
   }
 
@@ -253,9 +267,9 @@ export class WsTransport extends Transport {
       this._pending.set(id, { resolve, reject });
     });
     this._send({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
-      method: 'unsubscribe',
+      method: "unsubscribe",
       params: { subscription: subscriptionId },
     });
 
@@ -269,27 +283,35 @@ export class WsTransport extends Transport {
   // ── Transport base implementation ─────────────────────────────────────────
 
   async listTools(options?: any): Promise<MCPTool[]> {
-    return (await this._request('tools/list', options)) as MCPTool[];
+    return (await this._request("tools/list", options)) as MCPTool[];
   }
 
-  async callTool(name: string, args: Record<string, any>, _options?: any): Promise<any> {
-    return this._request('tools/call', { name, arguments: args });
+  async callTool(
+    name: string,
+    args: Record<string, any>,
+    _options?: any,
+  ): Promise<any> {
+    return this._request("tools/call", { name, arguments: args });
   }
 
   async listResources(_options?: any): Promise<MCPResource[]> {
-    return (await this._request('resources/list')) as MCPResource[];
+    return (await this._request("resources/list")) as MCPResource[];
   }
 
   async readResource(uri: string, _options?: any): Promise<any> {
-    return this._request('resources/read', { uri });
+    return this._request("resources/read", { uri });
   }
 
   async listPrompts(_options?: any): Promise<MCPPrompt[]> {
-    return (await this._request('prompts/list')) as MCPPrompt[];
+    return (await this._request("prompts/list")) as MCPPrompt[];
   }
 
-  async getPrompt(name: string, args?: Record<string, any>, _options?: any): Promise<any> {
-    return this._request('prompts/get', { name, arguments: args });
+  async getPrompt(
+    name: string,
+    args?: Record<string, any>,
+    _options?: any,
+  ): Promise<any> {
+    return this._request("prompts/get", { name, arguments: args });
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
@@ -300,7 +322,7 @@ export class WsTransport extends Transport {
 
   private _requireConnected(): void {
     if (this._ws === null) {
-      throw new Error('WS transport not connected. Call connect() first.');
+      throw new Error("WS transport not connected. Call connect() first.");
     }
   }
 
@@ -314,7 +336,12 @@ export class WsTransport extends Transport {
 
     return new Promise<unknown>((resolve, reject) => {
       this._pending.set(id, { resolve, reject });
-      this._send({ jsonrpc: '2.0', id, method, ...(params !== undefined ? { params } : {}) });
+      this._send({
+        jsonrpc: "2.0",
+        id,
+        method,
+        ...(params !== undefined ? { params } : {}),
+      });
     });
   }
 
@@ -327,26 +354,30 @@ export class WsTransport extends Transport {
     }
 
     // Notifications have no `id` field.
-    if (!('id' in msg)) {
-      if (msg['method'] === 'notification') {
-        this._routeNotification(msg['params'] as Record<string, unknown> | undefined);
+    if (!("id" in msg)) {
+      if (msg["method"] === "notification") {
+        this._routeNotification(
+          msg["params"] as Record<string, unknown> | undefined,
+        );
       }
       return;
     }
 
-    const msgId = String(msg['id']);
+    const msgId = String(msg["id"]);
 
     // Subscribe response — register the channel before handing off the handle.
     const pendingSub = this._pendingSubscribe.get(msgId);
     if (pendingSub !== undefined) {
       this._pendingSubscribe.delete(msgId);
-      const err = msg['error'] as Record<string, unknown> | undefined;
+      const err = msg["error"] as Record<string, unknown> | undefined;
       if (err !== undefined) {
-        pendingSub.reject(new Error(String(err['message'] ?? 'Subscribe failed')));
+        pendingSub.reject(
+          new Error(String(err["message"] ?? "Subscribe failed")),
+        );
         return;
       }
-      const result = (msg['result'] ?? {}) as Record<string, unknown>;
-      const subId = String(result['subscription'] ?? msgId);
+      const result = (msg["result"] ?? {}) as Record<string, unknown>;
+      const subId = String(result["subscription"] ?? msgId);
       const sub = new Subscription(subId, pendingSub.topic);
       this._subscriptions.set(subId, sub);
       pendingSub.resolve(sub);
@@ -357,26 +388,26 @@ export class WsTransport extends Transport {
     const pending = this._pending.get(msgId);
     if (pending !== undefined) {
       this._pending.delete(msgId);
-      const err = msg['error'] as Record<string, unknown> | undefined;
+      const err = msg["error"] as Record<string, unknown> | undefined;
       if (err !== undefined) {
-        pending.reject(new Error(String(err['message'] ?? 'RPC error')));
+        pending.reject(new Error(String(err["message"] ?? "RPC error")));
       } else {
-        pending.resolve(msg['result']);
+        pending.resolve(msg["result"]);
       }
     }
   }
 
   private _routeNotification(params?: Record<string, unknown>): void {
     if (params === undefined) return;
-    const subId = params['subscription'];
-    if (typeof subId !== 'string') return;
+    const subId = params["subscription"];
+    if (typeof subId !== "string") return;
     const sub = this._subscriptions.get(subId);
     if (sub === undefined) return;
 
     sub._enqueue({
       subscription: subId,
-      event: String(params['event'] ?? ''),
-      data: params['data'],
+      event: String(params["event"] ?? ""),
+      data: params["data"],
     });
   }
 
@@ -406,13 +437,15 @@ function buildUpgradeHeaders(auth?: AuthConfig): Record<string, string> {
   const headers: Record<string, string> = {};
   if (auth === undefined) return headers;
 
-  if ('bearer' in auth && auth.bearer !== undefined) {
-    headers['Authorization'] = `Bearer ${auth.bearer}`;
-  } else if ('apiKey' in auth && auth.apiKey !== undefined) {
-    headers['X-API-Key'] = auth.apiKey;
-  } else if ('basic' in auth && auth.basic !== undefined) {
-    const encoded = Buffer.from(`${auth.basic.username}:${auth.basic.password}`).toString('base64');
-    headers['Authorization'] = `Basic ${encoded}`;
+  if ("bearer" in auth && auth.bearer !== undefined) {
+    headers["Authorization"] = `Bearer ${auth.bearer}`;
+  } else if ("apiKey" in auth && auth.apiKey !== undefined) {
+    headers["X-API-Key"] = auth.apiKey;
+  } else if ("basic" in auth && auth.basic !== undefined) {
+    const encoded = Buffer.from(
+      `${auth.basic.username}:${auth.basic.password}`,
+    ).toString("base64");
+    headers["Authorization"] = `Basic ${encoded}`;
   }
 
   return headers;
@@ -425,15 +458,15 @@ function buildUpgradeHeaders(auth?: AuthConfig): Record<string, string> {
  * Falls back to the `ws` npm package for Node 18–21.
  */
 async function resolveWebSocketImpl(): Promise<typeof WebSocket> {
-  if (typeof globalThis.WebSocket !== 'undefined') {
+  if (typeof globalThis.WebSocket !== "undefined") {
     return globalThis.WebSocket;
   }
   try {
-    const { default: WS } = await import('ws');
+    const { default: WS } = await import("ws");
     return WS as unknown as typeof WebSocket;
   } catch {
     throw new Error(
-      "No WebSocket implementation found. Install the 'ws' package: npm install ws"
+      "No WebSocket implementation found. Install the 'ws' package: npm install ws",
     );
   }
 }

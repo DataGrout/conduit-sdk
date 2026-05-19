@@ -129,7 +129,9 @@ class FlowNamespace:
         if status is not None:
             params["status"] = status
         return await self._client._send_with_retry(
-            lambda: self._client._transport.call_tool("data-grout/inspect.execution-history", params)
+            lambda: self._client._transport.call_tool(
+                "data-grout/inspect.execution-history", params
+            )
         )
 
     async def details(self, execution_id: str, **kwargs: Any) -> Any:

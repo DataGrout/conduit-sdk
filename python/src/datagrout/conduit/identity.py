@@ -140,9 +140,7 @@ class ConduitIdentity:
 
         key_pem = os.environ.get("CONDUIT_MTLS_KEY")
         if not key_pem:
-            raise ValueError(
-                "CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing"
-            )
+            raise ValueError("CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing")
 
         ca_pem = os.environ.get("CONDUIT_MTLS_CA") or None
         return cls(cert_pem, key_pem, ca_pem)
@@ -159,9 +157,7 @@ class ConduitIdentity:
         return cls.try_discover()
 
     @classmethod
-    def try_discover(
-        cls, override_dir: Optional[Path] = None
-    ) -> Optional["ConduitIdentity"]:
+    def try_discover(cls, override_dir: Optional[Path] = None) -> Optional["ConduitIdentity"]:
         """Like :meth:`try_default` but checks *override_dir* first.
 
         Discovery order:
@@ -182,9 +178,7 @@ class ConduitIdentity:
         if override_dir is not None:
             identity = cls._try_load_from_dir(Path(override_dir))
             if identity is not None:
-                logger.debug(
-                    "conduit: loaded mTLS identity from %s", override_dir
-                )
+                logger.debug("conduit: loaded mTLS identity from %s", override_dir)
                 return identity
 
         # 1. Environment variables (inline PEM strings)
@@ -285,9 +279,7 @@ class ConduitIdentity:
 
     def __repr__(self) -> str:
         return (
-            f"ConduitIdentity("
-            f"has_ca={self._ca_pem is not None}, "
-            f"expires_at={self._expires_at!r})"
+            f"ConduitIdentity(has_ca={self._ca_pem is not None}, expires_at={self._expires_at!r})"
         )
 
     # ─── httpx / ssl integration ──────────────────────────────────────────────
@@ -308,23 +300,22 @@ class ConduitIdentity:
             ``httpx.AsyncClient(verify=ctx)``.
         """
         if self.needs_rotation(30):
-            logger.warning(
-                "conduit: mTLS certificate expires within 30 days — consider rotating"
-            )
+            logger.warning("conduit: mTLS certificate expires within 30 days — consider rotating")
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
 
-        with _temp_pem(self._cert_pem, suffix="-cert.pem") as cert_file, \
-             _temp_pem(self._key_pem, suffix="-key.pem") as key_file:
+        with (
+            _temp_pem(self._cert_pem, suffix="-cert.pem") as cert_file,
+            _temp_pem(self._key_pem, suffix="-key.pem") as key_file,
+        ):
             ctx.load_cert_chain(certfile=cert_file, keyfile=key_file)
 
+        ctx.load_default_certs()
         if self._ca_pem:
             ctx.load_verify_locations(cadata=self._ca_pem)
-        else:
-            ctx.load_default_certs()
 
         return ctx
 

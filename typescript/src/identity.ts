@@ -71,17 +71,21 @@ export class ConduitIdentity {
    *
    * @throws {Error} if the PEM strings do not look like a certificate or key.
    */
-  static fromPem(certPem: string, keyPem: string, caPem?: string): ConduitIdentity {
-    if (!certPem.includes('-----BEGIN CERTIFICATE-----')) {
+  static fromPem(
+    certPem: string,
+    keyPem: string,
+    caPem?: string,
+  ): ConduitIdentity {
+    if (!certPem.includes("-----BEGIN CERTIFICATE-----")) {
       throw new Error(
-        'certPem does not appear to contain a PEM certificate ' +
-          '(missing "-----BEGIN CERTIFICATE-----")'
+        "certPem does not appear to contain a PEM certificate " +
+          '(missing "-----BEGIN CERTIFICATE-----")',
       );
     }
     if (!ConduitIdentity._hasPemPrivateKey(keyPem)) {
       throw new Error(
-        'keyPem does not appear to contain a PEM private key ' +
-          '(expected PRIVATE KEY, RSA PRIVATE KEY, or EC PRIVATE KEY header)'
+        "keyPem does not appear to contain a PEM private key " +
+          "(expected PRIVATE KEY, RSA PRIVATE KEY, or EC PRIVATE KEY header)",
       );
     }
     return new ConduitIdentity({ certPem, keyPem, caPem });
@@ -92,15 +96,21 @@ export class ConduitIdentity {
    *
    * @throws {Error} in browser environments or if the files cannot be read.
    */
-  static fromPaths(certPath: string, keyPath: string, caPath?: string): ConduitIdentity {
-    if (typeof process === 'undefined' || !process.versions?.node) {
-      throw new Error('ConduitIdentity.fromPaths() is only available in Node.js environments');
+  static fromPaths(
+    certPath: string,
+    keyPath: string,
+    caPath?: string,
+  ): ConduitIdentity {
+    if (typeof process === "undefined" || !process.versions?.node) {
+      throw new Error(
+        "ConduitIdentity.fromPaths() is only available in Node.js environments",
+      );
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require('node:fs') as typeof import('fs');
-    const certPem = fs.readFileSync(certPath, 'utf8');
-    const keyPem = fs.readFileSync(keyPath, 'utf8');
-    const caPem = caPath ? fs.readFileSync(caPath, 'utf8') : undefined;
+    const fs = require("node:fs") as typeof import("fs");
+    const certPem = fs.readFileSync(certPath, "utf8");
+    const keyPem = fs.readFileSync(keyPath, "utf8");
+    const caPem = caPath ? fs.readFileSync(caPath, "utf8") : undefined;
     return ConduitIdentity.fromPem(certPem, keyPem, caPem);
   }
 
@@ -121,7 +131,9 @@ export class ConduitIdentity {
 
     const keyPem = process.env.CONDUIT_MTLS_KEY;
     if (!keyPem) {
-      throw new Error('CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing');
+      throw new Error(
+        "CONDUIT_MTLS_CERT is set but CONDUIT_MTLS_KEY is missing",
+      );
     }
 
     const caPem = process.env.CONDUIT_MTLS_CA || undefined;
@@ -162,7 +174,7 @@ export class ConduitIdentity {
     }
 
     // Node.js only from here
-    if (typeof process === 'undefined' || !process.versions?.node) {
+    if (typeof process === "undefined" || !process.versions?.node) {
       return null;
     }
 
@@ -174,7 +186,7 @@ export class ConduitIdentity {
     }
 
     // 3. ~/.conduit/
-    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
     if (home) {
       const id = ConduitIdentity._tryLoadFromDir(`${home}/.conduit`);
       if (id) return id;
@@ -182,7 +194,7 @@ export class ConduitIdentity {
 
     // 4. .conduit/ relative to cwd
     {
-      const id = ConduitIdentity._tryLoadFromDir('.conduit');
+      const id = ConduitIdentity._tryLoadFromDir(".conduit");
       if (id) return id;
     }
 
@@ -229,22 +241,26 @@ export class ConduitIdentity {
 
   private static _hasPemPrivateKey(pem: string): boolean {
     return (
-      pem.includes('-----BEGIN PRIVATE KEY-----') ||
-      pem.includes('-----BEGIN RSA PRIVATE KEY-----') ||
-      pem.includes('-----BEGIN EC PRIVATE KEY-----') ||
-      pem.includes('-----BEGIN ENCRYPTED PRIVATE KEY-----')
+      pem.includes("-----BEGIN PRIVATE KEY-----") ||
+      pem.includes("-----BEGIN RSA PRIVATE KEY-----") ||
+      pem.includes("-----BEGIN EC PRIVATE KEY-----") ||
+      pem.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")
     );
   }
 
   private static _tryLoadFromDir(dir: string): ConduitIdentity | null {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const fs = require('node:fs') as typeof import('fs');
+      const fs = require("node:fs") as typeof import("fs");
       const certPath = `${dir}/identity.pem`;
       const keyPath = `${dir}/identity_key.pem`;
       if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) return null;
       const caPath = `${dir}/ca.pem`;
-      return ConduitIdentity.fromPaths(certPath, keyPath, fs.existsSync(caPath) ? caPath : undefined);
+      return ConduitIdentity.fromPaths(
+        certPath,
+        keyPath,
+        fs.existsSync(caPath) ? caPath : undefined,
+      );
     } catch {
       return null;
     }
@@ -264,26 +280,28 @@ export class ConduitIdentity {
 export async function fetchWithIdentity(
   url: string,
   init: RequestInit,
-  identity: ConduitIdentity
+  identity: ConduitIdentity,
 ): Promise<Response> {
-  if (typeof process === 'undefined' || !process.versions?.node) {
+  if (typeof process === "undefined" || !process.versions?.node) {
     console.warn(
-      '[conduit] mTLS identity is set but this environment does not support client ' +
-        'certificates in fetch().  The request will proceed without mTLS.'
+      "[conduit] mTLS identity is set but this environment does not support client " +
+        "certificates in fetch().  The request will proceed without mTLS.",
     );
     return fetch(url, init);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const https = require('node:https') as typeof import('https');
+  const https = require("node:https") as typeof import("https");
   const parsedUrl = new URL(url);
 
-  const options: import('https').RequestOptions = {
+  const options: import("https").RequestOptions = {
     hostname: parsedUrl.hostname,
     port: parsedUrl.port || 443,
     path: parsedUrl.pathname + parsedUrl.search,
-    method: (init.method ?? 'GET').toUpperCase(),
-    headers: flattenHeaders(init.headers as Record<string, string> | string[][] | Headers | undefined),
+    method: (init.method ?? "GET").toUpperCase(),
+    headers: flattenHeaders(
+      init.headers as Record<string, string> | string[][] | Headers | undefined,
+    ),
     cert: identity.certPem,
     key: identity.keyPem,
     ...(identity.caPem ? { ca: identity.caPem } : {}),
@@ -292,28 +310,28 @@ export async function fetchWithIdentity(
   return new Promise<Response>((resolve, reject) => {
     const req = https.request(options, (res) => {
       const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
-      res.on('end', () => {
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
         const body = Buffer.concat(chunks);
         const responseHeaders = new Headers();
         for (const [key, value] of Object.entries(res.headers)) {
           if (value !== undefined) {
-            const v = Array.isArray(value) ? value.join(', ') : String(value);
+            const v = Array.isArray(value) ? value.join(", ") : String(value);
             responseHeaders.set(key, v);
           }
         }
         resolve(
           new Response(body, {
             status: res.statusCode ?? 200,
-            statusText: res.statusMessage ?? '',
+            statusText: res.statusMessage ?? "",
             headers: responseHeaders,
-          })
+          }),
         );
       });
-      res.on('error', reject);
+      res.on("error", reject);
     });
 
-    req.on('error', reject);
+    req.on("error", reject);
 
     if (init.body) {
       req.write(init.body as string | Buffer);
@@ -323,12 +341,14 @@ export async function fetchWithIdentity(
 }
 
 function flattenHeaders(
-  headers: Record<string, string> | string[][] | Headers | undefined
+  headers: Record<string, string> | string[][] | Headers | undefined,
 ): Record<string, string> {
   if (!headers) return {};
   if (headers instanceof Headers) {
     const obj: Record<string, string> = {};
-    headers.forEach((v, k) => { obj[k] = v; });
+    headers.forEach((v, k) => {
+      obj[k] = v;
+    });
     return obj;
   }
   if (Array.isArray(headers)) {

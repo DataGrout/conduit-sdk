@@ -144,7 +144,8 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
 
   describe "guide/2 wire protocol" do
     test "sends data-grout/discovery.guide via tools/call" do
-      client = start_capture_client(%{"session_id" => "s1", "status" => "pending", "options" => []})
+      client =
+        start_capture_client(%{"session_id" => "s1", "status" => "pending", "options" => []})
 
       Client.guide(client, goal: "find users")
 
@@ -155,7 +156,8 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
 
     test "includes goal param in arguments" do
-      client = start_capture_client(%{"session_id" => "s1", "status" => "pending", "options" => []})
+      client =
+        start_capture_client(%{"session_id" => "s1", "status" => "pending", "options" => []})
 
       Client.guide(client, goal: "search invoices")
 
@@ -201,7 +203,11 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     test "routes via tools/call and sends source_type/target_type (not lens)" do
       client = start_capture_client(%{"output" => "result"})
 
-      DatagroutConduit.Prism.focus(client, %{"data" => "hello", "source_type" => "text", "target_type" => "json"})
+      DatagroutConduit.Prism.focus(client, %{
+        "data" => "hello",
+        "source_type" => "text",
+        "target_type" => "json"
+      })
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -280,7 +286,10 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     test "routes data-grout/prism.refract via tools/call" do
       client = start_capture_client(%{"output" => "transformed"})
 
-      DatagroutConduit.Prism.refract(client, %{"goal" => "normalise addresses", "payload" => %{"street" => "123 Main"}})
+      DatagroutConduit.Prism.refract(client, %{
+        "goal" => "normalise addresses",
+        "payload" => %{"street" => "123 Main"}
+      })
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -296,7 +305,10 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     test "routes data-grout/prism.chart via tools/call" do
       client = start_capture_client(%{"image" => "base64..."})
 
-      DatagroutConduit.Prism.chart(client, %{"goal" => "bar chart of revenue", "payload" => [%{"month" => "Jan", "revenue" => 1000}]})
+      DatagroutConduit.Prism.chart(client, %{
+        "goal" => "bar chart of revenue",
+        "payload" => [%{"month" => "Jan", "revenue" => 1000}]
+      })
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -356,7 +368,10 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     test "routes data-grout/logic.constrain via dg" do
       client = start_capture_client(%{"ok" => true})
 
-      DatagroutConduit.Logic.constrain(client, %{"rule" => ":- likes(X, Y), hates(X, Y).", "tag" => "consistency"})
+      DatagroutConduit.Logic.constrain(client, %{
+        "rule" => ":- likes(X, Y), hates(X, Y).",
+        "tag" => "consistency"
+      })
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -385,7 +400,10 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     test "routes data-grout/flow.route via dg" do
       client = start_capture_client(%{"matched" => "branch_1"})
 
-      DatagroutConduit.Flow.route(client, %{"branches" => [%{"when" => "amount > 1000", "then" => "approval"}], "payload" => %{"amount" => 1500}})
+      DatagroutConduit.Flow.route(client, %{
+        "branches" => [%{"when" => "amount > 1000", "then" => "approval"}],
+        "payload" => %{"amount" => 1500}
+      })
 
       assert_received {:rpc_call, opts}
       assert opts.method == "tools/call"
@@ -456,7 +474,8 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
 
   describe "discover/2 supports query and min_score" do
     test "sends query and min_score params" do
-      client = start_capture_client(%{"query_used" => "q", "results" => [], "total" => 0, "limit" => 10})
+      client =
+        start_capture_client(%{"query_used" => "q", "results" => [], "total" => 0, "limit" => 10})
 
       Client.discover(client, query: "CRM search", min_score: 0.5, limit: 5)
 
@@ -469,9 +488,14 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
     end
 
     test "sends integrations and servers lists" do
-      client = start_capture_client(%{"query_used" => "q", "results" => [], "total" => 0, "limit" => 10})
+      client =
+        start_capture_client(%{"query_used" => "q", "results" => [], "total" => 0, "limit" => 10})
 
-      Client.discover(client, goal: "find leads", integrations: ["salesforce", "hubspot"], servers: ["srv-1"])
+      Client.discover(client,
+        goal: "find leads",
+        integrations: ["salesforce", "hubspot"],
+        servers: ["srv-1"]
+      )
 
       assert_received {:rpc_call, opts}
       args = opts.params["arguments"]
@@ -523,6 +547,90 @@ defmodule DatagroutConduit.ClientWireProtocolTest do
       assert {:error, {:invalid_config, msg}} = result
       assert msg =~ "goal"
       assert msg =~ "query"
+      GenServer.stop(client)
+    end
+  end
+
+  # ─── structuredContent / MCP 2025 ─────────────────────────────────────────
+
+  describe "call_tool/3 structured_content field" do
+    test "populates structured_content on ToolResult when server returns structuredContent" do
+      sc = %{"docs" => [%{"ref" => "doc_abc", "title" => "My Doc"}]}
+
+      client =
+        start_capture_client(%{
+          "structuredContent" => sc,
+          "content" => [%{"type" => "text", "text" => ~s({"docs":[{"ref":"doc_xyz"}]})}],
+          "isError" => false
+        })
+
+      {:ok, result} = Client.call_tool(client, "some-tool", %{})
+
+      assert result.structured_content == sc
+      GenServer.stop(client)
+    end
+
+    test "structured_content is nil when server omits structuredContent" do
+      client =
+        start_capture_client(%{
+          "content" => [%{"type" => "text", "text" => ~s({"rows":[1,2,3]})}],
+          "isError" => false
+        })
+
+      {:ok, result} = Client.call_tool(client, "some-tool", %{})
+
+      assert result.structured_content == nil
+      GenServer.stop(client)
+    end
+  end
+
+  describe "dg/3 unwrap_content priority (MCP 2025)" do
+    test "returns structuredContent directly for dg tool calls" do
+      sc = %{"answer" => 42}
+
+      client =
+        start_capture_client(%{
+          "structuredContent" => sc,
+          "content" => [%{"type" => "text", "text" => ~s({"answer":0})}]
+        })
+
+      {:ok, result} = Client.dg(client, "logic.query", %{"question" => "?"})
+
+      assert result == sc
+      GenServer.stop(client)
+    end
+
+    test "falls back to parsing content[0].text as JSON when no structuredContent" do
+      payload = %{"rows" => [1, 2, 3]}
+
+      client =
+        start_capture_client(%{
+          "content" => [%{"type" => "text", "text" => Jason.encode!(payload)}]
+        })
+
+      {:ok, result} = Client.dg(client, "logic.query", %{"question" => "?"})
+
+      assert result == payload
+      GenServer.stop(client)
+    end
+
+    test "falls back to returning content[0] as-is when first item has no text key" do
+      first = %{"type" => "image", "url" => "https://example.com/img.png"}
+      client = start_capture_client(%{"content" => [first]})
+
+      {:ok, result} = Client.dg(client, "some.tool", %{})
+
+      assert result == first
+      GenServer.stop(client)
+    end
+
+    test "returns raw result when neither structuredContent nor content present" do
+      raw = %{"custom" => "payload"}
+      client = start_capture_client(raw)
+
+      {:ok, result} = Client.dg(client, "some.tool", %{})
+
+      assert result == raw
       GenServer.stop(client)
     end
   end

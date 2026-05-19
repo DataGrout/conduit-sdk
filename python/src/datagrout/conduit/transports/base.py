@@ -23,9 +23,7 @@ class Transport(ABC):
         pass
 
     @abstractmethod
-    async def call_tool(
-        self, name: str, arguments: Dict[str, Any], **kwargs: Any
-    ) -> Any:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], **kwargs: Any) -> Any:
         """Call a tool with arguments."""
         pass
 

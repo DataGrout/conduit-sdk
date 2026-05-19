@@ -161,7 +161,8 @@ defmodule DatagroutConduit.Onramp do
   end
 
   defp do_complete(base, session_token) do
-    case Req.post("#{base}/onramp/complete",
+    case Req.post(
+           "#{base}/onramp/complete",
            @req_plug_opts ++ [headers: [{"authorization", "Bearer #{session_token}"}]]
          ) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->

@@ -159,7 +159,10 @@ defmodule DatagroutConduit.Transport.MCP do
   defp build_headers(nil), do: []
   defp build_headers({:bearer, token}), do: [{"authorization", "Bearer #{token}"}]
   defp build_headers({:api_key, key}), do: [{"x-api-key", key}]
-  defp build_headers({:basic, user, pass}), do: [{"authorization", "Basic #{Base.encode64("#{user}:#{pass}")}"}]
+
+  defp build_headers({:basic, user, pass}),
+    do: [{"authorization", "Basic #{Base.encode64("#{user}:#{pass}")}"}]
+
   defp build_headers(_), do: []
 
   defp build_connect_options(nil), do: []

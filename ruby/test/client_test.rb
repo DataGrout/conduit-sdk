@@ -715,4 +715,58 @@ class ClientTest < Minitest::Test
       client.plan
     end
   end
+
+  # ─── unwrap_content: structuredContent priority (MCP 2025) ──────────────────
+
+  def make_client
+    DatagroutConduit::Client.new(url: SERVER_URL, auth: { bearer: "tok" })
+  end
+
+  def test_unwrap_content_returns_structured_content_when_present
+    client = make_client
+    sc = { "docs" => [{ "ref" => "doc_abc", "title" => "My Doc" }] }
+    raw = {
+      "structuredContent" => sc,
+      "content" => [{ "type" => "text", "text" => '{"docs":[{"ref":"doc_xyz"}]}' }],
+      "isError" => false
+    }
+    result = client.send(:unwrap_content, raw)
+    assert_equal sc, result
+  end
+
+  def test_unwrap_content_returns_empty_structured_content
+    client = make_client
+    result = client.send(:unwrap_content, { "structuredContent" => {} })
+    assert_equal({}, result)
+  end
+
+  def test_unwrap_content_falls_back_to_content_text_parse
+    client = make_client
+    payload = { "answer" => 42, "rows" => [1, 2, 3] }
+    raw = { "content" => [{ "type" => "text", "text" => payload.to_json }] }
+    result = client.send(:unwrap_content, raw)
+    assert_equal payload, result
+  end
+
+  def test_unwrap_content_wraps_non_json_text
+    client = make_client
+    raw = { "content" => [{ "type" => "text", "text" => "plain string" }] }
+    result = client.send(:unwrap_content, raw)
+    assert_equal({ "text" => "plain string" }, result)
+  end
+
+  def test_unwrap_content_returns_item_when_no_text_field
+    client = make_client
+    item = { "type" => "image", "url" => "https://example.com/img.png" }
+    raw = { "content" => [item] }
+    result = client.send(:unwrap_content, raw)
+    assert_equal item, result
+  end
+
+  def test_unwrap_content_returns_raw_when_no_envelope
+    client = make_client
+    raw = { "custom" => "payload" }
+    result = client.send(:unwrap_content, raw)
+    assert_equal raw, result
+  end
 end

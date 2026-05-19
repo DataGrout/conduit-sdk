@@ -58,10 +58,11 @@ defmodule DatagroutConduit.Types do
     @moduledoc "Result from calling a tool."
     @type t :: %__MODULE__{
             content: [map()],
+            structured_content: map() | nil,
             is_error: boolean(),
             meta: map()
           }
-    defstruct [content: [], is_error: false, meta: %{}]
+    defstruct content: [], structured_content: nil, is_error: false, meta: %{}
   end
 
   defmodule Byok do
@@ -71,7 +72,7 @@ defmodule DatagroutConduit.Types do
             discount_applied: boolean(),
             discount_rate: float() | nil
           }
-    defstruct [enabled: false, discount_applied: false, discount_rate: nil]
+    defstruct enabled: false, discount_applied: false, discount_rate: nil
   end
 
   defmodule Receipt do
@@ -90,9 +91,20 @@ defmodule DatagroutConduit.Types do
             breakdown: map() | nil,
             byok: Byok.t() | nil
           }
-    defstruct [:receipt_id, :transaction_id, :timestamp, :estimated_credits, :actual_credits,
-               :net_credits, :savings, :savings_bonus, :balance_before, :balance_after,
-               :breakdown, :byok]
+    defstruct [
+      :receipt_id,
+      :transaction_id,
+      :timestamp,
+      :estimated_credits,
+      :actual_credits,
+      :net_credits,
+      :savings,
+      :savings_bonus,
+      :balance_before,
+      :balance_after,
+      :breakdown,
+      :byok
+    ]
   end
 
   defmodule CreditEstimate do
@@ -134,7 +146,7 @@ defmodule DatagroutConduit.Types do
             query: String.t() | nil,
             total: integer()
           }
-    defstruct [tools: [], query: nil, total: 0]
+    defstruct tools: [], query: nil, total: 0
   end
 
   defmodule GuideOption do
@@ -308,6 +320,7 @@ defmodule DatagroutConduit.Types do
   def parse_discover_result(raw) when is_map(raw) do
     # DG returns "results" (not "tools") and "goal_used" (not "query").
     tools_raw = raw["results"] || raw["tools"] || []
+
     %DiscoverResult{
       tools: Enum.map(tools_raw, &parse_discovered_tool/1),
       query: raw["goal_used"] || raw["query"],
@@ -342,8 +355,10 @@ defmodule DatagroutConduit.Types do
   def parse_tool_meta(meta) when is_map(meta) do
     %ToolMeta{
       receipt: if(meta["receipt"], do: parse_receipt(meta["receipt"])),
-      credit_estimate: if(meta["credit_estimate"] || meta["creditEstimate"],
-        do: parse_credit_estimate(meta["credit_estimate"] || meta["creditEstimate"])),
+      credit_estimate:
+        if(meta["credit_estimate"] || meta["creditEstimate"],
+          do: parse_credit_estimate(meta["credit_estimate"] || meta["creditEstimate"])
+        ),
       raw: meta
     }
   end
@@ -363,6 +378,7 @@ defmodule DatagroutConduit.Types do
   @spec extract_meta(map()) :: ToolMeta.t() | nil
   def extract_meta(result) when is_map(result) do
     rich = get_in(result, ["_meta", "datagrout"])
+
     if is_map(rich) and is_map(rich["receipt"]) do
       parse_tool_meta(rich)
     else
@@ -370,8 +386,10 @@ defmodule DatagroutConduit.Types do
         cond do
           is_map(result["_datagrout"]) and is_map(result["_datagrout"]["receipt"]) ->
             result["_datagrout"]
+
           is_map(result["_meta"]) and is_map(result["_meta"]["receipt"]) ->
             result["_meta"]
+
           true ->
             nil
         end
@@ -405,7 +423,12 @@ defmodule DatagroutConduit.Types do
     remaining = credits["remaining"]
 
     breakdown = %{}
-    breakdown = if credits["premium"], do: Map.put(breakdown, "premium", credits["premium"]), else: breakdown
+
+    breakdown =
+      if credits["premium"],
+        do: Map.put(breakdown, "premium", credits["premium"]),
+        else: breakdown
+
     breakdown = if credits["llm"], do: Map.put(breakdown, "llm", credits["llm"]), else: breakdown
 
     %ToolMeta{

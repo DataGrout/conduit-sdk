@@ -78,7 +78,9 @@ defmodule DatagroutConduit.RegistrationTest do
     end
 
     test "creates directory if it does not exist" do
-      dir = Path.join(System.tmp_dir!(), "conduit_reg_test_nested_#{:rand.uniform(100_000)}/sub/dir")
+      dir =
+        Path.join(System.tmp_dir!(), "conduit_reg_test_nested_#{:rand.uniform(100_000)}/sub/dir")
+
       refute File.exists?(dir)
 
       {:ok, {private_pem, _}} = Registration.generate_keypair()
@@ -87,7 +89,10 @@ defmodule DatagroutConduit.RegistrationTest do
       assert {:ok, _} = Registration.save_identity(cert_pem, private_pem, nil, dir)
       assert File.exists?(dir)
 
-      File.rm_rf!(Path.join(System.tmp_dir!(), "conduit_reg_test_nested_#{:rand.uniform(100_000)}"))
+      File.rm_rf!(
+        Path.join(System.tmp_dir!(), "conduit_reg_test_nested_#{:rand.uniform(100_000)}")
+      )
+
       File.rm_rf!(dir)
     end
 
@@ -111,7 +116,8 @@ defmodule DatagroutConduit.RegistrationTest do
     end
 
     test "dg_substrate_endpoint/0 returns expected URL" do
-      assert Registration.dg_substrate_endpoint() == "https://app.datagrout.ai/api/v1/substrate/identity"
+      assert Registration.dg_substrate_endpoint() ==
+               "https://app.datagrout.ai/api/v1/substrate/identity"
     end
   end
 

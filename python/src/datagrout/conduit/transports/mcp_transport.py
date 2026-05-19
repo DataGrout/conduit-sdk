@@ -28,9 +28,7 @@ class RateLimitError(_BaseRateLimitError):
         else:
             assert isinstance(status.limit, RateLimitPerHour)
             limit_str = f"{status.limit.per_hour}/hour"
-        super().__init__(
-            f"Rate limit exceeded ({status.used} / {limit_str} calls this hour)"
-        )
+        super().__init__(f"Rate limit exceeded ({status.used} / {limit_str} calls this hour)")
 
 
 def _parse_rate_limit_status(response: httpx.Response) -> RateLimitStatus:
@@ -93,9 +91,7 @@ class MCPTransport(Transport):
             )
 
         if identity is not None and identity.needs_rotation(30):
-            logger.warning(
-                "conduit: mTLS certificate expires within 30 days — consider rotating"
-            )
+            logger.warning("conduit: mTLS certificate expires within 30 days — consider rotating")
 
     async def _build_auth_headers(self) -> Dict[str, str]:
         """Build per-request auth headers (async to support OAuth token fetch)."""
@@ -109,6 +105,7 @@ class MCPTransport(Transport):
             return {"X-API-Key": self.auth["api_key"]}
         if "basic" in self.auth:
             import base64
+
             creds = base64.b64encode(
                 f"{self.auth['basic']['username']}:{self.auth['basic']['password']}".encode()
             ).decode()
@@ -202,9 +199,7 @@ class MCPTransport(Transport):
         """Send a raw JSON-RPC request and return the result."""
         return await self._send_with_retry(method, params, is_retry=False)
 
-    async def _send_with_retry(
-        self, method: str, params: Any, is_retry: bool
-    ) -> Any:
+    async def _send_with_retry(self, method: str, params: Any, is_retry: bool) -> Any:
         if not self._client:
             await self.connect()
 
@@ -228,9 +223,7 @@ class MCPTransport(Transport):
         }
 
         try:
-            response = await self._client.post(
-                self.url, json=payload, headers=request_headers
-            )
+            response = await self._client.post(self.url, json=payload, headers=request_headers)
         except httpx.ConnectError as exc:
             raise NetworkError(f"Connection failed: {exc}") from exc
         except httpx.TimeoutException as exc:
@@ -275,19 +268,22 @@ class MCPTransport(Transport):
             return result
         return result.get("tools", [])
 
-    async def call_tool(
-        self, name: str, arguments: Dict[str, Any], **kwargs: Any
-    ) -> Any:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], **kwargs: Any) -> Any:
         """Call a tool via tools/call."""
         import json as _json
 
         params = {"name": name, "arguments": arguments, **kwargs}
         result = await self.send_request("tools/call", params)
 
-        # MCP tool responses wrap the actual result in a content envelope:
-        # {"content": [{"type": "text", "text": "<json>"}], "isError": false}
-        # Unwrap one level so callers receive the actual tool output.
+        # Unwrap the MCP content envelope. Priority order (MCP 2025):
+        # 1. structuredContent — pure JSON object, no decoding needed.
+        # 2. content[0].text parsed as JSON — legacy text-encoded path.
+        # 3. content[0] as-is — plain-text or non-JSON content item.
         if isinstance(result, dict):
+            # 1. Prefer structuredContent (MCP 2025).
+            if "structuredContent" in result:
+                return result["structuredContent"]
+            # 2-3. Legacy content envelope.
             content = result.get("content")
             if isinstance(content, list) and content:
                 first = content[0]
@@ -296,6 +292,7 @@ class MCPTransport(Transport):
                         return _json.loads(first["text"])
                     except _json.JSONDecodeError:
                         return {"text": first["text"]}
+                return first
 
         return result
 

@@ -36,9 +36,7 @@ class RateLimitError(_BaseRateLimitError):
         else:
             assert isinstance(status.limit, RateLimitPerHour)
             limit_str = f"{status.limit.per_hour}/hour"
-        super().__init__(
-            f"Rate limit exceeded ({status.used} / {limit_str} calls this hour)"
-        )
+        super().__init__(f"Rate limit exceeded ({status.used} / {limit_str} calls this hour)")
 
 
 def _parse_rate_limit_status(response: httpx.Response) -> RateLimitStatus:
@@ -78,9 +76,7 @@ class JSONRPCTransport(Transport):
             )
 
         if identity is not None and identity.needs_rotation(30):
-            logger.warning(
-                "conduit: mTLS certificate expires within 30 days — consider rotating"
-            )
+            logger.warning("conduit: mTLS certificate expires within 30 days — consider rotating")
 
     async def connect(self) -> None:
         """Establish HTTP connection."""
@@ -113,6 +109,7 @@ class JSONRPCTransport(Transport):
             return {"Authorization": f"Bearer {self.auth['bearer']}"}
         if "basic" in self.auth:
             import base64
+
             creds = base64.b64encode(
                 f"{self.auth['basic']['username']}:{self.auth['basic']['password']}".encode()
             ).decode()
@@ -129,9 +126,7 @@ class JSONRPCTransport(Transport):
         """Make a JSONRPC call."""
         return await self._call_with_retry(method, params, is_retry=False)
 
-    async def _call_with_retry(
-        self, method: str, params: Any, is_retry: bool
-    ) -> Any:
+    async def _call_with_retry(self, method: str, params: Any, is_retry: bool) -> Any:
         if not self._client:
             await self.connect()
 
@@ -164,8 +159,7 @@ class JSONRPCTransport(Transport):
                 self._oauth.invalidate()
                 return await self._call_with_retry(method, params, is_retry=True)
             raise AuthError(
-                f"Authentication failed (HTTP 401). "
-                f"Check your credentials and try again."
+                f"Authentication failed (HTTP 401). Check your credentials and try again."
             )
 
         response.raise_for_status()
@@ -182,19 +176,22 @@ class JSONRPCTransport(Transport):
         result = await self._call("tools/list", kwargs)
         return result.get("tools", []) if result else []
 
-    async def call_tool(
-        self, name: str, arguments: Dict[str, Any], **kwargs: Any
-    ) -> Any:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], **kwargs: Any) -> Any:
         """Call tool via tools/call."""
         import json as _json
 
         params = {"name": name, "arguments": arguments, **kwargs}
         result = await self._call("tools/call", params)
 
-        # MCP tool responses (both MCP and JSONRPC transports) wrap the result in
-        # a content envelope: {"content": [{"type": "text", "text": "<json>"}], ...}
-        # Unwrap one level so callers receive the actual tool output.
+        # Unwrap the MCP content envelope. Priority order (MCP 2025):
+        # 1. structuredContent — pure JSON object, no decoding needed.
+        # 2. content[0].text parsed as JSON — legacy text-encoded path.
+        # 3. content[0] as-is — plain-text or non-JSON content item.
         if isinstance(result, dict):
+            # 1. Prefer structuredContent (MCP 2025).
+            if "structuredContent" in result:
+                return result["structuredContent"]
+            # 2-3. Legacy content envelope.
             content = result.get("content")
             if isinstance(content, list) and content:
                 first = content[0]
@@ -203,6 +200,7 @@ class JSONRPCTransport(Transport):
                         return _json.loads(first["text"])
                     except _json.JSONDecodeError:
                         return {"text": first["text"]}
+                return first
 
         return result
 

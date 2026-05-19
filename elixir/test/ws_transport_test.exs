@@ -154,7 +154,8 @@ defmodule DatagroutConduit.Transport.WsTest do
         }
       })
 
-      assert_receive {:subscription_event, "sub_abc", %{event: "agent.thought", data: %{"text" => "thinking"}}},
+      assert_receive {:subscription_event, "sub_abc",
+                      %{event: "agent.thought", data: %{"text" => "thinking"}}},
                      500
 
       GenServer.stop(pid)

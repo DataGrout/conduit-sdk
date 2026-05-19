@@ -388,16 +388,24 @@ module DatagroutConduit
       unwrap_content(raw)
     end
 
-    # Unwrap the MCP content envelope that wraps tool results from both MCP and
-    # JSONRPC transports: {"content" => [{"type" => "text", "text" => "<json>"}]}
+    # Unwrap the MCP content envelope from tool call results.
+    #
+    # Priority order (MCP 2025):
+    # 1. +structuredContent+ — pure JSON Hash, no decoding needed.
+    # 2. +content[0]["text"]+ parsed as JSON — legacy text-encoded path.
+    # 3. +content[0]+ as-is — plain-text or non-JSON content item.
+    # 4. +raw+ unchanged — no content envelope present.
     def unwrap_content(raw)
       return raw unless raw.is_a?(Hash)
+
+      # 1. Prefer structuredContent (MCP 2025).
+      return raw["structuredContent"] if raw.key?("structuredContent")
 
       content = raw["content"]
       return raw unless content.is_a?(Array) && !content.empty?
 
       first = content.first
-      return raw unless first.is_a?(Hash) && first["text"].is_a?(String)
+      return first unless first.is_a?(Hash) && first["text"].is_a?(String)
 
       begin
         JSON.parse(first["text"])

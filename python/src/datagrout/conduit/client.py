@@ -135,7 +135,9 @@ class Client:
         """
         self.url = url
         self._is_dg = is_dg_url(url)
-        self.use_intelligent_interface = use_intelligent_interface if use_intelligent_interface is not None else self._is_dg
+        self.use_intelligent_interface = (
+            use_intelligent_interface if use_intelligent_interface is not None else self._is_dg
+        )
         self._dg_warned = False
 
         # Merge convenience client_id/client_secret kwargs into auth dict.
@@ -164,12 +166,16 @@ class Client:
 
         # Initialize transport
         if transport == "mcp":
-            self._transport: Transport = MCPTransport(url, auth=auth, identity=resolved_identity, **kwargs)
+            self._transport: Transport = MCPTransport(
+                url, auth=auth, identity=resolved_identity, **kwargs
+            )
         elif transport == "jsonrpc":
             # When the user passes an MCP URL (ending in /mcp), transparently
             # rewrite the path to the DG JSONRPC endpoint (/rpc).
             rpc_url = url[:-4] + "/rpc" if url.endswith("/mcp") else url
-            self._transport = JSONRPCTransport(rpc_url, auth=auth, identity=resolved_identity, **kwargs)
+            self._transport = JSONRPCTransport(
+                rpc_url, auth=auth, identity=resolved_identity, **kwargs
+            )
         elif transport == "websocket":
             # Rewrite http(s):// → ws(s):// if the caller passed an HTTP URL.
             ws_url = url
@@ -210,9 +216,7 @@ class Client:
 
     def _ensure_initialized(self) -> None:
         if not self._initialized:
-            raise RuntimeError(
-                "Client not initialized. Call connect() first or use 'async with'."
-            )
+            raise RuntimeError("Client not initialized. Call connect() first or use 'async with'.")
 
     # ===== Namespace Accessors =====
 
@@ -260,8 +264,7 @@ class Client:
                 return await fn()
             except Exception as e:
                 is_not_init = (
-                    getattr(e, "code", None) == -32002
-                    or "not initialized" in str(e).lower()
+                    getattr(e, "code", None) == -32002 or "not initialized" in str(e).lower()
                 )
                 if is_not_init and retries > 0:
                     retries -= 1
@@ -490,9 +493,7 @@ class Client:
 
         return await self._send_with_retry(_do)
 
-    async def call_tool(
-        self, name: str, arguments: Dict[str, Any], **kwargs: Any
-    ) -> Any:
+    async def call_tool(self, name: str, arguments: Dict[str, Any], **kwargs: Any) -> Any:
         """
         Call a tool (standard MCP ``tools/call``).
 
@@ -514,23 +515,17 @@ class Client:
     async def list_resources(self, **kwargs: Any) -> List[Dict[str, Any]]:
         """List available resources (standard MCP method)."""
         self._ensure_initialized()
-        return await self._send_with_retry(
-            lambda: self._transport.list_resources(**kwargs)
-        )
+        return await self._send_with_retry(lambda: self._transport.list_resources(**kwargs))
 
     async def read_resource(self, uri: str, **kwargs: Any) -> Any:
         """Read a resource (standard MCP method)."""
         self._ensure_initialized()
-        return await self._send_with_retry(
-            lambda: self._transport.read_resource(uri, **kwargs)
-        )
+        return await self._send_with_retry(lambda: self._transport.read_resource(uri, **kwargs))
 
     async def list_prompts(self, **kwargs: Any) -> List[Dict[str, Any]]:
         """List available prompts (standard MCP method)."""
         self._ensure_initialized()
-        return await self._send_with_retry(
-            lambda: self._transport.list_prompts(**kwargs)
-        )
+        return await self._send_with_retry(lambda: self._transport.list_prompts(**kwargs))
 
     async def get_prompt(
         self, name: str, arguments: Optional[Dict[str, Any]] = None, **kwargs: Any
@@ -700,9 +695,7 @@ class Client:
             tool, args, demux=demux, demux_mode=demux_mode, **kwargs
         )
 
-    async def perform_batch(
-        self, calls: List[Dict[str, Any]], **kwargs: Any
-    ) -> List[Any]:
+    async def perform_batch(self, calls: List[Dict[str, Any]], **kwargs: Any) -> List[Any]:
         """
         Batch tool execution (DataGrout-native).
 
@@ -786,8 +779,13 @@ class Client:
         if query is not None:
             params["query"] = query
         _PLAN_OPTS = (
-            "server", "k", "policy", "have",
-            "return_call_handles", "expose_virtual_skills", "model_overrides",
+            "server",
+            "k",
+            "policy",
+            "have",
+            "return_call_handles",
+            "expose_virtual_skills",
+            "model_overrides",
         )
         for key in _PLAN_OPTS:
             if key in kwargs:
@@ -822,9 +820,7 @@ class Client:
         self._ensure_initialized()
         method = f"data-grout/{tool_short_name}"
         _params = params or {}
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(method, _params)
-        )
+        return await self._send_with_retry(lambda: self._transport.call_tool(method, _params))
 
     async def estimate_cost(self, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -839,15 +835,11 @@ class Client:
         """
         self._ensure_initialized()
         estimate_args = {**args, "estimate_only": True}
-        return await self._send_with_retry(
-            lambda: self._transport.call_tool(tool, estimate_args)
-        )
+        return await self._send_with_retry(lambda: self._transport.call_tool(tool, estimate_args))
 
     # ===== Internal Helpers =====
 
-    async def _perform_with_tracking(
-        self, tool: str, args: Dict[str, Any], **kwargs: Any
-    ) -> Any:
+    async def _perform_with_tracking(self, tool: str, args: Dict[str, Any], **kwargs: Any) -> Any:
         """Execute tool via discovery.perform and track receipt."""
         params = {"tool": tool, "args": args, **kwargs}
         return await self._send_with_retry(

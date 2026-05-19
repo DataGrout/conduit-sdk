@@ -57,6 +57,7 @@ def make_http_client(responses: list) -> AsyncMock:
 
 # ─── OnrampOptions ─────────────────────────────────────────────────────────────
 
+
 def test_onramp_options_required_fields():
     opts = OnrampOptions(gateway="https://app.datagrout.ai", agent_name="my-agent")
     assert opts.gateway == "https://app.datagrout.ai"
@@ -80,6 +81,7 @@ def test_onramp_options_all_fields():
 
 
 # ─── OnrampCredentials ────────────────────────────────────────────────────────
+
 
 def test_onramp_credentials_fields():
     creds = OnrampCredentials(
@@ -108,12 +110,15 @@ def test_onramp_credentials_defaults():
 
 # ─── _register ────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_register_sends_init_then_complete():
-    http = make_http_client([
-        (INIT_RESPONSE, 200),
-        (COMPLETE_RESPONSE, 200),
-    ])
+    http = make_http_client(
+        [
+            (INIT_RESPONSE, 200),
+            (COMPLETE_RESPONSE, 200),
+        ]
+    )
 
     creds = await _register(http, DEFAULT_OPTS)
 
@@ -137,10 +142,12 @@ async def test_register_sends_init_then_complete():
 @pytest.mark.asyncio
 async def test_register_omits_none_optional_fields():
     opts = OnrampOptions(gateway="https://app.datagrout.ai", agent_name="bare")
-    http = make_http_client([
-        (INIT_RESPONSE, 200),
-        (COMPLETE_RESPONSE, 200),
-    ])
+    http = make_http_client(
+        [
+            (INIT_RESPONSE, 200),
+            (COMPLETE_RESPONSE, 200),
+        ]
+    )
     await _register(http, opts)
     init_body = http.post.call_args_list[0].kwargs["json"]
     assert "agent_type" not in init_body
@@ -151,10 +158,12 @@ async def test_register_omits_none_optional_fields():
 @pytest.mark.asyncio
 async def test_register_strips_trailing_slash_from_gateway():
     opts = OnrampOptions(gateway="https://app.datagrout.ai/", agent_name="a")
-    http = make_http_client([
-        (INIT_RESPONSE, 200),
-        (COMPLETE_RESPONSE, 200),
-    ])
+    http = make_http_client(
+        [
+            (INIT_RESPONSE, 200),
+            (COMPLETE_RESPONSE, 200),
+        ]
+    )
     await _register(http, opts)
     url = http.post.call_args_list[0].args[0]
     assert url == "https://app.datagrout.ai/onramp"
@@ -162,19 +171,23 @@ async def test_register_strips_trailing_slash_from_gateway():
 
 @pytest.mark.asyncio
 async def test_register_raises_on_init_rejected():
-    http = make_http_client([
-        ({"error": "rate_limited"}, 429),
-    ])
+    http = make_http_client(
+        [
+            ({"error": "rate_limited"}, 429),
+        ]
+    )
     with pytest.raises(OnrampError, match="429"):
         await _register(http, DEFAULT_OPTS)
 
 
 @pytest.mark.asyncio
 async def test_register_raises_on_complete_rejected():
-    http = make_http_client([
-        (INIT_RESPONSE, 200),
-        ({"error": "expired"}, 410),
-    ])
+    http = make_http_client(
+        [
+            (INIT_RESPONSE, 200),
+            ({"error": "expired"}, 410),
+        ]
+    )
     with pytest.raises(OnrampError, match="410"):
         await _register(http, DEFAULT_OPTS)
 
@@ -191,6 +204,7 @@ async def test_register_handles_absent_mcp_url():
 
 
 # ─── _exchange_token ──────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_exchange_token_posts_client_credentials():
@@ -214,7 +228,8 @@ async def test_exchange_token_posts_client_credentials():
 @pytest.mark.asyncio
 async def test_exchange_token_raises_on_failure():
     creds = OnrampCredentials(
-        client_id="x", client_secret="y",
+        client_id="x",
+        client_secret="y",
         token_url="https://app.datagrout.ai/servers/abc/oauth/token",
     )
     http = make_http_client([({}, 401)])
@@ -223,6 +238,7 @@ async def test_exchange_token_raises_on_failure():
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_register_only_returns_credentials():

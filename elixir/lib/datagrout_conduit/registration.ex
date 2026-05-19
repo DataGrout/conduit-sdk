@@ -65,10 +65,9 @@ defmodule DatagroutConduit.Registration do
   # SubjectPublicKeyInfo DER for EC P-256 is a fixed-layout structure:
   #   SEQUENCE { SEQUENCE { OID(id-ecPublicKey), OID(prime256v1) }, BIT STRING(point) }
   # The header is always 26 bytes for an uncompressed 65-byte EC point.
-  @ec_p256_spki_prefix <<0x30, 0x59, 0x30, 0x13,
-    0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
-    0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07,
-    0x03, 0x42, 0x00>>
+  @ec_p256_spki_prefix <<0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02,
+                         0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03,
+                         0x42, 0x00>>
 
   defp ec_p256_spki_der(<<0x04, _::binary-size(64)>> = point) do
     @ec_p256_spki_prefix <> point
@@ -86,7 +85,8 @@ defmodule DatagroutConduit.Registration do
     * `:name` - Human-readable label (default: `"conduit-client"`)
     * `:endpoint` - Registration endpoint URL (default: `dg_substrate_endpoint()`)
   """
-  @spec register_identity(binary(), keyword()) :: {:ok, RegistrationResponse.t()} | {:error, term()}
+  @spec register_identity(binary(), keyword()) ::
+          {:ok, RegistrationResponse.t()} | {:error, term()}
   def register_identity(public_key_pem, opts) do
     auth_token = Keyword.fetch!(opts, :auth_token)
     name = Keyword.get(opts, :name, "conduit-client")
@@ -128,7 +128,8 @@ defmodule DatagroutConduit.Registration do
     * `:name` - Human-readable label (default: `"conduit-client"`)
     * `:endpoint` - Registration endpoint URL (default: `dg_substrate_endpoint()`)
   """
-  @spec rotate_identity(binary(), Identity.t(), keyword()) :: {:ok, RegistrationResponse.t()} | {:error, term()}
+  @spec rotate_identity(binary(), Identity.t(), keyword()) ::
+          {:ok, RegistrationResponse.t()} | {:error, term()}
   def rotate_identity(public_key_pem, %Identity{} = identity, opts \\ []) do
     name = Keyword.get(opts, :name, "conduit-client")
     endpoint = Keyword.get(opts, :endpoint, @dg_substrate_endpoint)

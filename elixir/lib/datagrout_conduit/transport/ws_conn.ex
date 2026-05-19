@@ -34,6 +34,7 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
   def handle_frame({:binary, _}, state), do: {:ok, state}
   def handle_frame({:ping, _}, state), do: {:ok, state}
   def handle_frame({:pong, _}, state), do: {:ok, state}
+
   def handle_frame({:close, _, _}, %{parent: parent} = state) do
     send(parent, :ws_disconnected)
     {:ok, state}

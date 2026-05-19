@@ -106,9 +106,7 @@ async def test_route_notification_dispatches_to_subscription():
     sub = Subscription("sub_abc", "agents.x.events")
     t._subscriptions["sub_abc"] = sub
 
-    t._route_notification(
-        {"subscription": "sub_abc", "event": "thought", "data": {"text": "hi"}}
-    )
+    t._route_notification({"subscription": "sub_abc", "event": "thought", "data": {"text": "hi"}})
 
     ev = sub._queue.get_nowait()
     assert ev is not None
@@ -120,9 +118,7 @@ async def test_route_notification_dispatches_to_subscription():
 async def test_route_notification_ignores_unknown_subscription():
     t = WsTransport("wss://example.com/ws")
     # No subscriptions registered — should not raise.
-    t._route_notification(
-        {"subscription": "ghost", "event": "x", "data": None}
-    )
+    t._route_notification({"subscription": "ghost", "event": "x", "data": None})
     assert len(t._subscriptions) == 0
 
 
@@ -405,9 +401,7 @@ def test_client_accepts_websocket_transport():
 def test_client_rewrites_https_to_wss():
     from datagrout.conduit import Client
 
-    client = Client(
-        "https://gateway.datagrout.ai/servers/test/ws", transport="websocket"
-    )
+    client = Client("https://gateway.datagrout.ai/servers/test/ws", transport="websocket")
     assert client._transport._url.startswith("wss://")
 
 

@@ -288,12 +288,25 @@ impl Client {
         if let Some(result) = response.result {
             let call_result: CallToolResult = serde_json::from_value(result)?;
 
-            // Return first content item
-            if let Some(content) = call_result.content.first() {
-                Ok(content.clone())
-            } else {
-                Ok(json!(null))
+            // Prefer `structuredContent` (MCP 2025) — it's the actual JSON object,
+            // not a re-encoded string.  Fall back to unwrapping the first text content
+            // item for servers that predate the structured-content extension.
+            if let Some(sc) = call_result.structured_content {
+                return Ok(sc);
             }
+
+            // Legacy path: content[0].text contains JSON-encoded result string.
+            if let Some(first) = call_result.content.first() {
+                if let Some(text) = first.get("text").and_then(|t| t.as_str()) {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                        return Ok(parsed);
+                    }
+                }
+                // Not JSON — return the content item as-is (e.g. plain-text tools).
+                return Ok(first.clone());
+            }
+
+            Ok(json!(null))
         } else {
             Err(Error::Other("Tool call returned no result".to_string()))
         }
@@ -531,10 +544,13 @@ impl Client {
             .result
             .ok_or_else(|| Error::Other(format!("`{}` returned no result", name)))?;
 
-        // MCP tool responses wrap the actual result in a `content` array.
-        // Both the MCP transport and the DG JSONRPC endpoint return:
+        // Prefer `structuredContent` (MCP 2025 — pure JSON, no encoding needed).
+        if let Some(sc) = raw.get("structuredContent") {
+            return Ok(sc.clone());
+        }
+
+        // Legacy: result is wrapped in a content array with JSON-encoded text.
         //   {"content": [{"type": "text", "text": "<json-encoded result>"}]}
-        // Unwrap one level so callers receive the actual tool output.
         if let Some(content) = raw.get("content").and_then(|c| c.as_array()) {
             if let Some(first) = content.first() {
                 if let Some(text) = first.get("text").and_then(|t| t.as_str()) {
@@ -542,6 +558,8 @@ impl Client {
                         return Ok(parsed);
                     }
                 }
+                // Plain-text tool — return the content item as-is.
+                return Ok(first.clone());
             }
         }
 

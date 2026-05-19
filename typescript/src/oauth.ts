@@ -41,8 +41,9 @@ interface CachedToken {
  * ```
  */
 export function deriveTokenEndpoint(mcpUrl: string): string {
-  const mcpIdx = mcpUrl.indexOf('/mcp');
-  const base = mcpIdx !== -1 ? mcpUrl.slice(0, mcpIdx) : mcpUrl.replace(/\/$/, '');
+  const mcpIdx = mcpUrl.indexOf("/mcp");
+  const base =
+    mcpIdx !== -1 ? mcpUrl.slice(0, mcpIdx) : mcpUrl.replace(/\/$/, "");
   return `${base}/oauth/token`;
 }
 
@@ -100,20 +101,20 @@ export class OAuthTokenProvider {
 
   private async fetchToken(): Promise<CachedToken> {
     const body = new URLSearchParams({
-      grant_type: 'client_credentials',
+      grant_type: "client_credentials",
       client_id: this.clientId,
       client_secret: this.clientSecret,
     });
 
     if (this.scope) {
-      body.set('scope', this.scope);
+      body.set("scope", this.scope);
     }
 
     let response: Response;
     try {
       response = await fetch(this.tokenEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
       });
     } catch (err) {
@@ -121,8 +122,10 @@ export class OAuthTokenProvider {
     }
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`OAuth token endpoint returned ${response.status}: ${text}`);
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `OAuth token endpoint returned ${response.status}: ${text}`,
+      );
     }
 
     const data = (await response.json()) as TokenResponse;

@@ -2,21 +2,21 @@
  * DataGrout Conduit client implementation
  */
 
-import * as path from 'path';
-import { Transport } from './transports/base';
-import { MCPTransport } from './transports/mcp';
-import { JSONRPCTransport } from './transports/jsonrpc';
-import { WsTransport, Subscription } from './transports/ws';
-export type { Subscription, SubscriptionEvent } from './transports/ws';
-import { ConduitIdentity } from './identity';
+import * as path from "path";
+import { Transport } from "./transports/base";
+import { MCPTransport } from "./transports/mcp";
+import { JSONRPCTransport } from "./transports/jsonrpc";
+import { WsTransport, Subscription } from "./transports/ws";
+export type { Subscription, SubscriptionEvent } from "./transports/ws";
+import { ConduitIdentity } from "./identity";
 import {
   generateKeypair,
   registerIdentity,
   saveIdentity,
   DEFAULT_IDENTITY_DIR,
   DG_SUBSTRATE_ENDPOINT,
-} from './registration';
-import { NotInitializedError, InvalidConfigError } from './errors';
+} from "./registration";
+import { NotInitializedError, InvalidConfigError } from "./errors";
 import {
   PrismNamespace,
   LogicNamespace,
@@ -24,7 +24,7 @@ import {
   DeliverablesNamespace,
   EphemeralsNamespace,
   FlowNamespace,
-} from './namespaces';
+} from "./namespaces";
 import type {
   ClientOptions,
   DiscoverResult,
@@ -36,7 +36,7 @@ import type {
   MCPTool,
   MCPResource,
   MCPPrompt,
-} from './types';
+} from "./types";
 
 /**
  * Stateful guided workflow session returned by `Client.guide()`.
@@ -98,13 +98,13 @@ export class GuidedSession {
    * Use `choose()` to advance through remaining steps first.
    */
   async complete(): Promise<any> {
-    if (this.status === 'completed') {
+    if (this.status === "completed") {
       return this.result;
     }
 
     throw new Error(
       `Workflow not complete (status: ${this.status}). ` +
-        `Call choose() with one of the available options.`
+        `Call choose() with one of the available options.`,
     );
   }
 }
@@ -112,9 +112,9 @@ export class GuidedSession {
 /** Returns `true` when `url` points at a DataGrout-managed endpoint. */
 export function isDgUrl(url: string): boolean {
   return (
-    url.includes('datagrout.ai') ||
-    url.includes('datagrout.dev') ||
-    !!process.env['CONDUIT_IS_DG']
+    url.includes("datagrout.ai") ||
+    url.includes("datagrout.dev") ||
+    !!process.env["CONDUIT_IS_DG"]
   );
 }
 
@@ -132,7 +132,7 @@ export function isDgUrl(url: string): boolean {
  */
 export class Client {
   private url: string;
-  private auth?: ClientOptions['auth'];
+  private auth?: ClientOptions["auth"];
   private useIntelligentInterface: boolean;
   private transport: Transport;
   private readonly isDg: boolean;
@@ -142,7 +142,7 @@ export class Client {
 
   constructor(options: ClientOptions | string) {
     // Allow simple string URL or full options object
-    if (typeof options === 'string') {
+    if (typeof options === "string") {
       options = { url: options };
     }
 
@@ -157,26 +157,36 @@ export class Client {
     const identity =
       options.identity ??
       (options.identityAuto
-        ? ConduitIdentity.tryDiscover(options.identityDir) ?? undefined
+        ? (ConduitIdentity.tryDiscover(options.identityDir) ?? undefined)
         : undefined);
 
-    const transportType = options.transport || 'mcp';
-    if (transportType === 'mcp') {
+    const transportType = options.transport || "mcp";
+    if (transportType === "mcp") {
       this.transport = new MCPTransport(this.url, this.auth, identity);
-    } else if (transportType === 'websocket') {
+    } else if (transportType === "websocket") {
       // Rewrite https:// → wss:// (or http:// → ws://) if the caller passed
       // an HTTP URL so they don't have to think about it.
       let wsUrl = this.url;
-      if (wsUrl.startsWith('https://')) wsUrl = 'wss://' + wsUrl.slice(8);
-      else if (wsUrl.startsWith('http://')) wsUrl = 'ws://' + wsUrl.slice(7);
-      this.transport = new WsTransport(wsUrl, this.auth, options.timeout, identity);
+      if (wsUrl.startsWith("https://")) wsUrl = "wss://" + wsUrl.slice(8);
+      else if (wsUrl.startsWith("http://")) wsUrl = "ws://" + wsUrl.slice(7);
+      this.transport = new WsTransport(
+        wsUrl,
+        this.auth,
+        options.timeout,
+        identity,
+      );
     } else {
       // When the user passes an MCP URL (ending in /mcp), transparently rewrite
       // the path to the DG JSONRPC endpoint (/rpc).
-      const rpcUrl = this.url.endsWith('/mcp')
-        ? this.url.slice(0, -4) + '/rpc'
+      const rpcUrl = this.url.endsWith("/mcp")
+        ? this.url.slice(0, -4) + "/rpc"
         : this.url;
-      this.transport = new JSONRPCTransport(rpcUrl, this.auth, options.timeout, identity);
+      this.transport = new JSONRPCTransport(
+        rpcUrl,
+        this.auth,
+        options.timeout,
+        identity,
+      );
     }
   }
 
@@ -206,7 +216,7 @@ export class Client {
     substrateEndpoint?: string;
   }): Promise<Client> {
     const dir = options.identityDir || DEFAULT_IDENTITY_DIR;
-    const name = options.name || 'conduit-client';
+    const name = options.name || "conduit-client";
     const endpoint = options.substrateEndpoint || DG_SUBSTRATE_ENDPOINT;
 
     // Fast path: existing identity that doesn't need rotation.
@@ -228,9 +238,9 @@ export class Client {
     saveIdentity(registered, dir);
 
     const identity = ConduitIdentity.fromPaths(
-      path.join(dir, 'identity.pem'),
-      path.join(dir, 'identity_key.pem'),
-      path.join(dir, 'ca.pem')
+      path.join(dir, "identity.pem"),
+      path.join(dir, "identity_key.pem"),
+      path.join(dir, "ca.pem"),
     );
     const client = new Client({ url: options.url, identity });
     await client.connect();
@@ -256,7 +266,7 @@ export class Client {
     identityDir?: string;
     substrateEndpoint?: string;
   }): Promise<Client> {
-    const { OAuthTokenProvider, deriveTokenEndpoint } = await import('./oauth');
+    const { OAuthTokenProvider, deriveTokenEndpoint } = await import("./oauth");
     const tokenEndpoint = deriveTokenEndpoint(options.url);
     const provider = new OAuthTokenProvider({
       clientId: options.clientId,
@@ -303,20 +313,26 @@ export class Client {
    * ```
    */
   static async bootstrapOnramp(options: {
-    opts: import('./onramp').OnrampOptions;
+    opts: import("./onramp").OnrampOptions;
     url?: string;
     identityDir?: string;
   }): Promise<Client> {
-    const { _doRegister, _exchangeToken } = await import('./onramp');
+    const { _doRegister, _exchangeToken } = await import("./onramp");
     const dir = options.identityDir || DEFAULT_IDENTITY_DIR;
 
     // Fast path: existing valid identity.
     const existing = ConduitIdentity.tryDiscover(dir);
     if (existing && !existing.needsRotation(7)) {
       if (!options.url) {
-        throw new Error("'url' must be provided when an existing identity is reused");
+        throw new Error(
+          "'url' must be provided when an existing identity is reused",
+        );
       }
-      return new Client({ url: options.url, identity: existing, identityDir: dir });
+      return new Client({
+        url: options.url,
+        identity: existing,
+        identityDir: dir,
+      });
     }
 
     // Slow path: full onramp flow.
@@ -326,7 +342,7 @@ export class Client {
     const url = creds.mcpUrl ?? options.url;
     if (!url) {
       throw new Error(
-        "'url' must be provided when mcpUrl is absent from the onramp response"
+        "'url' must be provided when mcpUrl is absent from the onramp response",
       );
     }
 
@@ -382,12 +398,11 @@ export class Client {
         return await fn();
       } catch (error: any) {
         const isNotInit =
-          error?.code === -32002 ||
-          error?.message?.includes('not initialized');
+          error?.code === -32002 || error?.message?.includes("not initialized");
         if (isNotInit && retries > 0) {
           retries--;
           await this.connect();
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise((r) => setTimeout(r, 500));
           continue;
         }
         throw error;
@@ -397,9 +412,14 @@ export class Client {
 
   // ===== Namespace Accessors =====
 
-  private callDgTool = async (tool: string, params: Record<string, any>): Promise<any> => {
+  private callDgTool = async (
+    tool: string,
+    params: Record<string, any>,
+  ): Promise<any> => {
     this.ensureInitialized();
-    return this.sendWithRetry(() => this.transport.callTool(`data-grout/${tool}`, params));
+    return this.sendWithRetry(() =>
+      this.transport.callTool(`data-grout/${tool}`, params),
+    );
   };
 
   /** Data transformation, charting, rendering, and type bridging. */
@@ -419,7 +439,9 @@ export class Client {
 
   /** Work product registration, listing, and retrieval. */
   get deliverables(): DeliverablesNamespace {
-    return new DeliverablesNamespace(this.callDgTool, (m) => this.warnIfNotDg(m));
+    return new DeliverablesNamespace(this.callDgTool, (m) =>
+      this.warnIfNotDg(m),
+    );
   }
 
   /** Cache listing and inspection. */
@@ -452,13 +474,17 @@ export class Client {
 
       do {
         const response = await this.transport.listTools({ ...options, cursor });
-        const tools = Array.isArray(response) ? response : ((response as any).tools || []);
+        const tools = Array.isArray(response)
+          ? response
+          : (response as any).tools || [];
         allTools.push(...tools);
-        cursor = Array.isArray(response) ? undefined : (response as any).nextCursor;
+        cursor = Array.isArray(response)
+          ? undefined
+          : (response as any).nextCursor;
       } while (cursor);
 
       if (this.useIntelligentInterface) {
-        return allTools.filter(t => !t.name.includes('@'));
+        return allTools.filter((t) => !t.name.includes("@"));
       }
       return allTools;
     });
@@ -472,7 +498,11 @@ export class Client {
    * @param name - Fully-qualified tool name (e.g. `salesforce@v1/get_lead@v1`).
    * @param args - Tool input arguments.
    */
-  async callTool(name: string, args: Record<string, any>, _options?: any): Promise<any> {
+  async callTool(
+    name: string,
+    args: Record<string, any>,
+    _options?: any,
+  ): Promise<any> {
     this.ensureInitialized();
     return this.sendWithRetry(() => this.transport.callTool(name, args));
   }
@@ -517,9 +547,15 @@ export class Client {
    * @param name - Prompt name as returned by `listPrompts()`.
    * @param args - Template argument values.
    */
-  async getPrompt(name: string, args?: Record<string, any>, options?: any): Promise<any> {
+  async getPrompt(
+    name: string,
+    args?: Record<string, any>,
+    options?: any,
+  ): Promise<any> {
     this.ensureInitialized();
-    return this.sendWithRetry(() => this.transport.getPrompt(name, args, options));
+    return this.sendWithRetry(() =>
+      this.transport.getPrompt(name, args, options),
+    );
   }
 
   // ===== WebSocket push subscriptions =====
@@ -548,7 +584,7 @@ export class Client {
     if (!(this.transport instanceof WsTransport)) {
       throw new Error(
         "subscribe() requires transport: 'websocket'. " +
-          "Reinitialise the client with transport: 'websocket'."
+          "Reinitialise the client with transport: 'websocket'.",
       );
     }
     return (this.transport as WsTransport).subscribe(topic);
@@ -565,7 +601,7 @@ export class Client {
     if (!(this.transport instanceof WsTransport)) {
       throw new Error(
         "unsubscribe() requires transport: 'websocket'. " +
-          "Reinitialise the client with transport: 'websocket'."
+          "Reinitialise the client with transport: 'websocket'.",
       );
     }
     return (this.transport as WsTransport).unsubscribe(subscriptionId);
@@ -578,8 +614,8 @@ export class Client {
       this.dgWarned = true;
       console.warn(
         `[conduit] \`${method}\` is a DataGrout-specific extension. ` +
-        `The connected server may not support it. ` +
-        `Standard MCP methods (listTools, callTool, …) work on any server.`
+          `The connected server may not support it. ` +
+          `Standard MCP methods (listTools, callTool, …) work on any server.`,
       );
     }
   }
@@ -604,7 +640,7 @@ export class Client {
    */
   async discover(options: DiscoverOptions): Promise<DiscoverResult> {
     this.ensureInitialized();
-    this.warnIfNotDg('discover');
+    this.warnIfNotDg("discover");
     const params: Record<string, any> = {
       limit: options.limit ?? 10,
       min_score: options.minScore ?? 0.0,
@@ -616,12 +652,13 @@ export class Client {
     if (options.servers) params.servers = options.servers;
 
     const result = await this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/discovery.discover', params)
+      this.transport.callTool("data-grout/discovery.discover", params),
     );
 
     const tools = result.results || result.tools || [];
     return {
-      queryUsed: result.goal_used || result.query_used || result.queryUsed || '',
+      queryUsed:
+        result.goal_used || result.query_used || result.queryUsed || "",
       results: tools.map((r: any) => ({
         toolName: r.tool_name || r.toolName,
         integration: r.integration,
@@ -634,7 +671,7 @@ export class Client {
         outputSchema: r.output_contract || r.output_schema || r.outputSchema,
       })),
       total: result.total ?? tools.length,
-      limit: result.limit ?? (options.limit ?? 10),
+      limit: result.limit ?? options.limit ?? 10,
     };
   }
 
@@ -653,11 +690,13 @@ export class Client {
    */
   async perform(options: PerformOptions): Promise<any> {
     this.ensureInitialized();
-    this.warnIfNotDg('perform');
+    this.warnIfNotDg("perform");
     return await this.performWithTracking(
       options.tool,
       options.args,
-      options.demux ? { demux: options.demux, demuxMode: options.demuxMode } : undefined
+      options.demux
+        ? { demux: options.demux, demuxMode: options.demuxMode }
+        : undefined,
     );
   }
 
@@ -668,11 +707,13 @@ export class Client {
    *
    * @param calls - Array of `{ tool, args }` call descriptors.
    */
-  async performBatch(calls: Array<{ tool: string; args: Record<string, any> }>): Promise<any[]> {
+  async performBatch(
+    calls: Array<{ tool: string; args: Record<string, any> }>,
+  ): Promise<any[]> {
     this.ensureInitialized();
-    this.warnIfNotDg('performBatch');
+    this.warnIfNotDg("performBatch");
     return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/discovery.perform', calls)
+      this.transport.callTool("data-grout/discovery.perform", calls),
     );
   }
 
@@ -693,7 +734,7 @@ export class Client {
    */
   async guide(options: GuideRequestOptions): Promise<GuidedSession> {
     this.ensureInitialized();
-    this.warnIfNotDg('guide');
+    this.warnIfNotDg("guide");
     const params: Record<string, any> = {};
 
     if (options.goal) params.goal = options.goal;
@@ -702,7 +743,7 @@ export class Client {
     if (options.choice) params.choice = options.choice;
 
     const result = await this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/discovery.guide', params)
+      this.transport.callTool("data-grout/discovery.guide", params),
     );
 
     const state: GuideState = {
@@ -747,10 +788,10 @@ export class Client {
    */
   async plan(options: PlanOptions): Promise<any> {
     this.ensureInitialized();
-    this.warnIfNotDg('plan');
+    this.warnIfNotDg("plan");
 
     if (!options.goal && !options.query) {
-      throw new InvalidConfigError('plan() requires either goal or query');
+      throw new InvalidConfigError("plan() requires either goal or query");
     }
 
     const params: Record<string, any> = {};
@@ -761,12 +802,14 @@ export class Client {
     if (options.k !== undefined) params.k = options.k;
     if (options.policy) params.policy = options.policy;
     if (options.have) params.have = options.have;
-    if (options.returnCallHandles !== undefined) params.return_call_handles = options.returnCallHandles;
-    if (options.exposeVirtualSkills !== undefined) params.expose_virtual_skills = options.exposeVirtualSkills;
+    if (options.returnCallHandles !== undefined)
+      params.return_call_handles = options.returnCallHandles;
+    if (options.exposeVirtualSkills !== undefined)
+      params.expose_virtual_skills = options.exposeVirtualSkills;
     if (options.modelOverrides) params.model_overrides = options.modelOverrides;
 
     return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/discovery.plan', params)
+      this.transport.callTool("data-grout/discovery.plan", params),
     );
   }
 
@@ -781,7 +824,10 @@ export class Client {
    * @param toolShortName - Tool name without the `data-grout/` prefix.
    * @param params        - Tool input arguments.
    */
-  async dg(toolShortName: string, params: Record<string, any> = {}): Promise<any> {
+  async dg(
+    toolShortName: string,
+    params: Record<string, any> = {},
+  ): Promise<any> {
     this.ensureInitialized();
     const method = `data-grout/${toolShortName}`;
     return this.sendWithRetry(() => this.transport.callTool(method, params));
@@ -800,7 +846,7 @@ export class Client {
     this.ensureInitialized();
     const estimateArgs = { ...args, estimate_only: true };
     return this.sendWithRetry(() =>
-      this.transport.callTool(tool, estimateArgs)
+      this.transport.callTool(tool, estimateArgs),
     );
   }
 
@@ -809,12 +855,11 @@ export class Client {
   private async performWithTracking(
     tool: string,
     args: Record<string, any>,
-    options?: any
+    options?: any,
   ): Promise<any> {
     const params = { tool, args, ...options };
     return this.sendWithRetry(() =>
-      this.transport.callTool('data-grout/discovery.perform', params)
+      this.transport.callTool("data-grout/discovery.perform", params),
     );
   }
-
 }

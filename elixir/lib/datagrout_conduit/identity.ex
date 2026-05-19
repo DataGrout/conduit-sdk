@@ -233,7 +233,9 @@ defmodule DatagroutConduit.Identity do
         try do
           cert = :public_key.pkix_decode_cert(der, :otp)
 
-          {:OTPCertificate, {:OTPTBSCertificate, _, _, _, _, {:Validity, _, not_after}, _, _, _, _, _}, _, _} = cert
+          {:OTPCertificate,
+           {:OTPTBSCertificate, _, _, _, _, {:Validity, _, not_after}, _, _, _, _, _}, _, _} =
+            cert
 
           secs =
             case not_after do
@@ -254,7 +256,10 @@ defmodule DatagroutConduit.Identity do
     end
   end
 
-  defp parse_utc_time(<<yy::binary-size(2), mm::binary-size(2), dd::binary-size(2), hh::binary-size(2), mi::binary-size(2), ss::binary-size(2), "Z">>) do
+  defp parse_utc_time(
+         <<yy::binary-size(2), mm::binary-size(2), dd::binary-size(2), hh::binary-size(2),
+           mi::binary-size(2), ss::binary-size(2), "Z">>
+       ) do
     year = String.to_integer(yy)
     year = if year >= 50, do: 1900 + year, else: 2000 + year
 
@@ -270,7 +275,10 @@ defmodule DatagroutConduit.Identity do
     |> DateTime.to_unix()
   end
 
-  defp parse_general_time(<<yyyy::binary-size(4), mm::binary-size(2), dd::binary-size(2), hh::binary-size(2), mi::binary-size(2), ss::binary-size(2), "Z">>) do
+  defp parse_general_time(
+         <<yyyy::binary-size(4), mm::binary-size(2), dd::binary-size(2), hh::binary-size(2),
+           mi::binary-size(2), ss::binary-size(2), "Z">>
+       ) do
     NaiveDateTime.new!(
       String.to_integer(yyyy),
       String.to_integer(mm),

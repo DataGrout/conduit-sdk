@@ -71,13 +71,21 @@ defmodule DatagroutConduit.BootstrapTest do
       System.cmd(
         "openssl",
         [
-          "req", "-x509", "-newkey", "ec",
-          "-pkeyopt", "ec_paramgen_curve:prime256v1",
+          "req",
+          "-x509",
+          "-newkey",
+          "ec",
+          "-pkeyopt",
+          "ec_paramgen_curve:prime256v1",
           "-nodes",
-          "-keyout", key_path,
-          "-out", cert_path,
-          "-days", "365",
-          "-subj", "/CN=conduit-test"
+          "-keyout",
+          key_path,
+          "-out",
+          cert_path,
+          "-days",
+          "365",
+          "-subj",
+          "/CN=conduit-test"
         ],
         stderr_to_stdout: true
       )

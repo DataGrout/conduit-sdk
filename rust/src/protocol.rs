@@ -206,10 +206,17 @@ pub struct CallToolParams {
 
 /// Tool call response
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
-    /// Tool result content
+    /// Tool result content (text/image items; present for backward compat).
+    #[serde(default)]
     pub content: Vec<Value>,
-    /// Whether the tool succeeded
+    /// Structured JSON result (MCP 2025 — preferred over parsing `content[].text`).
+    /// When present, callers should use this directly instead of decoding the
+    /// JSON-encoded string inside `content[0].text`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Value>,
+    /// Whether the tool call signalled an error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }
