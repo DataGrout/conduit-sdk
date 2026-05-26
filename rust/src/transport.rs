@@ -4,6 +4,7 @@ use crate::error::{Error, RateLimit, Result};
 use crate::identity::ConduitIdentity;
 use crate::oauth::OAuthTokenProvider;
 use crate::protocol::{JsonRpcRequest, JsonRpcResponse};
+use crate::ws_transport::Subscription;
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{header, Client as HttpClient, Response, StatusCode};
@@ -65,6 +66,28 @@ pub trait TransportTrait: Send + Sync {
 
     /// Check if connected
     fn is_connected(&self) -> bool;
+
+    /// Subscribe to a server-push topic.
+    ///
+    /// Returns a [`Subscription`] whose `events` receiver fires every time
+    /// the server pushes a notification matching the topic.
+    ///
+    /// Only implemented on the WS transport; other transports return
+    /// `Err(Error::Network("subscribe requires WS transport"))`.
+    async fn subscribe(&self, _topic: String) -> Result<Subscription> {
+        Err(Error::Network(
+            "subscribe is only supported on the WS transport".into(),
+        ))
+    }
+
+    /// Cancel a subscription by id.
+    ///
+    /// Only implemented on the WS transport.
+    async fn unsubscribe(&self, _subscription_id: String) -> Result<()> {
+        Err(Error::Network(
+            "unsubscribe is only supported on the WS transport".into(),
+        ))
+    }
 }
 
 // ─── Shared HTTP helpers ────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WsTransport, Subscription, SubscriptionEvent, SUBPROTOCOL } from '../src/transports/ws';
+import { WsTransport, Subscription, SubscriptionEvent, SUBPROTOCOL, PING_INTERVAL_MS } from '../src/transports/ws';
 import { Client } from '../src/client';
 
 // ── Mock WebSocket factory ────────────────────────────────────────────────────
@@ -376,5 +376,61 @@ describe('Client WebSocket integration', () => {
     const client = new Client('https://gateway.datagrout.ai/servers/test/mcp');
     (client as any).initialized = true;
     await expect(client.unsubscribe('sub_123')).rejects.toThrow("transport: 'websocket'");
+  });
+});
+
+// ── Ping keepalive ────────────────────────────────────────────────────────────
+
+describe('WsTransport ping keepalive', () => {
+  it('exports PING_INTERVAL_MS = 25 000', () => {
+    expect(PING_INTERVAL_MS).toBe(25_000);
+  });
+
+  it('does not start a ping timer before connect()', () => {
+    const t = new WsTransport('wss://example.com/ws');
+    expect((t as any)._pingTimer).toBeNull();
+    expect(t.pingsSent).toBe(0);
+  });
+
+  it('starts and stops the ping timer across the connect/disconnect lifecycle', async () => {
+    const t = new WsTransport('wss://example.com/ws');
+    t.setPingInterval(20); // 20ms so the test does not stall
+
+    const ws = createMockWs();
+    // Mock the `ws.ping()` method that the Node `ws` package would expose.
+    const ping = vi.fn();
+    (ws as any).ping = ping;
+
+    (t as any)._ws = ws;
+    (t as any)._startPingTimer();
+
+    expect((t as any)._pingTimer).not.toBeNull();
+
+    // Wait long enough for at least one tick.
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(ping.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(t.pingsSent).toBeGreaterThanOrEqual(1);
+
+    await t.disconnect();
+    expect((t as any)._pingTimer).toBeNull();
+
+    const callsBefore = ping.mock.calls.length;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(ping.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('silently skips ping when the underlying WebSocket lacks a ping method (browser)', async () => {
+    const t = new WsTransport('wss://example.com/ws');
+    t.setPingInterval(20);
+
+    const ws = createMockWs(); // no `ping` property
+    (t as any)._ws = ws;
+    (t as any)._startPingTimer();
+
+    await new Promise(resolve => setTimeout(resolve, 80));
+    // No throw, no pings counted, timer still active until disconnect.
+    expect(t.pingsSent).toBe(0);
+
+    await t.disconnect();
   });
 });

@@ -528,6 +528,40 @@ impl Client {
     }
 
     // ========================================================================
+    // WebSocket PubSub
+    // ========================================================================
+
+    /// Subscribe to a server-push topic over the WebSocket transport.
+    ///
+    /// Returns a [`Subscription`] whose `events` receiver fires every time the
+    /// server broadcasts a notification matching `topic`.  Returns
+    /// [`Error::Network`] when the active transport is not WebSocket.
+    ///
+    /// Typical use: subscribe to `agents.orchestrate.<run_id>` before calling
+    /// `agents.orchestrate@1` so you receive IC progress events in real time.
+    ///
+    /// Mirrors `Client.subscribe` in the TypeScript, Python, Ruby, and Elixir
+    /// SDKs.
+    pub async fn subscribe(
+        &self,
+        topic: impl Into<String>,
+    ) -> crate::error::Result<crate::ws_transport::Subscription> {
+        let transport = self.transport.read().await;
+        transport.subscribe(topic.into()).await
+    }
+
+    /// Cancel a server-push subscription by its ID.
+    ///
+    /// Mirrors `Client.unsubscribe` in the other-language SDKs.
+    pub async fn unsubscribe(
+        &self,
+        subscription_id: impl Into<String>,
+    ) -> crate::error::Result<()> {
+        let transport = self.transport.read().await;
+        transport.unsubscribe(subscription_id.into()).await
+    }
+
+    // ========================================================================
     // Internal: DataGrout tool dispatch
     // ========================================================================
 

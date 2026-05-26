@@ -45,6 +45,17 @@ defmodule DatagroutConduit.Transport.Ws do
 
   @subprotocol "datagrout-jsonrpc.v1"
 
+  @doc """
+  Milliseconds between client-initiated WS ping frames.
+
+  Many load balancers and reverse proxies (nginx, AWS ALB) close idle WS
+  connections after 60-120 seconds; pinging every 25 seconds keeps the
+  connection alive well within the tightest common timeout window.  Mirrors
+  `PING_INTERVAL` in the Rust reference implementation.
+  """
+  @ping_interval_ms 25_000
+  def ping_interval_ms, do: @ping_interval_ms
+
   # ── State ──────────────────────────────────────────────────────────────────
 
   defstruct [
@@ -53,8 +64,16 @@ defmodule DatagroutConduit.Transport.Ws do
     pending_subscribe: %{},
     # sub_id => [subscriber_pid]
     subscriptions: %{},
-    next_id: 0
+    next_id: 0,
+    # ms between ping frames; overridable via :ping_interval_ms init opt
+    ping_interval_ms: @ping_interval_ms,
+    # bumped each time a ping frame is sent (exposed via pings_sent/1 for tests)
+    pings_sent: 0
   ]
+
+  @doc "Returns how many ping frames this transport has sent. For tests."
+  @spec pings_sent(GenServer.server()) :: non_neg_integer()
+  def pings_sent(pid), do: GenServer.call(pid, :pings_sent)
 
   # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -112,6 +131,7 @@ defmodule DatagroutConduit.Transport.Ws do
     url = Keyword.fetch!(opts, :url)
     auth = Keyword.get(opts, :auth)
     identity = Keyword.get(opts, :identity)
+    ping_interval_ms = Keyword.get(opts, :ping_interval_ms, @ping_interval_ms)
 
     ws_url = to_ws_url(url)
     headers = build_headers(auth)
@@ -124,12 +144,22 @@ defmodule DatagroutConduit.Transport.Ws do
 
     case Conn.start_link(ws_url, conn_opts) do
       {:ok, conn_pid} ->
-        {:ok, %__MODULE__{conn_pid: conn_pid}}
+        state = %__MODULE__{conn_pid: conn_pid, ping_interval_ms: ping_interval_ms}
+        schedule_ping(state)
+        {:ok, state}
 
       {:error, reason} ->
         {:stop, reason}
     end
   end
+
+  # Schedule the next ping tick.  No-op when ping_interval_ms <= 0 so tests
+  # can disable pinging entirely by passing 0.
+  defp schedule_ping(%__MODULE__{ping_interval_ms: interval}) when interval > 0 do
+    Process.send_after(self(), :ping_tick, interval)
+  end
+
+  defp schedule_ping(_), do: nil
 
   # ── GenServer callbacks ────────────────────────────────────────────────────
 
@@ -179,6 +209,10 @@ defmodule DatagroutConduit.Transport.Ws do
     end
   end
 
+  def handle_call(:pings_sent, _from, state) do
+    {:reply, state.pings_sent, state}
+  end
+
   # ── Incoming frame routing ─────────────────────────────────────────────────
 
   @impl true
@@ -189,6 +223,24 @@ defmodule DatagroutConduit.Transport.Ws do
         {:error, _} -> state
       end
 
+    {:noreply, state}
+  end
+
+  # Periodic ping tick — send a WS ping frame to keep the connection alive
+  # past idle-timeout-happy load balancers (nginx, AWS ALB) and reschedule
+  # the next tick.  See @ping_interval_ms doc for rationale.
+  #
+  # Wraps the send in try/catch because WebSockex.send_frame `exit`s rather
+  # than returning when the Conn process has died — without this, every
+  # disconnect would crash the Ws GenServer along with it.
+  def handle_info(:ping_tick, state) do
+    state =
+      case safe_send_ping(state.conn_pid) do
+        :ok -> %{state | pings_sent: state.pings_sent + 1}
+        _ -> state
+      end
+
+    schedule_ping(state)
     {:noreply, state}
   end
 
@@ -300,6 +352,19 @@ defmodule DatagroutConduit.Transport.Ws do
     case Jason.encode(frame) do
       {:ok, json} -> Conn.send_frame(conn_pid, {:text, json})
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Wraps `Conn.send_frame/2` with a try/catch so the Ws GenServer survives
+  # a vanished Conn process — `WebSockex.send_frame/2` exits the caller when
+  # the target client has gone away, which would otherwise take down this
+  # GenServer alongside the dead connection.
+  defp safe_send_ping(conn_pid) do
+    try do
+      Conn.send_frame(conn_pid, {:ping, ""})
+    catch
+      :exit, _ -> {:error, :conn_gone}
+      _kind, _err -> {:error, :send_failed}
     end
   end
 

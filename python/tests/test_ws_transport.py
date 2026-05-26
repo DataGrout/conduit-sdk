@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from datagrout.conduit.transports.ws_transport import (
+    PING_INTERVAL_SECONDS,
     SUBPROTOCOL,
     Subscription,
     SubscriptionEvent,
@@ -430,3 +431,47 @@ async def test_client_unsubscribe_requires_ws_transport():
     client._initialized = True
     with pytest.raises(RuntimeError, match="transport='websocket'"):
         await client.unsubscribe("sub_123")
+
+
+# ── Ping keepalive ────────────────────────────────────────────────────────────
+
+
+def test_ping_interval_constant_is_25_seconds():
+    """Mirror of Rust PING_INTERVAL; must stay aligned for parity."""
+    assert PING_INTERVAL_SECONDS == 25
+
+
+def test_default_ping_interval_matches_constant():
+    """A WsTransport with no explicit ping_interval uses PING_INTERVAL_SECONDS."""
+    t = WsTransport("wss://example.com/ws")
+    assert t._ping_interval == float(PING_INTERVAL_SECONDS)
+
+
+def test_constructor_accepts_ping_interval_override():
+    """Tests / advanced callers can supply a shorter interval for testing."""
+    t = WsTransport("wss://example.com/ws", ping_interval=0.1)
+    assert t._ping_interval == 0.1
+
+
+@pytest.mark.asyncio
+async def test_connect_forwards_ping_interval_to_websockets_library():
+    """``websockets.connect`` must receive both ping_interval and ping_timeout."""
+    t = WsTransport("wss://example.com/ws", ping_interval=42.5)
+
+    captured: Dict[str, Any] = {}
+
+    async def fake_connect(url: str, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return await make_mock_ws()
+
+    with patch(
+        "datagrout.conduit.transports.ws_transport.ws_connect",
+        side_effect=fake_connect,
+    ):
+        await t.connect()
+
+    assert captured.get("ping_interval") == 42.5
+    assert captured.get("ping_timeout") == 42.5
+    assert captured.get("subprotocols") == [SUBPROTOCOL]
+
+    await t.disconnect()

@@ -6,6 +6,105 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] - 2026-05-25
+
+### TL;DR
+
+Two themes:
+
+1. **Client-initiated WebSocket ping keepalive** — new in all five languages.
+   The WS transport now sends a ping every 25 seconds to defeat idle-timeout
+   disconnects from load balancers and reverse proxies (nginx, AWS ALB,
+   Cloudflare).
+2. **Rust subscribe/unsubscribe API surface closes a long-standing parity
+   gap** — TS, Python, Ruby, and Elixir have exposed `Client.subscribe(topic)`
+   / `Client.unsubscribe(id)` since 0.4.0; Rust callers had to reach for
+   `WsTransport.subscribe` directly. The Rust client now has the same surface.
+
+After this release the five SDKs are at **full functional parity** for push
+subscriptions and connection keepalive.
+
+### Added (all five languages — new behaviour)
+
+**Client-initiated WebSocket ping keepalive (25 s).**  The WS transport
+sends a ping frame every `PING_INTERVAL` seconds.  Many load balancers and
+reverse proxies close idle WS connections after 60–120 seconds; pinging
+every 25 seconds keeps the connection alive well within the tightest common
+timeout window.  Long-running push subscriptions that previously died after
+two minutes of quiet traffic now stay open indefinitely.
+
+Each language exposes the interval as a public constant, mirrored across
+the five SDKs:
+
+| Lang       | Constant / accessor                                                  | Override mechanism                                  |
+| ---------- | -------------------------------------------------------------------- | --------------------------------------------------- |
+| Rust       | `ws_transport::PING_INTERVAL` (`Duration::from_secs(25)`)            | private const — recompile or fork                    |
+| TypeScript | `PING_INTERVAL_MS = 25_000` (exported)                               | `WsTransport.setPingInterval(ms)` before `connect()` |
+| Python     | `PING_INTERVAL_SECONDS = 25` (exported)                              | `WsTransport(url, ping_interval=...)` kw            |
+| Ruby       | `Transport::Ws::PING_INTERVAL_SECONDS = 25`                          | `Ws.new(url, ping_interval: ...)` kw                |
+| Elixir     | `DatagroutConduit.Transport.Ws.ping_interval_ms/0` → `25_000`        | `start_link(..., ping_interval_ms: ...)` init opt   |
+
+Per-language wire-up:
+
+- **Rust** — `run_connection` in `ws_transport.rs` fires
+  `Message::Ping(vec![])` on a `tokio::time::interval` tick; if the sink
+  send fails the connection task exits cleanly.
+- **TypeScript** — `setInterval(_, PING_INTERVAL_MS)` set in `connect()`,
+  cleared in `disconnect()` and `onclose`.  Calls the Node `ws.ping()`
+  method when available; silently no-ops in browsers (the spec
+  `WebSocket` API doesn't expose ping).  `Timer.unref()` is invoked when
+  available so the timer does not pin the Node event loop open.
+- **Python** — `ping_interval` and `ping_timeout` are forwarded to
+  `websockets.connect()`, using the library's built-in ping mechanism.
+- **Ruby** — a `conduit-ws-ping` background thread sleeps
+  `@ping_interval` seconds then calls `WebSocket::Driver#ping`; exits
+  cleanly when the driver returns `false` (closing) or `@connected` flips
+  to `false`.  `cleanup_socket` kills the ping thread before tearing down
+  the reader.
+- **Elixir** — `:ping_tick` `handle_info/2` clause sends `{:ping, ""}`
+  through the `Conn` WebSockex process and reschedules itself via
+  `Process.send_after/3`.  A new `safe_send_ping/1` helper catches `:exit`
+  from `WebSockex.send_frame/2` so a vanished Conn does not crash the `Ws`
+  GenServer alongside it.
+
+### Added (Rust — closing the parity gap with the other four SDKs)
+
+These items bring Rust to the same surface the other four languages have
+shipped since 0.4.0; no functional change for TS/Python/Ruby/Elixir.
+
+- **`TransportTrait::subscribe(topic)` / `TransportTrait::unsubscribe(id)`** —
+  promoted from the `WsTransport` inherent impl onto the public transport
+  trait, with default impls that return
+  `Error::Network("subscribe is only supported on the WS transport")` for
+  non-WS transports.  Callers no longer need to downcast.  Mirrors TS's
+  `Client.subscribe` runtime check, Python's analogous guard, Ruby's
+  `Subscription.unsubscribe`, and Elixir's `{:error, :not_ws_transport}`
+  return on non-WS clients.
+- **`Client::subscribe(topic)` / `Client::unsubscribe(id)`** — client-level
+  methods that delegate to the active transport.  Same naming as the
+  corresponding methods on TypeScript, Python, Ruby, and Elixir clients.
+  (No collision with namespace accessors — those are sync methods returning
+  `Logic<'_>` / `Prism<'_>` / `Flow<'_>` namespaced handles.)
+
+### Tests
+
+| Lang       | New tests | Total WS tests | Total package tests |
+| ---------- | --------: | -------------: | ------------------: |
+| Rust       |         0 |              8 |                 105 |
+| TypeScript |        +4 |             30 |                 157 |
+| Python     |        +4 |             32 |                 196 |
+| Ruby       |        +6 |             41 |                 151 |
+| Elixir     |        +5 |             18 |                 125 |
+
+The new tests verify, per language: the public `PING_INTERVAL` constant
+value, the default state, the override mechanism, the timer/thread/tick
+lifecycle, and graceful degradation when the underlying connection has
+gone away.  Rust's existing `ws_transport_tests.rs` suite continues to
+pass; the ping cadence is exercised indirectly by the long-lived
+subscribe→push→unsubscribe lifecycle test.
+
+---
+
 ## [0.6.0] - 2026-05-19
 
 ### Added (all languages)

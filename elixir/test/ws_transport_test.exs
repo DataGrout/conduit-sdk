@@ -281,4 +281,66 @@ defmodule DatagroutConduit.Transport.WsTest do
                )
     end
   end
+
+  # ── Ping keepalive ────────────────────────────────────────────────────────
+
+  describe "ping keepalive" do
+    test "ping_interval_ms/0 returns 25_000 — Rust parity" do
+      assert Ws.ping_interval_ms() == 25_000
+    end
+
+    test "default state initialises ping_interval_ms from the module attribute" do
+      state = %Ws{conn_pid: self()}
+      assert state.ping_interval_ms == 25_000
+      assert state.pings_sent == 0
+    end
+
+    test ":ping_tick degrades gracefully when conn_pid is a non-WebSockex process" do
+      # WebSockex.send_frame `exit`s when the target is not a WebSockex
+      # process; safe_send_ping/1 must catch that so the Ws GenServer
+      # doesn't crash on every disconnect.
+      {:ok, dummy} = Agent.start_link(fn -> nil end)
+      state = %Ws{conn_pid: dummy, ping_interval_ms: 50_000}
+
+      assert {:noreply, new_state} = Ws.handle_info(:ping_tick, state)
+
+      # Send failed, so pings_sent stays at 0 — but the GenServer survived.
+      assert new_state.pings_sent == 0
+      Agent.stop(dummy)
+    end
+
+    test ":ping_tick reschedules itself at ping_interval_ms" do
+      # Use a non-WebSockex conn so the send fails gracefully; we only care
+      # about the reschedule signal here.
+      {:ok, dummy} = Agent.start_link(fn -> nil end)
+      state = %Ws{conn_pid: dummy, ping_interval_ms: 30}
+
+      # First tick fires immediately via direct handle_info call.
+      {:noreply, _state} = Ws.handle_info(:ping_tick, state)
+
+      # Production handler scheduled the NEXT tick — verify it lands in
+      # this process's mailbox within ~100ms.
+      assert_receive :ping_tick, 200
+      Agent.stop(dummy)
+    end
+
+    test "ping_interval_ms = 0 disables rescheduling (no further tick)" do
+      {:ok, dummy} = Agent.start_link(fn -> nil end)
+      state = %Ws{conn_pid: dummy, ping_interval_ms: 0}
+
+      {:noreply, _state} = Ws.handle_info(:ping_tick, state)
+
+      refute_receive :ping_tick, 100
+      Agent.stop(dummy)
+    end
+
+    test "pings_sent/1 returns the live counter through the GenServer API" do
+      # Start a Ws GenServer using the test-only init clause that takes a
+      # pre-built struct; this avoids the real WS handshake.
+      state = %Ws{conn_pid: self(), ping_interval_ms: 0, pings_sent: 7}
+      {:ok, pid} = GenServer.start_link(Ws, state)
+      assert Ws.pings_sent(pid) == 7
+      GenServer.stop(pid)
+    end
+  end
 end

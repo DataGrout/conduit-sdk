@@ -32,6 +32,14 @@ module DatagroutConduit
     class Ws
       SUBPROTOCOL = "datagrout-jsonrpc.v1"
 
+      # Seconds between client-initiated WS ping frames.
+      #
+      # Many load balancers and reverse proxies (nginx, AWS ALB) close idle
+      # WS connections after 60-120 seconds; pinging every 25 seconds keeps
+      # the connection alive well within the tightest common timeout window.
+      # Mirrors PING_INTERVAL in the Rust reference implementation.
+      PING_INTERVAL_SECONDS = 25
+
       # ── Subscription ─────────────────────────────────────────────────────────
 
       # Per-subscription event stream delivered via a thread-safe Queue.
@@ -98,7 +106,7 @@ module DatagroutConduit
 
       # ── Construction ─────────────────────────────────────────────────────────
 
-      def initialize(url:, auth: {}, identity: nil)
+      def initialize(url:, auth: {}, identity: nil, ping_interval: PING_INTERVAL_SECONDS)
         @url      = url
         @auth     = normalize_auth(auth)
         @identity = identity
@@ -113,8 +121,15 @@ module DatagroutConduit
         @io          = nil
         @driver      = nil
         @read_thread = nil
+        @ping_thread = nil
+        @ping_interval = ping_interval.to_f
+        @pings_sent   = 0
         @connected   = false
       end
+
+      # Number of ping frames this transport has sent over its lifetime.
+      # Exposed for tests; production code can ignore it.
+      attr_reader :pings_sent, :ping_interval
 
       # ── Public API ────────────────────────────────────────────────────────────
 
@@ -145,6 +160,7 @@ module DatagroutConduit
         raise ConnectionError, "WebSocket handshake failed: #{err}" if err
 
         @connected = true
+        start_ping_thread
         self
       rescue Timeout::Error
         cleanup_socket
@@ -423,6 +439,7 @@ module DatagroutConduit
       end
 
       def cleanup_socket
+        stop_ping_thread
         @write_mutex.synchronize do
           @driver = nil
         end
@@ -430,6 +447,44 @@ module DatagroutConduit
         @read_thread = nil
         @io&.close rescue nil
         @io = nil
+      end
+
+      # ── Ping keepalive ───────────────────────────────────────────────────────
+
+      # Start the background ping thread. Sends one WS ping frame every
+      # @ping_interval seconds until the connection is torn down. No-op when
+      # @ping_interval is non-positive (used by tests to disable pinging).
+      def start_ping_thread
+        return if @ping_thread
+        return if @ping_interval <= 0
+
+        interval = @ping_interval
+        @ping_thread = Thread.new do
+          loop do
+            sleep interval
+            break unless @connected
+
+            driver = @driver
+            break unless driver
+
+            begin
+              # WebSocket::Driver#ping returns false if the connection is
+              # already closing; treat that as "stop the loop" too.
+              @write_mutex.synchronize { driver.ping } || break
+              @pings_sent += 1
+            rescue StandardError
+              break
+            end
+          end
+        end
+        @ping_thread.abort_on_exception = false
+        @ping_thread.name = "conduit-ws-ping"
+      end
+
+      def stop_ping_thread
+        thread = @ping_thread
+        @ping_thread = nil
+        thread&.kill
       end
 
       # ── Helpers ───────────────────────────────────────────────────────────────

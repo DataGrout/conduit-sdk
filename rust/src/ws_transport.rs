@@ -337,11 +337,26 @@ impl TransportTrait for WsTransport {
     fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
     }
+
+    async fn subscribe(&self, topic: String) -> Result<Subscription> {
+        WsTransport::subscribe(self, topic).await
+    }
+
+    async fn unsubscribe(&self, subscription_id: String) -> Result<()> {
+        WsTransport::unsubscribe(self, subscription_id).await
+    }
 }
 
 // ─── Connection task ────────────────────────────────────────────────────────
 
 type WsStream<S> = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<S>>;
+
+/// Interval between client-side WS ping frames.
+///
+/// Many load balancers and reverse proxies (nginx, AWS ALB) close idle WS
+/// connections after 60–120 seconds. Sending a ping every 25 seconds keeps
+/// the connection alive well within the tightest common timeout window.
+const PING_INTERVAL: Duration = Duration::from_secs(25);
 
 async fn run_connection(
     ws_stream: WsStream<tokio::net::TcpStream>,
@@ -350,6 +365,11 @@ async fn run_connection(
 ) {
     let (mut sink, mut stream) = ws_stream.split();
     let mut state = ConnectionState::new();
+
+    // Consume the immediate first tick so the first ping fires after the
+    // interval, not instantly on connect.
+    let mut ping_timer = tokio::time::interval(PING_INTERVAL);
+    ping_timer.tick().await;
 
     loop {
         tokio::select! {
@@ -477,7 +497,10 @@ async fn run_connection(
                     Ok(Message::Ping(payload)) => {
                         let _ = sink.send(Message::Pong(payload)).await;
                     }
-                    Ok(Message::Pong(_)) => {}
+                    Ok(Message::Pong(_)) => {
+                        // Keepalive acknowledged — reset is implicit via the
+                        // interval; nothing to track.
+                    }
                     Ok(Message::Close(_)) => {
                         break;
                     }
@@ -488,6 +511,14 @@ async fn run_connection(
                         fail_all(&mut state, &format!("WS read error: {e}"));
                         break;
                     }
+                }
+            }
+
+            // Keepalive: send a ping every PING_INTERVAL to prevent idle
+            // timeout disconnects from load balancers and proxies.
+            _ = ping_timer.tick() => {
+                if sink.send(Message::Ping(vec![])).await.is_err() {
+                    break;
                 }
             }
         }

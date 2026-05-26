@@ -58,6 +58,13 @@ SUBPROTOCOL = "datagrout-jsonrpc.v1"
 # Maximum events buffered per subscription before the oldest is dropped.
 _SUBSCRIPTION_BUFFER = 256
 
+# Interval (seconds) between client-initiated WS ping frames.  Many load
+# balancers and reverse proxies (nginx, AWS ALB) close idle WS connections
+# after 60-120 seconds; pinging every 25 seconds keeps the connection alive
+# well within the tightest common timeout window.  Mirrors PING_INTERVAL in
+# the Rust reference implementation.
+PING_INTERVAL_SECONDS = 25
+
 
 # ── Public types ──────────────────────────────────────────────────────────────
 
@@ -145,6 +152,7 @@ class WsTransport(Transport):
         url: str,
         auth: Optional[Dict[str, Any]] = None,
         identity: Optional[Any] = None,
+        ping_interval: Optional[float] = None,
         **_kwargs: Any,
     ) -> None:
         from urllib.parse import urlparse
@@ -156,6 +164,12 @@ class WsTransport(Transport):
         self._url = url
         self._auth = auth or {}
         self._identity = identity
+
+        # Seconds between client-initiated ping frames.  Defaults to
+        # PING_INTERVAL_SECONDS; tests may override with a small value.
+        self._ping_interval: float = (
+            ping_interval if ping_interval is not None else float(PING_INTERVAL_SECONDS)
+        )
 
         self._ws: Optional[ClientConnection] = None
         self._recv_task: Optional[asyncio.Task] = None
@@ -182,6 +196,15 @@ class WsTransport(Transport):
         connect_kwargs: Dict[str, Any] = {
             "additional_headers": extra_headers,
             "subprotocols": [SUBPROTOCOL],
+            # Client-initiated WebSocket ping every PING_INTERVAL seconds.
+            # Many load balancers and proxies (nginx, AWS ALB) close idle WS
+            # connections after 60-120 seconds; pinging every 25 seconds keeps
+            # the connection alive well within the tightest common timeout
+            # window.  Mirrors PING_INTERVAL in the Rust reference impl.
+            "ping_interval": self._ping_interval,
+            # Generous pong-deadline: connection is considered dead only if
+            # the server fails to ack the ping for an entire interval.
+            "ping_timeout": self._ping_interval,
         }
         if ssl_ctx is not None:
             connect_kwargs["ssl"] = ssl_ctx

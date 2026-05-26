@@ -35,6 +35,20 @@ export const SUBPROTOCOL = "datagrout-jsonrpc.v1";
 /** Maximum events buffered per subscription before the oldest is dropped. */
 const SUBSCRIPTION_BUFFER = 256;
 
+/**
+ * Interval (ms) between client-initiated WS ping frames.
+ *
+ * Many load balancers and reverse proxies (nginx, AWS ALB) close idle WS
+ * connections after 60-120 seconds. Sending a ping every 25 seconds keeps
+ * the connection alive well within the tightest common timeout window.
+ *
+ * Mirrors the `PING_INTERVAL` constant in the Rust reference implementation.
+ * In browsers, the underlying WebSocket does not expose a ping API, so the
+ * keepalive is a no-op there; users behind aggressive proxies should rely on
+ * application-level traffic or a proxy with longer idle timeouts.
+ */
+export const PING_INTERVAL_MS = 25_000;
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 /** A single server-pushed notification. */
@@ -155,6 +169,19 @@ export class WsTransport extends Transport {
   private readonly _pendingSubscribe = new Map<string, PendingSubscribe>();
   private readonly _subscriptions = new Map<string, Subscription>();
 
+  /**
+   * Handle for the recurring ping timer; non-null only while connected.
+   * Cleared on disconnect / close.  Set indirectly via {@link _startPingTimer}.
+   */
+  private _pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Interval in ms between client-initiated ping frames.  Public-readable so
+   * tests can inject a small value via {@link WsTransport.setPingInterval};
+   * defaults to {@link PING_INTERVAL_MS}.
+   */
+  private _pingIntervalMs: number = PING_INTERVAL_MS;
+
   constructor(
     url: string,
     auth?: AuthConfig,
@@ -200,16 +227,19 @@ export class WsTransport extends Transport {
     ws.onerror = (_ev: Event) => this._failAll("WS connection error");
     ws.onclose = () => {
       this._failAll("WS connection closed");
+      this._stopPingTimer();
       this._ws = null;
     };
 
     this._ws = ws;
+    this._startPingTimer();
   }
 
   async disconnect(): Promise<void> {
     const ws = this._ws;
     this._ws = null;
 
+    this._stopPingTimer();
     this._failAll("WS connection closed");
 
     if (ws !== null) {
@@ -218,6 +248,58 @@ export class WsTransport extends Transport {
       } catch {
         // ignore
       }
+    }
+  }
+
+  // ── Ping keepalive ────────────────────────────────────────────────────────
+
+  /**
+   * Override the ping interval (ms) — used by tests to avoid 25-second waits.
+   * Must be called BEFORE {@link connect}; has no effect on an already-running
+   * timer.  In production code, leave the default ({@link PING_INTERVAL_MS}).
+   */
+  setPingInterval(intervalMs: number): void {
+    this._pingIntervalMs = intervalMs;
+  }
+
+  /** Tracks how many ping frames this transport has sent — for tests. */
+  get pingsSent(): number {
+    return this._pingsSent;
+  }
+  private _pingsSent = 0;
+
+  private _startPingTimer(): void {
+    if (this._pingTimer !== null || this._pingIntervalMs <= 0) return;
+
+    this._pingTimer = setInterval(() => {
+      const ws = this._ws as unknown as {
+        ping?: (data?: Buffer | string) => void;
+        readyState?: number;
+      } | null;
+      if (ws === null) return;
+
+      // The Node `ws` package exposes `ws.ping()`.  Browser WebSocket does
+      // NOT expose ping, so we silently skip the keepalive there — proxies
+      // would need longer idle timeouts in that case.
+      if (typeof ws.ping === "function") {
+        try {
+          ws.ping();
+          this._pingsSent += 1;
+        } catch {
+          // Connection going away; the onclose handler will tidy up.
+        }
+      }
+    }, this._pingIntervalMs);
+
+    // In Node, prevent the ping timer from holding the event loop open.
+    const t = this._pingTimer as unknown as { unref?: () => void };
+    if (typeof t.unref === "function") t.unref();
+  }
+
+  private _stopPingTimer(): void {
+    if (this._pingTimer !== null) {
+      clearInterval(this._pingTimer);
+      this._pingTimer = null;
     }
   }
 

@@ -442,4 +442,67 @@ class WsTransportTest < Minitest::Test
     headers = ws.send(:build_upgrade_headers)
     assert_empty headers
   end
+
+  # ── Ping keepalive ──────────────────────────────────────────────────────────
+
+  def test_ping_interval_constant_is_25_seconds
+    # Mirror of Rust PING_INTERVAL; must stay aligned for parity.
+    assert_equal 25, DatagroutConduit::Transport::Ws::PING_INTERVAL_SECONDS
+  end
+
+  def test_default_ping_interval_matches_constant
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws")
+    assert_in_delta DatagroutConduit::Transport::Ws::PING_INTERVAL_SECONDS, ws.ping_interval, 0.001
+  end
+
+  def test_constructor_accepts_ping_interval_override
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.05)
+    assert_in_delta 0.05, ws.ping_interval, 0.001
+  end
+
+  def test_pings_sent_starts_at_zero
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.05)
+    assert_equal 0, ws.pings_sent
+  end
+
+  def test_ping_thread_fires_pings_against_a_driver_double
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
+
+    # Drive the ping loop without a real socket: install a driver double and
+    # mark @connected so start_ping_thread keeps iterating.
+    ping_calls = 0
+    driver = Object.new
+    driver.define_singleton_method(:ping) { ping_calls += 1; true }
+    ws.instance_variable_set(:@driver, driver)
+    ws.instance_variable_set(:@connected, true)
+
+    ws.send(:start_ping_thread)
+    sleep 0.08
+    ws.send(:stop_ping_thread)
+    ws.instance_variable_set(:@connected, false)
+
+    assert ping_calls >= 1, "expected at least 1 ping in 80ms with 20ms interval; got #{ping_calls}"
+    assert ws.pings_sent >= 1
+  end
+
+  def test_ping_thread_exits_when_driver_returns_false
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
+    driver = Object.new
+    driver.define_singleton_method(:ping) { false }  # simulates closing connection
+    ws.instance_variable_set(:@driver, driver)
+    ws.instance_variable_set(:@connected, true)
+
+    ws.send(:start_ping_thread)
+    sleep 0.08
+    refute ws.instance_variable_get(:@ping_thread)&.alive?,
+           "ping thread should exit when driver#ping returns false"
+    ws.instance_variable_set(:@connected, false)
+  end
+
+  def test_stop_ping_thread_is_idempotent
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
+    ws.send(:stop_ping_thread)  # nothing to stop
+    ws.send(:stop_ping_thread)  # still nothing to stop
+    assert true # if we got here without an exception, it's idempotent
+  end
 end
