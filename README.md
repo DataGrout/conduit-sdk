@@ -15,11 +15,11 @@ Drop-in replacement for standard MCP clients. Swap one import line and your agen
 
 | Language | Package | Install |
 |----------|---------|---------|
-| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.5.0` |
-| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.5.0` |
-| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.5.0` |
-| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.5.0"}` |
-| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.5.0` |
+| **Python** | `datagrout-conduit` | `pip install datagrout-conduit==0.7.0` |
+| **TypeScript** | `@datagrout/conduit` | `npm install @datagrout/conduit@0.7.0` |
+| **Rust** | `datagrout-conduit` | `cargo add datagrout-conduit@0.7.0` |
+| **Elixir** | `datagrout_conduit` | `{:datagrout_conduit, "~> 0.7.0"}` |
+| **Ruby** | `datagrout-conduit` | `gem install datagrout-conduit -v 0.7.0` |
 
 ## New to DataGrout? Start here.
 
