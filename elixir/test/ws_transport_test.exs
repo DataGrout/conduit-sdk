@@ -295,25 +295,42 @@ defmodule DatagroutConduit.Transport.WsTest do
       assert state.pings_sent == 0
     end
 
-    test ":ping_tick degrades gracefully when conn_pid is a non-WebSockex process" do
-      # WebSockex.send_frame `exit`s when the target is not a WebSockex
-      # process; safe_send_ping/1 must catch that so the Ws GenServer
-      # doesn't crash on every disconnect.
-      {:ok, dummy} = Agent.start_link(fn -> nil end)
-      state = %Ws{conn_pid: dummy, ping_interval_ms: 50_000}
+    # Helper: returns a freshly-dead pid.  `WebSockex.send_frame/2` exits
+    # with `:noproc` immediately when called against a dead pid — exactly
+    # the production crash scenario `safe_send_ping/1` is designed to
+    # catch — and it avoids both the 5-second `:gen.call` timeout and the
+    # noisy `[error] Agent.Server received unexpected message …` lines
+    # that an `Agent.start_link/1` dummy would emit when poked with the
+    # `:"$websockex_send"` protocol.
+    defp dead_pid do
+      pid = spawn(fn -> :ok end)
+      ref = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _} -> :ok
+      after
+        500 -> flunk("spawned process did not exit in time")
+      end
+
+      pid
+    end
+
+    test ":ping_tick degrades gracefully when the Conn process has died" do
+      # WebSockex.send_frame `exit`s when the target Conn is gone;
+      # safe_send_ping/1 must catch that so the Ws GenServer doesn't
+      # crash alongside it.
+      state = %Ws{conn_pid: dead_pid(), ping_interval_ms: 50_000}
 
       assert {:noreply, new_state} = Ws.handle_info(:ping_tick, state)
 
       # Send failed, so pings_sent stays at 0 — but the GenServer survived.
       assert new_state.pings_sent == 0
-      Agent.stop(dummy)
     end
 
     test ":ping_tick reschedules itself at ping_interval_ms" do
-      # Use a non-WebSockex conn so the send fails gracefully; we only care
-      # about the reschedule signal here.
-      {:ok, dummy} = Agent.start_link(fn -> nil end)
-      state = %Ws{conn_pid: dummy, ping_interval_ms: 30}
+      # Dead conn so the send fails fast; we only care about the
+      # reschedule signal here.
+      state = %Ws{conn_pid: dead_pid(), ping_interval_ms: 30}
 
       # First tick fires immediately via direct handle_info call.
       {:noreply, _state} = Ws.handle_info(:ping_tick, state)
@@ -321,17 +338,14 @@ defmodule DatagroutConduit.Transport.WsTest do
       # Production handler scheduled the NEXT tick — verify it lands in
       # this process's mailbox within ~100ms.
       assert_receive :ping_tick, 200
-      Agent.stop(dummy)
     end
 
     test "ping_interval_ms = 0 disables rescheduling (no further tick)" do
-      {:ok, dummy} = Agent.start_link(fn -> nil end)
-      state = %Ws{conn_pid: dummy, ping_interval_ms: 0}
+      state = %Ws{conn_pid: dead_pid(), ping_interval_ms: 0}
 
       {:noreply, _state} = Ws.handle_info(:ping_tick, state)
 
       refute_receive :ping_tick, 100
-      Agent.stop(dummy)
     end
 
     test "pings_sent/1 returns the live counter through the GenServer API" do
