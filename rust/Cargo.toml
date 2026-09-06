@@ -55,6 +55,9 @@ webpki-roots = "0.26"
 # Base64 for basic auth
 base64 = "0.21"
 
+# PKCE code challenge (SHA-256) for the authorization-code grant
+sha2 = { version = "0.10", optional = true }
+
 # Certificate generation for identity registration
 rcgen = { version = "0.13", optional = true }
 # Time handling for certificate validity (used by rcgen)
@@ -77,12 +80,23 @@ full = ["tracing-subscriber"]
 registration = ["dep:rcgen", "dep:time"]
 # Enables the two-step DG onramp handshake (autonomous agent registration)
 onramp = []
+# OAuth 2.1 authorization-code + PKCE (browser consent, for user-facing apps)
+authcode = ["dep:sha2"]
+# Adds the 127.0.0.1 redirect listener. Needs no extra dependency in Rust; the
+# split exists so the surface matches the other conduit SDKs, where a local HTTP
+# server IS a dependency, and so headless callers can skip it.
+authcode-loopback = ["authcode"]
 # Full self-service bootstrap: onramp handshake + mTLS identity registration
 bootstrap = ["onramp", "registration"]
 
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[[example]]
+name = "browser_signin"
+path = "examples/browser_signin.rs"
+required-features = ["authcode-loopback"]
 
 [[example]]
 name = "discovery"

@@ -6,6 +6,115 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+> **Release gate:** this version is **not tagged until every language has
+> shipped the changes below.** Parity is the promise; a one-language release is
+> how a temporary gap becomes a permanent one. Track progress in the porting
+> brief at the end of this section.
+>
+> | language | authcode | WS OAuth handshake fix |
+> |---|---|---|
+> | Rust (reference) | ✅ | ✅ |
+> | TypeScript | ☐ | ☐ |
+> | Python | ☐ | ☐ |
+> | Ruby | ☐ | ☐ |
+> | Elixir | ☐ | ☐ |
+
+### Fixed — OAuth tokens now authenticate the WebSocket handshake
+
+`WsTransport::connect` resolves an asynchronously-fetched bearer **before**
+building the handshake request. `build_handshake_request` is synchronous, so
+previously a provider-backed token could never reach the upgrade — an OAuth
+client authenticated over WS only if it also happened to present an mTLS
+identity. This affected `client_credentials` from the start; it is fixed for
+both grants.
+
+Behaviour change for existing `client_credentials` users: WS upgrades now carry
+an `Authorization: Bearer` header. Servers that were relying on the absence of
+that header will see it.
+
+### Added — OAuth 2.1 authorization code + PKCE (Rust only so far)
+
+Browser-consent sign-in, behind the new `authcode` feature. Until now every
+conduit SDK could authenticate a *machine* (`client_credentials`, or the onramp
+handshake that ends in one) but none could authenticate a *person*. That made
+`https://gateway.datagrout.ai/connect` — where the server binding is chosen at
+consent time and lives in the token rather than the URL — unreachable from a
+desktop or CLI application.
+
+- `authcode::AuthCodeFlow` — RFC 8414/9728 discovery → RFC 7591 dynamic client
+  registration (as a **public client**, `token_endpoint_auth_method: "none"`) →
+  PKCE authorize URL → code exchange.
+- `authcode::Grant` — the persistable authorization, with `refresh()`.
+- `authcode::RegisteredClient` — a client id **paired with its redirect URI**.
+  `register()` returns this rather than a bare id, and
+  `AuthCodeFlow::with_registered_client` restores it. The pairing is not
+  bookkeeping: the authorization server matches redirect URIs exactly, with no
+  loopback-port exemption, so an id saved without its URI cannot be reused.
+- `loopback::Listener::bind_for(redirect_uri)` — re-bind the exact port and
+  path of a saved registration, failing loudly if that port is taken (recover by
+  registering a new client, not by retrying).
+- `authcode::AuthCodeProvider` — caches and refreshes, mirroring
+  `OAuthTokenProvider`; `take_if_dirty()` surfaces a rotated grant for
+  re-persisting.
+- `authcode::loopback::Listener` (feature `authcode-loopback`) — one-shot
+  `127.0.0.1` redirect capture.
+- `ClientBuilder::auth_authorization_code(grant)` and
+  `auth_authorization_code_provider(provider)`.
+- Example: `cargo run --example browser_signin --features authcode-loopback`.
+
+**Additive:** with the feature off, nothing changes. The new
+`AuthConfig::AuthorizationCode` variant resolves through the same
+`inject_oauth_token` choke point as `ClientCredentials`, so every transport and
+the 401-retry path pick it up unchanged.
+
+**WebSocket:** `connect()` now resolves an async bearer before building the
+handshake, so authorization-code grants authenticate over WS.
+`ClientCredentials` keeps its existing WS behaviour (mTLS, or a token in the
+first subscribe frame) — the same treatment would likely suit it, but that
+would change existing behaviour and is left for a separate change.
+
+### Porting brief — TypeScript, Python, Ruby, Elixir
+
+Rust is the reference. Idiomatic parity means the semantics port, not the
+signatures. Invariants that must hold in every language:
+
+1. **The `Grant` JSON shape is identical**, so a grant written by one SDK is
+   readable by another: `access_token`, `refresh_token?`, `expires_at?`,
+   `client_id`, `token_endpoint`, `scope?`, `resource?`. `expires_at` is
+   **Unix seconds** — never a monotonic clock value, which is meaningless once
+   serialized.
+2. **Sequence and error taxonomy match:** discovery → registration → authorize
+   → exchange → refresh, with distinct errors for `Discovery`,
+   `NoRegistrationEndpoint`, `RegistrationRejected`, `NoClientId`,
+   `PkceUnsupported`, `StateMismatch`, `TokenExchange`, `NotRefreshable`,
+   `Denied`, `Http`.
+3. **`state` is verified inside `exchange`**, before any request is sent, using
+   a length-independent comparison. A mismatch is refused, never attempted.
+4. **PKCE is S256 only.** A server advertising only `plain` is refused rather
+   than downgraded; an empty `code_challenge_methods_supported` is treated as
+   "assume S256".
+5. **`resource` (RFC 8707) is sent** on both authorize and token requests, so a
+   token cannot be replayed against a different resource.
+6. **The loopback listener is a separate opt-in** from the flow itself, so
+   headless callers never pull in an HTTP server.
+7. **Storage is the application's job.** The SDK owns the grant's shape and its
+   refresh; it must not choose a file location or a keychain.
+8. **A refresh that returns no new refresh token keeps the old one**, rather
+   than silently making the grant unrefreshable.
+9. **The registered client id and its redirect URI are one persisted unit**, and
+   a saved registration re-binds the same loopback port. Redirect matching is
+   exact; a new random port with an old client id is rejected, and the failure
+   only surfaces once the first grant can no longer be refreshed.
+10. **`DEFAULT_SCOPE` is `"mcp tools"`** — the authorization server's own
+    registration default. It splits the scope string on whitespace and stores
+    what it is given, so an invented scope is accepted silently and then means
+    nothing. Do not "improve" this per language.
+11. **The WS handshake carries the resolved OAuth bearer**, for both grants.
+
+---
+
 ## [0.7.0] - 2026-05-25
 
 ### TL;DR

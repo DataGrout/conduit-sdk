@@ -50,6 +50,15 @@ pub enum AuthConfig {
     /// endpoint on the first request and automatically refreshes it before
     /// it expires.  Application code never handles tokens directly.
     ClientCredentials(OAuthTokenProvider),
+
+    /// OAuth 2.1 **authorization code + PKCE** grant — a user's browser
+    /// consent, rather than a machine credential.
+    ///
+    /// Behaves like [`ClientCredentials`](Self::ClientCredentials) from the
+    /// transport's point of view: the token is fetched asynchronously per
+    /// request and refreshed (via the refresh token) before it expires.
+    #[cfg(feature = "authcode")]
+    AuthorizationCode(crate::authcode::AuthCodeProvider),
 }
 
 /// Base transport trait
@@ -147,6 +156,8 @@ fn build_headers(auth: &AuthConfig) -> header::HeaderMap {
         }
         // Token is fetched asynchronously and injected in send_request.
         AuthConfig::ClientCredentials(_) | AuthConfig::None => {}
+        #[cfg(feature = "authcode")]
+        AuthConfig::AuthorizationCode(_) => {}
     }
 
     headers
@@ -229,15 +240,46 @@ fn accepted_response(request: &JsonRpcRequest) -> JsonRpcResponse {
     }
 }
 
-/// Inject the OAuth bearer token from a `ClientCredentials` provider into an
-/// existing header map.  Returns `Ok(())` if auth is not `ClientCredentials`.
+/// Invalidate a cached OAuth token so the next request fetches a fresh one.
+///
+/// Returns whether this auth mode has a token worth retrying with — the 401
+/// retry path is only worth taking when a refresh could plausibly change the
+/// outcome. A static bearer or API key is rejected for a reason retrying will
+/// not fix.
+async fn invalidate_oauth(auth: &AuthConfig) -> bool {
+    match auth {
+        AuthConfig::ClientCredentials(provider) => {
+            provider.invalidate().await;
+            true
+        }
+        #[cfg(feature = "authcode")]
+        AuthConfig::AuthorizationCode(provider) => {
+            provider.invalidate().await;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Inject an asynchronously-resolved OAuth bearer token into an existing header
+/// map.  A no-op for auth modes whose header is built synchronously.
+///
+/// This is the single place a token provider becomes an `Authorization` header,
+/// which is why adding a grant type touches so little: implement `get_token`
+/// and add an arm here.
 async fn inject_oauth_token(
     auth: &AuthConfig,
     http_client: &HttpClient,
     headers: &mut header::HeaderMap,
 ) -> Result<()> {
-    if let AuthConfig::ClientCredentials(provider) = auth {
-        let token = provider.get_token(http_client).await?;
+    let token = match auth {
+        AuthConfig::ClientCredentials(provider) => Some(provider.get_token(http_client).await?),
+        #[cfg(feature = "authcode")]
+        AuthConfig::AuthorizationCode(provider) => Some(provider.get_token(http_client).await?),
+        _ => None,
+    };
+
+    if let Some(token) = token {
         if let Ok(value) = header::HeaderValue::from_str(&format!("Bearer {}", token)) {
             headers.insert(header::AUTHORIZATION, value);
         }
@@ -364,35 +406,32 @@ impl TransportTrait for McpTransport {
         }
 
         // On 401, invalidate the cached OAuth token and retry once.
-        if response.status() == StatusCode::UNAUTHORIZED {
-            if let AuthConfig::ClientCredentials(provider) = &self.auth {
-                provider.invalidate().await;
-                let mut retry_headers = build_headers(&self.auth);
-                inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
-                {
-                    let sid = self.session_id.read().await;
-                    inject_session_id(&sid, &mut retry_headers);
-                }
-                let retry_resp = self
-                    .client
-                    .post(&self.url)
-                    .headers(retry_headers)
-                    .json(&request)
-                    .send()
-                    .await?;
-                if let Some(rl_err) = check_rate_limit(&retry_resp) {
-                    return Err(rl_err);
-                }
-                if !retry_resp.status().is_success() {
-                    return Err(Error::Auth("OAuth token rejected after refresh".into()));
-                }
-                capture_session_id(&retry_resp, &self.session_id).await;
-                let json_resp = parse_response(retry_resp).await?;
-                if let Some(error) = json_resp.error {
-                    return Err(Error::server(error.code, error.message, error.data));
-                }
-                return Ok(json_resp);
+        if response.status() == StatusCode::UNAUTHORIZED && invalidate_oauth(&self.auth).await {
+            let mut retry_headers = build_headers(&self.auth);
+            inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
+            {
+                let sid = self.session_id.read().await;
+                inject_session_id(&sid, &mut retry_headers);
             }
+            let retry_resp = self
+                .client
+                .post(&self.url)
+                .headers(retry_headers)
+                .json(&request)
+                .send()
+                .await?;
+            if let Some(rl_err) = check_rate_limit(&retry_resp) {
+                return Err(rl_err);
+            }
+            if !retry_resp.status().is_success() {
+                return Err(Error::Auth("OAuth token rejected after refresh".into()));
+            }
+            capture_session_id(&retry_resp, &self.session_id).await;
+            let json_resp = parse_response(retry_resp).await?;
+            if let Some(error) = json_resp.error {
+                return Err(Error::server(error.code, error.message, error.data));
+            }
+            return Ok(json_resp);
         }
 
         capture_session_id(&response, &self.session_id).await;
@@ -497,35 +536,32 @@ impl TransportTrait for JsonRpcTransport {
         }
 
         // On 401, invalidate the cached OAuth token and retry once.
-        if response.status() == StatusCode::UNAUTHORIZED {
-            if let AuthConfig::ClientCredentials(provider) = &self.auth {
-                provider.invalidate().await;
-                let mut retry_headers = build_headers(&self.auth);
-                inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
-                {
-                    let sid = self.session_id.read().await;
-                    inject_session_id(&sid, &mut retry_headers);
-                }
-                let retry_resp = self
-                    .client
-                    .post(&self.url)
-                    .headers(retry_headers)
-                    .json(&request)
-                    .send()
-                    .await?;
-                if let Some(rl_err) = check_rate_limit(&retry_resp) {
-                    return Err(rl_err);
-                }
-                if !retry_resp.status().is_success() {
-                    return Err(Error::Auth("OAuth token rejected after refresh".into()));
-                }
-                capture_session_id(&retry_resp, &self.session_id).await;
-                let json_resp = parse_response(retry_resp).await?;
-                if let Some(error) = json_resp.error {
-                    return Err(Error::server(error.code, error.message, error.data));
-                }
-                return Ok(json_resp);
+        if response.status() == StatusCode::UNAUTHORIZED && invalidate_oauth(&self.auth).await {
+            let mut retry_headers = build_headers(&self.auth);
+            inject_oauth_token(&self.auth, &self.client, &mut retry_headers).await?;
+            {
+                let sid = self.session_id.read().await;
+                inject_session_id(&sid, &mut retry_headers);
             }
+            let retry_resp = self
+                .client
+                .post(&self.url)
+                .headers(retry_headers)
+                .json(&request)
+                .send()
+                .await?;
+            if let Some(rl_err) = check_rate_limit(&retry_resp) {
+                return Err(rl_err);
+            }
+            if !retry_resp.status().is_success() {
+                return Err(Error::Auth("OAuth token rejected after refresh".into()));
+            }
+            capture_session_id(&retry_resp, &self.session_id).await;
+            let json_resp = parse_response(retry_resp).await?;
+            if let Some(error) = json_resp.error {
+                return Err(Error::server(error.code, error.message, error.data));
+            }
+            return Ok(json_resp);
         }
 
         capture_session_id(&response, &self.session_id).await;

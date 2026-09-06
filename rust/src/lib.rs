@@ -154,6 +154,9 @@ pub mod ws_transport;
 #[cfg(feature = "onramp")]
 pub mod onramp;
 
+#[cfg(feature = "authcode")]
+pub mod authcode;
+
 pub use client::{
     is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
     GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
@@ -172,6 +175,11 @@ pub use registration::{
 #[cfg(feature = "onramp")]
 pub use onramp::{
     register_and_exchange, register_only, OnrampCredentials, OnrampError, OnrampOptions,
+};
+
+#[cfg(feature = "authcode")]
+pub use authcode::{
+    AuthCodeError, AuthCodeFlow, AuthCodeProvider, Grant, PendingAuthorization, RegisteredClient,
 };
 pub use transport::{parse_sse_body, Transport};
 pub use types::{

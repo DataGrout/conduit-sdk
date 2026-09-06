@@ -830,6 +830,55 @@ impl ClientBuilder {
         self
     }
 
+    /// Authenticate as a **user**, using a grant obtained through browser
+    /// consent (OAuth 2.1 authorization code + PKCE).
+    ///
+    /// Unlike [`auth_client_credentials`](Self::auth_client_credentials), which
+    /// authenticates a machine holding a secret, this carries a specific
+    /// person's authorization. It is what a desktop or CLI application needs,
+    /// and the only way to use `https://gateway.datagrout.ai/connect`, where
+    /// the server binding is chosen at consent time and lives in the token.
+    ///
+    /// Obtain the [`Grant`](crate::authcode::Grant) with
+    /// [`AuthCodeFlow`](crate::authcode::AuthCodeFlow), and persist it yourself
+    /// — the SDK owns the grant's shape and refresh, not its storage.
+    ///
+    /// The access token is refreshed automatically before expiry, and on a 401.
+    /// Because DataGrout rotates refresh tokens, hold on to the provider (see
+    /// [`AuthCodeProvider::take_if_dirty`](crate::authcode::AuthCodeProvider::take_if_dirty))
+    /// if you want to persist the renewed grant.
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::{ClientBuilder, authcode::Grant};
+    /// # fn demo(grant: Grant) -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/connect")
+    ///     .auth_authorization_code(grant)
+    ///     .build()?;
+    /// # Ok(()) }
+    /// ```
+    #[cfg(feature = "authcode")]
+    pub fn auth_authorization_code(mut self, grant: crate::authcode::Grant) -> Self {
+        self.auth = Some(AuthConfig::AuthorizationCode(
+            crate::authcode::AuthCodeProvider::new(grant),
+        ));
+        self
+    }
+
+    /// Like [`auth_authorization_code`](Self::auth_authorization_code) but
+    /// reuses an existing provider.
+    ///
+    /// Use this when the application already holds the provider in order to
+    /// watch it for refreshed grants, so both share one token and one refresh.
+    #[cfg(feature = "authcode")]
+    pub fn auth_authorization_code_provider(
+        mut self,
+        provider: crate::authcode::AuthCodeProvider,
+    ) -> Self {
+        self.auth = Some(AuthConfig::AuthorizationCode(provider));
+        self
+    }
+
     /// Provide an explicit mTLS identity (client certificate + key).
     ///
     /// When set, every connection will present this certificate during the TLS

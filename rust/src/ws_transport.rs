@@ -236,7 +236,11 @@ impl TransportTrait for WsTransport {
             return Ok(());
         }
 
-        let request = build_handshake_request(&self.url, &self.auth)?;
+        // Resolve any asynchronously-fetched bearer BEFORE the handshake:
+        // `build_handshake_request` is sync, so a provider-backed token can
+        // only reach the upgrade request if it is already in hand.
+        let resolved = resolve_async_token(&self.auth).await?;
+        let request = build_handshake_request(&self.url, &self.auth, resolved.as_deref())?;
         let connector = build_connector(self.identity.as_ref())?;
 
         let (ws_stream, response) =
@@ -637,7 +641,27 @@ fn fail_all(state: &mut ConnectionState, msg: &str) {
 
 // ─── Handshake helpers ──────────────────────────────────────────────────────
 
-fn build_handshake_request(url: &str, auth: &AuthConfig) -> Result<WsRequest> {
+/// Resolve a bearer token for auth modes whose token is fetched asynchronously.
+///
+/// Both OAuth grants are resolved here. `build_handshake_request` is sync, so
+/// this is the only point at which a provider-backed credential can reach the
+/// upgrade request — without it, an OAuth client authenticates over WS only if
+/// it also happens to present an mTLS identity.
+async fn resolve_async_token(auth: &AuthConfig) -> Result<Option<String>> {
+    let http = reqwest::Client::new();
+    match auth {
+        AuthConfig::ClientCredentials(provider) => Ok(Some(provider.get_token(&http).await?)),
+        #[cfg(feature = "authcode")]
+        AuthConfig::AuthorizationCode(provider) => Ok(Some(provider.get_token(&http).await?)),
+        _ => Ok(None),
+    }
+}
+
+fn build_handshake_request(
+    url: &str,
+    auth: &AuthConfig,
+    resolved_token: Option<&str>,
+) -> Result<WsRequest> {
     let mut request = url
         .into_client_request()
         .map_err(|e| Error::invalid_url(format!("invalid WS URL: {e}")))?;
@@ -649,12 +673,24 @@ fn build_handshake_request(url: &str, auth: &AuthConfig) -> Result<WsRequest> {
         HeaderValue::from_static(SUBPROTOCOL),
     );
 
-    match auth {
-        AuthConfig::None | AuthConfig::ClientCredentials(_) => {
-            // ClientCredentials is async; tokens can be carried in the
-            // initial subscribe frame instead. mTLS is the recommended
-            // auth path for WS.
+    // A pre-resolved token wins: it is the only way an async provider's
+    // credential can reach the upgrade request.
+    if let Some(token) = resolved_token {
+        if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
+            headers.insert(AUTHORIZATION, value);
         }
+        return Ok(request);
+    }
+
+    match auth {
+        AuthConfig::None => {}
+        // Both OAuth grants are resolved by `connect` and arrive as
+        // `resolved_token` above. Reaching here means the caller built a
+        // handshake without resolving first; sending no credential is better
+        // than sending a wrong one, and the server's 401 is legible.
+        AuthConfig::ClientCredentials(_) => {}
+        #[cfg(feature = "authcode")]
+        AuthConfig::AuthorizationCode(_) => {}
         AuthConfig::Bearer(token) => {
             if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
                 headers.insert(AUTHORIZATION, value);
@@ -745,7 +781,7 @@ mod tests {
 
     #[test]
     fn handshake_includes_subprotocol() {
-        let req = build_handshake_request("wss://example.com/ws", &AuthConfig::None).unwrap();
+        let req = build_handshake_request("wss://example.com/ws", &AuthConfig::None, None).unwrap();
         let value = req
             .headers()
             .get(SEC_WEBSOCKET_PROTOCOL)
@@ -756,9 +792,12 @@ mod tests {
 
     #[test]
     fn handshake_carries_bearer_token() {
-        let req =
-            build_handshake_request("wss://example.com/ws", &AuthConfig::Bearer("abc123".into()))
-                .unwrap();
+        let req = build_handshake_request(
+            "wss://example.com/ws",
+            &AuthConfig::Bearer("abc123".into()),
+            None,
+        )
+        .unwrap();
         let value = req
             .headers()
             .get(AUTHORIZATION)
@@ -775,6 +814,7 @@ mod tests {
                 username: "alice".into(),
                 password: "s3cret".into(),
             },
+            None,
         )
         .unwrap();
         let value = req
