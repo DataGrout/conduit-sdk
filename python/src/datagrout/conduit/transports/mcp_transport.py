@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from .base import Transport
+from .._version import __version__
 from ..errors import (
     AuthError,
     NetworkError,
@@ -145,7 +146,7 @@ class MCPTransport(Transport):
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "datagrout-conduit", "version": "0.1.0"},
+                "clientInfo": {"name": "datagrout-conduit", "version": __version__},
             },
         }
 

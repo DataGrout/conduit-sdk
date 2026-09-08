@@ -6,7 +6,33 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.8.0] - 2026-09-08
+
+### TL;DR
+
+Three themes:
+
+1. **The SDKs can authenticate a person, not just a machine.** OAuth 2.1
+   authorization code + PKCE lands in all five languages. Until now every
+   conduit SDK could authenticate a *machine* — `client_credentials`, or the
+   onramp handshake that ends in one — which left
+   `https://gateway.datagrout.ai/connect` unreachable, because the server
+   binding there is chosen at consent time and lives in the token rather than
+   the URL. Desktop and CLI applications can now sign a user in.
+2. **The WebSocket handshake actually authenticates.** Four of the five sent no
+   usable credential on the upgrade, for three different underlying reasons,
+   and two of them dropped an mTLS identity they had been handed. Elixir also
+   performed no server verification at all without an identity.
+3. **The cross-language contract is enforced rather than described.**
+   `testdata/contract.json` pins the grant shape, the persisted client, the
+   default scope and the error taxonomy, and every language's suite loads it.
+
+**Behaviour changes for existing users**, none of them tied to the new grant:
+WebSocket upgrades now carry an `Authorization` header for `client_credentials`
+in Rust, TypeScript, Python and Elixir; Elixir `wss://` now refuses a server
+certificate it cannot verify, where it previously accepted anything; and an
+Elixir HTTP 401 now refreshes and retries once instead of surfacing
+immediately. Details in the sections below.
 
 > **Release gate: met.** This version was not to be tagged until every language
 > had shipped the changes below. Parity is the promise; a one-language release

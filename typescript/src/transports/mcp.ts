@@ -2,6 +2,7 @@
  * MCP transport implementation using official SDK
  */
 
+import { version } from "../version";
 import { Transport } from "./base";
 import type { AuthConfig, MCPTool, MCPResource, MCPPrompt } from "../types";
 import type { ConduitIdentity } from "../identity";
@@ -114,7 +115,7 @@ export class MCPTransport extends Transport {
     }
 
     this.client = new Client(
-      { name: "datagrout-conduit", version: "0.1.0" },
+      { name: "datagrout-conduit", version },
       { capabilities: {} },
     );
 

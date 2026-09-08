@@ -70,7 +70,7 @@ from .types import (
     RateLimitStatus,
 )
 
-__version__ = "0.5.0"
+from ._version import __version__ as __version__  # re-export
 
 __all__ = [
     # Client

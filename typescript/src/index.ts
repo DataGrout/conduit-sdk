@@ -66,4 +66,4 @@ export type * from "./types";
 export { registerOnly, registerAndExchange } from "./onramp";
 export type { OnrampOptions, OnrampCredentials } from "./onramp";
 
-export const version = "0.5.0";
+export { version } from "./version";
