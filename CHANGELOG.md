@@ -8,10 +8,9 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-> **Release gate:** this version is **not tagged until every language has
-> shipped the changes below.** Parity is the promise; a one-language release is
-> how a temporary gap becomes a permanent one. Track progress in the porting
-> brief at the end of this section.
+> **Release gate: met.** This version was not to be tagged until every language
+> had shipped the changes below. Parity is the promise; a one-language release
+> is how a temporary gap becomes a permanent one. All five are in.
 >
 > | language | authcode | WS OAuth handshake fix |
 > |---|---|---|
@@ -19,7 +18,14 @@ This project follows [Semantic Versioning](https://semver.org/).
 > | TypeScript | ✅ | ✅ |
 > | Python | ✅ | ✅ |
 > | Ruby | ✅ | n/a — never broken, see below |
-> | Elixir | ☐ | ☐ |
+> | Elixir | ✅ | ✅ |
+>
+> The WS column is not one bug in five places. Rust, TypeScript and Python built
+> the upgrade headers synchronously and so could never attach an
+> asynchronously-fetched token; Elixir interpolated the `{:ok, token}` tuple and
+> sent a malformed bearer; Ruby resolves synchronously and was always correct.
+> Same symptom in four of them, three different causes. Each language section
+> below says which applied.
 
 ### Fixed — OAuth tokens now authenticate the WebSocket handshake
 
@@ -96,7 +102,7 @@ all, so *neither* grant authenticated over WS. Both do now, and the token
 endpoint is derived from the `ws://` URL with the scheme mapped across to
 `http://`, since a `ws://` token endpoint is nonsense.
 
-Example: `npx tsx examples/browserSignin.ts`. 56 new tests, including a
+Example: `npx tsx examples/browserSignin.ts`. 65 new tests, including a
 capturing WebSocket stub that drives the real `connect()` — the bug lived in
 exactly the wiring that the existing mocked-transport tests skip.
 
@@ -125,7 +131,7 @@ token endpoint is derived from the `ws://` URL with the scheme mapped across to
 `http://`. The transport closes the `httpx` client it creates for token fetches
 on disconnect.
 
-Example: `python examples/browser_signin.py`. 92 new tests: the loopback suite
+Example: `python examples/browser_signin.py`. 102 new tests: the loopback suite
 binds real sockets and drives them with real requests, and the WS suite drives
 the real `connect()` and reads the headers handed to `websockets`. The transport
 suite runs every case against both HTTP transports, which carry independent
@@ -156,10 +162,70 @@ directly; the async SDKs had to hoist that out of header construction to reach
 the same place. The authorization-code grant joins `client_credentials` on that
 path, and the tests now pin both down.
 
-Example: `ruby -Ilib examples/browser_signin.rb`. 84 new tests: the loopback
+Example: `ruby -Ilib examples/browser_signin.rb`. 94 new tests: the loopback
 suite binds real sockets and drives them with raw HTTP requests, and the
 transport suite runs each case against MCP, JSONRPC and WebSocket, since the
 three build their headers independently.
+
+#### Elixir
+
+The same surface, as plain functions over a struct rather than a process: the
+flow is short-lived and sequential, so `DatagroutConduit.AuthCode.discover/1`,
+`register/3`, `authorize_url/1` and `exchange/4` thread a `%AuthCode{}` and
+return `{:ok, ...} | {:error, %AuthCode.Error{}}`. `register/3` returns
+`{:ok, registered, flow}` because there is nothing to mutate. The error taxonomy
+is one exception struct carrying a `:kind` atom, which is what an Elixir caller
+pattern-matches on. `AuthCode.Grant`, `RegisteredClient` and `ServerMetadata`
+carry `to_map/1` and `from_map/1` producing the cross-language shape, with
+absent optionals omitted rather than written as nulls.
+
+`AuthCode.Provider` is a GenServer mirroring `DatagroutConduit.OAuth` — same
+`get_token/1` and `invalidate/1` — and `take_if_dirty/1` returns `{:ok, grant}`
+or `:clean`. `auth: {:authorization_code, ...}` accepts a `Grant`, a grant map
+straight from JSON, or a running provider. `AuthCode.Loopback` lives in its own
+module, mirroring the Rust feature split, and runs on `:gen_tcp` — no new
+dependency.
+
+**New: `DatagroutConduit.Auth`.** Resolving auth, invalidating it, and turning
+it into headers now live in one module that every transport calls, which is what
+lets the two grants share a single path. Three things were wrong before, and all
+three are fixed by routing through it:
+
+- The WS upgrade interpolated the `{:ok, token}` tuple that `get_token` returns,
+  so it sent `Authorization: Bearer {:ok, "…"}`. An OAuth client authenticated
+  over WS only if it also happened to present an mTLS identity — the same
+  outcome as the other SDKs, by a different route.
+- The client never passed a provider into the transports' request options, so
+  the 401-refresh path in both HTTP transports was unreachable.
+- Even when reached, the retry reused the `Req` struct built with the stale
+  header, so it would have re-sent the token that had just been rejected. The
+  transports now invalidate, rebuild the header, and retry once.
+- A token fetch that *failed* was logged and dropped, and the request went out
+  with no `Authorization` header at all. The caller then saw a bare 401 — a
+  round trip later, and saying nothing about why the token could not be had.
+  Elixir was the only SDK that did this; the other four propagate. `resolve/1`
+  now returns `{:ok, resolved} | {:error, reason}` and callers surface
+  `{:auth_error, reason}` rather than sending the request unauthenticated.
+  The WebSocket transport refuses to start, since the token rides the upgrade
+  and there is no second chance. The one exception is client start-up, where a
+  failure stays advisory: every request re-resolves, so a briefly-unreachable
+  token endpoint must not stop a supervised client from booting.
+
+`Auth.normalize/1` now raises `ArgumentError` on an `:authorization_code` value
+it cannot turn into a provider, matching what the Ruby SDK already did. That is
+a configuration mistake rather than a transient failure, and silently
+continuing unauthenticated turned a typo into a puzzling 401 much later.
+
+Behaviour change for existing `client_credentials` users: WS upgrades now carry
+a well-formed `Authorization: Bearer` header; a 401 on an HTTP transport
+refreshes and retries once instead of surfacing immediately; and a failed token
+fetch now returns `{:error, {:auth_error, reason}}` where it previously sent an
+unauthenticated request.
+
+Example: `mix run examples/browser_signin.exs`. 100 new tests: the loopback suite
+binds real sockets and drives them with raw HTTP requests, the flow suite runs
+against `Req.Test` so the real request building is exercised, and the transport
+suite drives both HTTP transports plus the WS upgrade headers.
 
 ### Porting brief — TypeScript, Python, Ruby, Elixir
 
@@ -198,6 +264,67 @@ signatures. Invariants that must hold in every language:
     what it is given, so an invented scope is accepted silently and then means
     nothing. Do not "improve" this per language.
 11. **The WS handshake carries the resolved OAuth bearer**, for both grants.
+12. **A refresh never holds the state lock.** `grant`, `is_dirty` and
+    `take_if_dirty` must keep answering while one is in flight — a persistence
+    loop is the documented use, and a hung token endpoint must not wedge the
+    provider. Refreshes are single-flighted: concurrent callers make one
+    request and share its outcome, failure included, so a dead endpoint costs
+    one round trip rather than one per waiter.
+
+#### Fixed — a refresh no longer freezes the provider
+
+Every provider except TypeScript's held its state lock across the refresh
+request. That blocked `grant`, `is_dirty` and `take_if_dirty` for the whole
+round trip — and a persistence loop calling `take_if_dirty` on a timer is the
+use the docs recommend — while a hung token endpoint wedged the provider
+outright. Elixir was worst: the refresh ran inside `handle_call`, so every
+caller hit its 30-second timeout while the GenServer stayed stuck.
+
+TypeScript already had the right model, a shared promise cleared in `finally`.
+The other four now match it:
+
+- **Rust** — a dedicated `tokio::sync::Mutex` serializes refreshes; the `RwLock`
+  over the grant is taken only to read the stale value and to write the fresh
+  one, never across `.await`.
+- **Python** — the in-flight refresh is a shared `asyncio.Task`, shielded so a
+  caller that gives up cannot cancel it for everyone else. The lock is held only
+  to hand off leadership.
+- **Ruby** — two mutexes with distinct jobs: one guards state and is never held
+  across the network, one serializes the refresh itself.
+- **Elixir** — the refresh runs in a monitored process and callers are parked
+  with `{:noreply, …}` until it lands, so the GenServer keeps serving. Monitored
+  rather than linked, so a crash in the refresh answers the waiters instead of
+  taking the provider down. `$callers` is propagated by hand, since that is what
+  carries process ownership to a test HTTP stub.
+
+All five also share failures, not just successes: a caller that queued behind a
+refresh takes its outcome either way, so a dead token endpoint costs one request
+rather than one per waiter. TypeScript, Python and Elixir get that from the
+shared promise, task and waiter list respectively. Rust and Ruby have no shared
+handle to hold, so they record the settled attempt — a counter plus the failure
+message — and a waiter that finds the counter moved on takes that result instead
+of launching its own.
+
+The memoized failure belongs to the callers that queued behind it, not to the
+future: once an attempt has settled, the next call refreshes again rather than
+replaying the error. Each language has a test for both halves.
+
+#### Invariants 1, 2, 9 and 10 are now enforced, not just written down
+
+`testdata/contract.json` holds the canonical grant, minimal grant, registered
+client, default scope and error taxonomy as bytes, and every language's suite
+loads that one file. Before it, each suite round-tripped a grant through its
+*own* serializer — which passes even when a language has a field name wrong, so
+long as it is wrong consistently. Nothing actually checked that a grant written
+by Python could be read by Ruby, which is the property invariant 1 promises.
+
+Coverage is deliberately uneven and `testdata/README.md` says why: Python
+enumerates a real `Enum` and TypeScript uses an exhaustive
+`Record<AuthCodeErrorKind, true>`, so both fail when a kind is added and not
+declared; Ruby and Elixir have no runtime registry and compare a hand-written
+list, catching a rename but not an addition; Rust's `thiserror` enum has no
+string form and sits that row out. The grant and client shapes are checked in
+all five.
 
 ---
 

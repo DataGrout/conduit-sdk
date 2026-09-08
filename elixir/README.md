@@ -71,6 +71,75 @@ endpoint = DatagroutConduit.OAuth.derive_token_endpoint("https://gateway.datagro
 
 Tokens are cached and refreshed automatically 60 seconds before expiry.
 
+### OAuth 2.1 (authorization code + PKCE)
+
+Client credentials authenticate a *machine*, with a secret issued out of band.
+To authenticate a *person* — and to reach
+`https://gateway.datagrout.ai/connect`, where the server binding is chosen at
+consent time and lives in the token rather than the URL — run the
+browser-consent flow once and persist the grant:
+
+```elixir
+alias DatagroutConduit.AuthCode
+
+{:ok, listener} = AuthCode.Loopback.bind()          # 127.0.0.1, OS-chosen port
+{:ok, flow} = AuthCode.discover("https://gateway.datagrout.ai/connect")
+
+{:ok, registered, flow} =
+  AuthCode.register(flow, "My App", AuthCode.Loopback.redirect_uri(listener))
+
+{:ok, url, pending} = AuthCode.authorize_url(flow)
+IO.puts("Open this to sign in:\n#{url}")            # the SDK never opens a browser
+
+{:ok, redirect} = AuthCode.Loopback.wait(listener, 300_000)
+{:ok, grant} = AuthCode.exchange(flow, pending, redirect.code, redirect.state)
+
+# Persist BOTH: a client id without its redirect URI cannot be reused, because
+# the authorization server matches redirect URIs exactly.
+save_somewhere(%{
+  "registered" => AuthCode.RegisteredClient.to_map(registered),
+  "grant" => AuthCode.Grant.to_map(grant)
+})
+```
+
+On later runs, skip straight to the grant:
+
+```elixir
+{:ok, client} = DatagroutConduit.Client.start_link(
+  url: "https://gateway.datagrout.ai/connect",
+  auth: {:authorization_code, grant}
+)
+```
+
+DataGrout **rotates refresh tokens**, so a grant that is refreshed and not
+written back leaves a consumed token on disk. Own the provider when you care:
+
+```elixir
+{:ok, provider} = AuthCode.Provider.start_link(grant: grant)
+
+{:ok, client} = DatagroutConduit.Client.start_link(
+  url: url,
+  auth: {:authorization_code, provider}
+)
+
+# ...periodically, or once on shutdown:
+case AuthCode.Provider.take_if_dirty(provider) do
+  {:ok, rotated} -> save_somewhere(AuthCode.Grant.to_map(rotated))
+  :clean -> :ok
+end
+```
+
+`{:authorization_code, ...}` accepts a `Grant`, a grant map straight from JSON,
+or a running `AuthCode.Provider`.
+
+Where the grant lives is your decision — a keychain, a config file, a vault.
+The SDK owns its shape and its refresh, and deliberately picks no location. The
+shape is identical across every conduit SDK, so a grant written by the Python
+client is readable by this one.
+
+See [`examples/browser_signin.exs`](examples/browser_signin.exs) for a complete
+run that registers, signs in, saves, and reuses.
+
 ### mTLS Client Certificates
 
 ```elixir

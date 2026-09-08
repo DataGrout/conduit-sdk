@@ -134,22 +134,29 @@ defmodule DatagroutConduit.Transport.Ws do
     ping_interval_ms = Keyword.get(opts, :ping_interval_ms, @ping_interval_ms)
 
     ws_url = to_ws_url(url)
-    headers = build_headers(auth)
 
-    conn_opts = [
-      headers: headers,
-      identity: identity,
-      parent: self()
-    ]
+    # Unlike the HTTP transports there is no per-request retry here — the token
+    # rides the upgrade and that is the only chance to send it. So a fetch
+    # failure stops the transport rather than opening a connection that cannot
+    # authenticate.
+    with {:ok, headers} <- build_headers(auth) do
+      conn_opts = [
+        headers: headers,
+        identity: identity,
+        parent: self()
+      ]
 
-    case Conn.start_link(ws_url, conn_opts) do
-      {:ok, conn_pid} ->
-        state = %__MODULE__{conn_pid: conn_pid, ping_interval_ms: ping_interval_ms}
-        schedule_ping(state)
-        {:ok, state}
+      case Conn.start_link(ws_url, conn_opts) do
+        {:ok, conn_pid} ->
+          state = %__MODULE__{conn_pid: conn_pid, ping_interval_ms: ping_interval_ms}
+          schedule_ping(state)
+          {:ok, state}
 
-      {:error, reason} ->
-        {:stop, reason}
+        {:error, reason} ->
+          {:stop, reason}
+      end
+    else
+      {:error, reason} -> {:stop, {:auth_error, reason}}
     end
   end
 
@@ -374,21 +381,16 @@ defmodule DatagroutConduit.Transport.Ws do
     |> String.replace_prefix("http://", "ws://")
   end
 
-  defp build_headers(nil), do: [{"sec-websocket-protocol", @subprotocol}]
-
-  defp build_headers({:bearer, token}),
-    do: [{"authorization", "Bearer #{token}"}, {"sec-websocket-protocol", @subprotocol}]
-
-  defp build_headers({:api_key, key}),
-    do: [{"x-api-key", key}, {"sec-websocket-protocol", @subprotocol}]
-
-  defp build_headers({:basic, user, pass}) do
-    encoded = Base.encode64("#{user}:#{pass}")
-    [{"authorization", "Basic #{encoded}"}, {"sec-websocket-protocol", @subprotocol}]
-  end
-
-  defp build_headers({:oauth, provider_pid}) do
-    token = GenServer.call(provider_pid, :get_token)
-    [{"authorization", "Bearer #{token}"}, {"sec-websocket-protocol", @subprotocol}]
+  # Both provider-backed grants resolve here, through the same module the HTTP
+  # transports use. This previously interpolated the `{:ok, token}` tuple that
+  # `get_token` returns, so the upgrade carried a malformed bearer and an OAuth
+  # client authenticated over WS only if it also presented an mTLS identity.
+  @doc false
+  # Public so the upgrade headers can be asserted on without a live socket.
+  def build_headers(auth) do
+    with {:ok, headers} <-
+           auth |> DatagroutConduit.Auth.normalize() |> DatagroutConduit.Auth.resolved_headers() do
+      {:ok, headers ++ [{"sec-websocket-protocol", @subprotocol}]}
+    end
   end
 end

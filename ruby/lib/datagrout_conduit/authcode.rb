@@ -548,19 +548,43 @@ module DatagroutConduit
       def initialize(grant)
         @grant = grant
         @dirty = false
+        # Two locks with distinct jobs. @mutex guards the state and is held
+        # only for as long as it takes to read or swap it — never across the
+        # network. @refresh_mutex serializes the refresh itself, so concurrent
+        # callers make one request rather than a stampede of them.
         @mutex = Mutex.new
+        @refresh_mutex = Mutex.new
+        # Bumped each time a refresh attempt settles, alongside the failure of
+        # the one that failed. A caller that queued behind a failing attempt
+        # takes its outcome instead of launching another.
+        @attempt = 0
+        @last_error = nil
       end
 
       # The current access token, refreshing first if it is at or near expiry.
+      #
+      # A refresh does not hold the state lock, so {#grant}, {#dirty?},
+      # {#take_if_dirty} and {#invalidate!} keep answering while one is in
+      # flight — a persistence loop must not stall behind a slow token
+      # endpoint, and a hung one must not wedge the whole provider.
       def get_token
-        @mutex.synchronize do
-          unless @grant.expired?
-            return @grant.access_token
-          end
+        current, seen = @mutex.synchronize { [@grant, @attempt] }
+        return current.access_token unless current.expired?
 
-          @grant = @grant.refresh
-          @dirty = true
-          @grant.access_token
+        @refresh_mutex.synchronize do
+          current, attempt, error = @mutex.synchronize { [@grant, @attempt, @last_error] }
+
+          # Another thread refreshed while we queued: nothing left to do.
+          return current.access_token unless current.expired?
+
+          # An attempt settled while we queued and left the grant expired, so
+          # it failed. Share that rather than hammering an endpoint we have
+          # just watched fail — a dead one should cost one request, not one
+          # per waiter. The backtrace is the leader's, which is where it
+          # actually broke.
+          raise error if attempt != seen && error
+
+          perform_refresh(current)
         end
       end
 
@@ -622,6 +646,30 @@ module DatagroutConduit
                 "authorization_code must be a Grant, a grant Hash, or an " \
                 "AuthCode::Provider (got #{value.class})"
         end
+      end
+
+      private
+
+      # Runs with @refresh_mutex held and @mutex free, so the state stays
+      # readable while the request is out. Records the outcome either way, so
+      # whoever queued behind this attempt can take it.
+      def perform_refresh(stale)
+        refreshed = stale.refresh
+
+        @mutex.synchronize do
+          @grant = refreshed
+          @dirty = true
+          @attempt += 1
+          @last_error = nil
+        end
+
+        refreshed.access_token
+      rescue StandardError => e
+        @mutex.synchronize do
+          @attempt += 1
+          @last_error = e
+        end
+        raise
       end
     end
 

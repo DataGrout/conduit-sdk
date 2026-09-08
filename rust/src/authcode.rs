@@ -639,6 +639,23 @@ pub struct AuthCodeProvider {
     /// it. Rotating refresh tokens make this important: a stored grant that is
     /// never updated goes stale and eventually invalidates the family.
     dirty: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Serializes refreshes so concurrent callers make one request rather than
+    /// a stampede. Deliberately separate from `grant`: this one is held across
+    /// the network call, that one never is.
+    refreshing: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// The settled outcome of the most recent refresh attempt, so a caller that
+    /// queued behind a failing one can take its result instead of launching
+    /// another against an endpoint just seen to fail.
+    outcome: std::sync::Arc<std::sync::Mutex<RefreshOutcome>>,
+}
+
+/// Bookkeeping for the last settled refresh. Never held across an `.await`.
+#[derive(Debug, Default)]
+struct RefreshOutcome {
+    /// Bumped once per settled attempt, success or failure.
+    attempt: u64,
+    /// The failure message of the attempt that just settled, if it failed.
+    last_error: Option<String>,
 }
 
 impl std::fmt::Debug for AuthCodeProvider {
@@ -654,6 +671,8 @@ impl AuthCodeProvider {
         Self {
             grant: std::sync::Arc::new(RwLock::new(grant)),
             dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            refreshing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            outcome: std::sync::Arc::new(std::sync::Mutex::new(RefreshOutcome::default())),
         }
     }
 
@@ -666,18 +685,77 @@ impl AuthCodeProvider {
             }
         }
 
-        // Re-check under the write lock so concurrent callers refresh once.
-        let mut guard = self.grant.write().await;
-        if !guard.is_expired() {
-            return Ok(guard.access_token.clone());
+        // Which attempt was current before we queued. If a different one
+        // settles while we wait, its outcome is ours too.
+        let seen = self.attempt();
+
+        // One refresh at a time. Waiters re-check on entry, so a leader that
+        // succeeded spares them the request entirely.
+        let _refreshing = self.refreshing.lock().await;
+
+        let stale = {
+            let guard = self.grant.read().await;
+            if !guard.is_expired() {
+                return Ok(guard.access_token.clone());
+            }
+            guard.clone()
+        };
+
+        {
+            // An attempt settled while we queued and left the grant expired, so
+            // it failed. Share that rather than hammering an endpoint we have
+            // just watched fail — a dead one should cost one request, not one
+            // per waiter.
+            let outcome = self.outcome_lock();
+            if outcome.attempt != seen {
+                if let Some(message) = &outcome.last_error {
+                    return Err(Error::Auth(message.clone()));
+                }
+            }
         }
 
-        let refreshed = guard.refresh(http).await.map_err(Error::from)?;
-        *guard = refreshed;
-        self.dirty.store(true, std::sync::atomic::Ordering::Release);
+        // The state lock is released across the request. Holding it here would
+        // stall `grant()` and `take_if_dirty()` for the whole round trip — and
+        // a persistence loop calling the latter is exactly the documented use.
+        match stale.refresh(http).await {
+            Ok(refreshed) => {
+                let token = refreshed.access_token.clone();
+                *self.grant.write().await = refreshed;
+                self.dirty.store(true, std::sync::atomic::Ordering::Release);
 
-        tracing::debug!("conduit: refreshed authorization-code grant");
-        Ok(guard.access_token.clone())
+                let mut outcome = self.outcome_lock();
+                outcome.attempt += 1;
+                outcome.last_error = None;
+                drop(outcome);
+
+                tracing::debug!("conduit: refreshed authorization-code grant");
+                Ok(token)
+            }
+            Err(err) => {
+                // Recorded as the message rather than the error, because
+                // `Error` is not `Clone` and every waiter must see the same
+                // thing the leader saw.
+                let message = err.to_string();
+                let mut outcome = self.outcome_lock();
+                outcome.attempt += 1;
+                outcome.last_error = Some(message.clone());
+                drop(outcome);
+
+                Err(Error::Auth(message))
+            }
+        }
+    }
+
+    fn attempt(&self) -> u64 {
+        self.outcome_lock().attempt
+    }
+
+    /// Poison-tolerant: this guards two plain fields and is never held across
+    /// an `.await`, so a poisoned lock still holds usable bookkeeping.
+    fn outcome_lock(&self) -> std::sync::MutexGuard<'_, RefreshOutcome> {
+        self.outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// A snapshot of the current grant, for persisting.
@@ -1109,6 +1187,131 @@ mod tests {
         assert!(p.take_if_dirty().await.is_none());
     }
 
+    #[tokio::test]
+    async fn provider_state_stays_readable_while_a_refresh_is_in_flight() {
+        // A token endpoint that accepts the connection and never answers, so
+        // the refresh is reliably still in flight when we probe the state.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                open.push(socket);
+            }
+        });
+
+        let mut stale = grant(Some(0), Some("rt"));
+        stale.token_endpoint = format!("http://{addr}/oauth/token");
+
+        let provider = AuthCodeProvider::new(stale);
+        let refreshing = provider.clone();
+        tokio::spawn(async move {
+            let _ = refreshing.get_token(&reqwest::Client::new()).await;
+        });
+
+        // Let the request reach the socket.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        // Held across the request, the state lock would block both of these
+        // until the HTTP timeout — and a persistence loop calling
+        // `take_if_dirty` is the documented use.
+        let read = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            let g = provider.grant().await;
+            let taken = provider.take_if_dirty().await;
+            (g, taken)
+        })
+        .await;
+
+        let (g, taken) = read.expect("state blocked while a refresh was in flight");
+        assert_eq!(g.access_token, "at");
+        assert!(taken.is_none());
+    }
+
+    #[tokio::test]
+    async fn provider_shares_a_failing_refresh_with_every_waiter() {
+        use std::sync::atomic::AtomicUsize;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // A token endpoint that fails, slowly. The delay is what guarantees
+        // the other callers are queued behind the leader rather than racing
+        // it, so the count means what the test says it means.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+
+        let counted = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = socket.read(&mut buf).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 400 Bad Request\r\ncontent-length: 4\r\n\
+                              connection: close\r\n\r\nnope",
+                        )
+                        .await;
+                });
+            }
+        });
+
+        let mut stale = grant(Some(0), Some("rt"));
+        stale.token_endpoint = format!("http://{addr}/oauth/token");
+
+        let provider = AuthCodeProvider::new(stale);
+        let http = reqwest::Client::new();
+
+        let waiters: Vec<_> = (0..5)
+            .map(|_| {
+                let p = provider.clone();
+                let h = http.clone();
+                tokio::spawn(async move { p.get_token(&h).await })
+            })
+            .collect();
+
+        for waiter in waiters {
+            assert!(waiter.await.unwrap().is_err(), "every waiter should fail");
+        }
+
+        // One request, not five: the leader's failure is shared.
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_retries_on_a_later_call_rather_than_replaying_a_failure() {
+        // The shared failure is only for callers that queued behind that
+        // attempt. Once it has settled, the next call must try again.
+        let mut server = mockito::Server::new_async().await;
+        let failed = server
+            .mock("POST", "/oauth/token")
+            .with_status(400)
+            .with_body("nope")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mut stale = grant(Some(0), Some("rt"));
+        stale.token_endpoint = format!("{}/oauth/token", server.url());
+
+        let provider = AuthCodeProvider::new(stale);
+        let http = reqwest::Client::new();
+
+        assert!(provider.get_token(&http).await.is_err());
+        failed.assert_async().await;
+
+        let ok = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"at_2","expires_in":3600}"#)
+            .create_async()
+            .await;
+
+        assert_eq!(provider.get_token(&http).await.unwrap(), "at_2");
+        ok.assert_async().await;
+    }
+
     #[test]
     fn provider_debug_never_prints_tokens() {
         let p = AuthCodeProvider::new(grant(None, Some("super-secret-refresh")));
@@ -1229,5 +1432,77 @@ mod tests {
     fn authcode_error_converts_into_the_crate_error() {
         let e: Error = AuthCodeError::NoClientId.into();
         assert!(matches!(e, Error::Auth(_)));
+    }
+
+    // ---------------------------------------------------------------------
+    // Cross-language contract
+    //
+    // Every test above round-trips a grant through this crate's own serde
+    // impls, which passes even if a field name is wrong — as long as it is
+    // consistently wrong. These load `testdata/contract.json`, the same bytes
+    // every language SDK checks, so a grant written here is provably readable
+    // elsewhere. See `testdata/README.md`.
+    //
+    // `error_kinds` is not checked here: `AuthCodeError` is a `thiserror` enum
+    // with no string form, and giving it one would mean new public API. Python
+    // and TypeScript enumerate theirs and cover that row.
+    // ---------------------------------------------------------------------
+
+    fn contract() -> serde_json::Value {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../testdata/contract.json"
+        )))
+        .expect("testdata/contract.json is not valid JSON")
+    }
+
+    #[test]
+    fn contract_fixture_grant_loads_field_for_field() {
+        // Read explicitly rather than by round-trip: a misnamed field would
+        // fail to deserialize or land as None, and a round-trip alone would
+        // not say which.
+        let grant: Grant = serde_json::from_value(contract()["grant"].clone()).unwrap();
+
+        assert_eq!(grant.access_token, "at_contract_fixture");
+        assert_eq!(grant.refresh_token.as_deref(), Some("rt_contract_fixture"));
+        assert_eq!(grant.expires_at, Some(1_700_000_000));
+        assert_eq!(grant.client_id, "client_contract_fixture");
+        assert_eq!(
+            grant.token_endpoint,
+            "https://gateway.example.com/oauth/token"
+        );
+        assert_eq!(grant.scope.as_deref(), Some("mcp tools"));
+        assert_eq!(
+            grant.resource.as_deref(),
+            Some("https://gateway.example.com/connect")
+        );
+    }
+
+    #[test]
+    fn contract_fixture_grant_serializes_identically() {
+        let expected = contract()["grant"].clone();
+        let grant: Grant = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&grant).unwrap(), expected);
+    }
+
+    #[test]
+    fn contract_fixture_minimal_grant_omits_absent_optionals() {
+        let expected = contract()["grant_minimal"].clone();
+        let grant: Grant = serde_json::from_value(expected.clone()).unwrap();
+        // Not `"refresh_token": null` — another SDK reading this must see
+        // absence.
+        assert_eq!(serde_json::to_value(&grant).unwrap(), expected);
+    }
+
+    #[test]
+    fn contract_fixture_registered_client_round_trips_as_one_unit() {
+        let expected = contract()["registered_client"].clone();
+        let client: RegisteredClient = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&client).unwrap(), expected);
+    }
+
+    #[test]
+    fn contract_fixture_pins_the_default_scope() {
+        assert_eq!(DEFAULT_SCOPE, contract()["default_scope"].as_str().unwrap());
     }
 }

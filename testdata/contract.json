@@ -1,0 +1,33 @@
+{
+  "default_scope": "mcp tools",
+  "error_kinds": [
+    "denied",
+    "discovery",
+    "http",
+    "no_client_id",
+    "no_registration_endpoint",
+    "not_refreshable",
+    "pkce_unsupported",
+    "registration_rejected",
+    "state_mismatch",
+    "token_exchange"
+  ],
+  "grant": {
+    "access_token": "at_contract_fixture",
+    "client_id": "client_contract_fixture",
+    "expires_at": 1700000000,
+    "refresh_token": "rt_contract_fixture",
+    "resource": "https://gateway.example.com/connect",
+    "scope": "mcp tools",
+    "token_endpoint": "https://gateway.example.com/oauth/token"
+  },
+  "grant_minimal": {
+    "access_token": "at_minimal_fixture",
+    "client_id": "client_minimal_fixture",
+    "token_endpoint": "https://gateway.example.com/oauth/token"
+  },
+  "registered_client": {
+    "client_id": "client_contract_fixture",
+    "redirect_uri": "http://127.0.0.1:8765/callback"
+  }
+}

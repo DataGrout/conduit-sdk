@@ -41,7 +41,10 @@ defmodule DatagroutConduit.Transport.JSONRPC do
       "params" => opts[:params] || %{}
     }
 
-    oauth = opts[:oauth]
+    # The caller's auth as configured, not the token already on `req`. Needed
+    # so a 401 can invalidate the provider and rebuild the header — retrying
+    # with the same stale token would just fail again.
+    auth = opts[:auth]
 
     case Req.post(req, url: "", json: body) do
       {:ok, %Req.Response{status: status, body: response_body}} when status in 200..299 ->
@@ -51,9 +54,26 @@ defmodule DatagroutConduit.Transport.JSONRPC do
         retry_after = get_header(resp_headers, "retry-after")
         {:error, {:rate_limited, retry_after}}
 
-      {:ok, %Req.Response{status: 401}} when not retried and oauth != nil ->
-        DatagroutConduit.OAuth.invalidate(oauth)
-        do_send_request(req, opts, _retried: true)
+      {:ok, %Req.Response{status: 401, body: response_body}} when not retried and auth != nil ->
+        # Either provider-backed grant recovers by refreshing; an expired access
+        # token should not surface to the caller as an auth failure.
+        if DatagroutConduit.Auth.provider_backed?(auth) do
+          DatagroutConduit.Auth.invalidate(auth)
+
+          case DatagroutConduit.Auth.resolved_headers(auth) do
+            {:ok, headers} ->
+              do_send_request(Req.merge(req, headers: headers), opts, _retried: true)
+
+            {:error, reason} ->
+              # The refresh itself failed. That reason is the useful one —
+              # retrying would only earn a second, less informative 401.
+              {:error, {:auth_error, reason}}
+          end
+        else
+          # Nothing to refresh. Report it exactly as any other error status
+          # would be, body included — dropping it hides the server's reason.
+          {:error, {:http_error, 401, response_body}}
+        end
 
       {:ok, %Req.Response{status: status, body: response_body}} ->
         {:error, {:http_error, status, response_body}}

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "timeout"
 
 # Ports the Rust reference suite for the authorization-code flow.
 class AuthCodeTest < Minitest::Test
@@ -359,6 +360,108 @@ class AuthCodeTest < Minitest::Test
 
   def test_provider_from_auth_rejects_nonsense
     assert_raises(ArgumentError) { AC::Provider.from_auth("a token string") }
+  end
+
+  def test_state_stays_answerable_while_a_refresh_is_in_flight
+    started = Queue.new
+    release = Queue.new
+
+    stub_request(:post, TOKEN).to_return do
+      started << :in_flight
+      release.pop
+      { status: 200, headers: json_headers,
+        body: JSON.generate("access_token" => "at_2", "expires_in" => 3600) }
+    end
+
+    provider = AC::Provider.new(a_grant(expires_at: 0, refresh: "rt"))
+    worker = Thread.new { provider.get_token }
+    started.pop
+
+    # The state lock is not held across the request, so a persistence loop
+    # keeps working while a slow token endpoint is being waited on. This
+    # blocked for the whole round trip before.
+    Timeout.timeout(5) do
+      assert_equal "at", provider.grant.access_token
+      assert_nil provider.take_if_dirty
+    end
+
+    release << :go
+    assert_equal "at_2", worker.value
+  ensure
+    release << :go
+    worker&.join(1)
+  end
+
+  def test_concurrent_callers_share_one_refresh
+    calls = Mutex.new
+    count = 0
+    gate = Queue.new
+
+    stub_request(:post, TOKEN).to_return do
+      calls.synchronize { count += 1 }
+      # Hold the leader here so the others pile up behind it.
+      gate.pop
+      { status: 200, headers: json_headers,
+        body: JSON.generate("access_token" => "at_2", "expires_in" => 3600) }
+    end
+
+    provider = AC::Provider.new(a_grant(expires_at: 0, refresh: "rt"))
+    workers = Array.new(4) { Thread.new { provider.get_token } }
+
+    # Let the single leader through once everyone is queued.
+    sleep 0.1
+    gate << :go
+
+    assert_equal ["at_2"] * 4, workers.map(&:value)
+    # One request, not four: serializing the refresh is what the second lock
+    # is for.
+    assert_equal 1, calls.synchronize { count }
+  end
+
+  def test_a_failing_refresh_is_shared_by_every_waiter
+    count = 0
+    counter = Mutex.new
+    gate = Queue.new
+
+    stub_request(:post, TOKEN).to_return do
+      counter.synchronize { count += 1 }
+      # Hold the leader until everyone else has queued behind it.
+      gate.pop
+      { status: 400, body: '{"error":"invalid_grant"}' }
+    end
+
+    provider = AC::Provider.new(a_grant(expires_at: 0, refresh: "rt"))
+
+    workers = Array.new(4) do
+      Thread.new do
+        provider.get_token
+      rescue AC::Error => e
+        e
+      end
+    end
+
+    sleep 0.1
+    gate << :go
+
+    results = workers.map(&:value)
+    assert(results.all? { |r| r.is_a?(AC::TokenExchangeError) },
+           "every waiter should get the leader's failure, got #{results.inspect}")
+    # A dead token endpoint costs one request, not one per waiter.
+    assert_equal 1, counter.synchronize { count }
+  end
+
+  def test_a_later_call_retries_after_a_failure_rather_than_replaying_it
+    # The shared failure is only for callers that queued behind that attempt.
+    # Once it has settled, the next call must try again.
+    stub_request(:post, TOKEN)
+      .to_return({ status: 400, body: '{"error":"temporarily_unavailable"}' },
+                 { status: 200, headers: json_headers,
+                   body: JSON.generate("access_token" => "at_2", "expires_in" => 3600) })
+
+    provider = AC::Provider.new(a_grant(expires_at: 0, refresh: "rt"))
+
+    assert_raises(AC::TokenExchangeError) { provider.get_token }
+    assert_equal "at_2", provider.get_token
   end
 
   # ── metadata / discovery ─────────────────────────────────────────────────

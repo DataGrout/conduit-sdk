@@ -433,6 +433,94 @@ def test_provider_from_auth_rejects_nonsense():
         provider_from_auth(42)
 
 
+async def test_a_failing_refresh_costs_one_request_for_every_waiter():
+    # The refresh is single-flighted, so waiters share the leader's outcome —
+    # including its failure. Before, each queued caller re-acquired the lock,
+    # found the grant still expired and tried again, so a dead token endpoint
+    # cost one round trip per waiter.
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    provider = AuthCodeProvider(_grant(0, "rt"))
+    client = _client(handler)
+
+    results = await asyncio.gather(
+        *[provider.get_token(client) for _ in range(5)], return_exceptions=True
+    )
+
+    assert all(isinstance(r, AuthCodeError) for r in results)
+    assert calls == 1
+
+
+async def test_concurrent_callers_share_one_successful_refresh():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200, json={"access_token": "at_2", "refresh_token": "rt_2", "expires_in": 3600}
+        )
+
+    provider = AuthCodeProvider(_grant(0, "rt_1"))
+    client = _client(handler)
+
+    tokens = await asyncio.gather(*[provider.get_token(client) for _ in range(5)])
+
+    assert tokens == ["at_2"] * 5
+    assert calls == 1
+
+
+async def test_a_later_call_retries_after_a_failure_rather_than_replaying_it():
+    # The shared failure belongs to the callers that queued behind that
+    # attempt, not to the future: once it has settled, the next call tries
+    # again.
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(400, json={"error": "temporarily_unavailable"})
+        return httpx.Response(200, json={"access_token": "at_2", "expires_in": 3600})
+
+    provider = AuthCodeProvider(_grant(0, "rt"))
+    client = _client(handler)
+
+    with pytest.raises(AuthCodeError):
+        await provider.get_token(client)
+
+    assert await provider.get_token(client) == "at_2"
+
+
+async def test_the_grant_stays_readable_while_a_refresh_is_in_flight():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        started.set()
+        await release.wait()
+        return httpx.Response(200, json={"access_token": "at_2", "expires_in": 3600})
+
+    provider = AuthCodeProvider(_grant(0, "rt"))
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    pending = asyncio.create_task(provider.get_token(client))
+    await asyncio.wait_for(started.wait(), timeout=2)
+
+    # The lock is not held across the request, so a persistence loop keeps
+    # working while a slow token endpoint is being waited on.
+    assert provider.grant().access_token == "at"
+    assert provider.take_if_dirty() is None
+
+    release.set()
+    assert await asyncio.wait_for(pending, timeout=2) == "at_2"
+
+
 # ─── metadata / discovery ─────────────────────────────────────────────────────
 
 

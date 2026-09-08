@@ -362,6 +362,75 @@ describe("AuthCodeProvider", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("shares a failing refresh with every waiter", async () => {
+    // The in-flight promise is shared, so a dead token endpoint costs one
+    // request rather than one per waiter.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+        }),
+    ) as any;
+
+    const p = new AuthCodeProvider(grant(nowSecs() - 10, "rt"), fetchImpl);
+    const results = await Promise.allSettled([
+      p.getToken(),
+      p.getToken(),
+      p.getToken(),
+    ]);
+
+    expect(results.every((r) => r.status === "rejected")).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on a later call rather than replaying the failure", async () => {
+    // The shared failure belongs to the callers that queued behind that
+    // attempt, not to the future: once it has settled, the next call tries
+    // again.
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+            status: 400,
+          })
+        : new Response(
+            JSON.stringify({ access_token: "fresh", expires_in: 3600 }),
+            { status: 200 },
+          );
+    }) as any;
+
+    const p = new AuthCodeProvider(grant(nowSecs() - 10, "rt"), fetchImpl);
+    await expect(p.getToken()).rejects.toThrowError();
+    expect(await p.getToken()).toBe("fresh");
+  });
+
+  it("does not block the grant accessors during a refresh", async () => {
+    // The state is plain fields, never guarded by a lock the refresh holds, so
+    // a persistence loop keeps working while a slow endpoint is in flight.
+    let release: (() => void) | undefined;
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const fetchImpl = vi.fn(async () => {
+      await inFlight;
+      return new Response(
+        JSON.stringify({ access_token: "fresh", expires_in: 3600 }),
+        { status: 200 },
+      );
+    }) as any;
+
+    const p = new AuthCodeProvider(grant(nowSecs() - 10, "rt"), fetchImpl);
+    const pending = p.getToken();
+
+    expect(p.grant().access_token).toBe("at");
+    expect(p.takeIfDirty()).toBeNull();
+
+    release!();
+    expect(await pending).toBe("fresh");
+  });
+
   it("invalidate forces the next fetch to refresh", async () => {
     const p = new AuthCodeProvider(grant(nowSecs() + 3600), vi.fn() as any);
     p.invalidate();

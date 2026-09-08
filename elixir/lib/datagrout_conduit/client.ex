@@ -421,7 +421,10 @@ defmodule DatagroutConduit.Client do
   @impl true
   def init(opts) do
     url = Keyword.fetch!(opts, :url)
-    auth = Keyword.get(opts, :auth)
+    # Normalize once: an authorization-code grant given as a Grant or a plain
+    # map becomes a running provider here, so every request and every 401 shares
+    # one token and one refresh.
+    auth = DatagroutConduit.Auth.normalize(Keyword.get(opts, :auth))
     transport = Keyword.get(opts, :transport, :mcp)
     is_dg = DatagroutConduit.is_dg_url?(url)
 
@@ -462,7 +465,19 @@ defmodule DatagroutConduit.Client do
             _ -> Transport.MCP
           end
 
-      resolved_auth = resolve_auth(auth)
+      # A failure here is advisory: every request re-resolves, so a token
+      # endpoint that is briefly down must not stop a supervised client from
+      # starting. It is no longer hidden either — the first call returns the
+      # real reason instead of an unauthenticated request's 401.
+      resolved_auth =
+        case DatagroutConduit.Auth.resolve(auth) do
+          {:ok, resolved} ->
+            resolved
+
+          {:error, reason} ->
+            Logger.warning("conduit: initial token fetch failed: #{inspect(reason)}")
+            nil
+        end
 
       {:ok, req} = transport_mod.connect(%{url: url, identity: identity, auth: resolved_auth})
 
@@ -791,11 +806,22 @@ defmodule DatagroutConduit.Client do
   end
 
   defp send_rpc(state, method, params, id) do
-    auth = resolve_auth(state.auth)
+    case DatagroutConduit.Auth.resolve(state.auth) do
+      {:error, reason} ->
+        # Do not send it unauthenticated. The server's 401 would say far less
+        # than why the token could not be fetched, and cost a round trip to say
+        # it.
+        {{:error, {:auth_error, reason}}, state}
 
+      {:ok, resolved} ->
+        do_send_rpc(state, method, params, id, resolved)
+    end
+  end
+
+  defp do_send_rpc(state, method, params, id, resolved_auth) do
     req =
-      if auth != resolve_auth(nil) do
-        update_auth_header(state.transport_req, auth)
+      if resolved_auth do
+        update_auth_header(state.transport_req, resolved_auth)
       else
         state.transport_req
       end
@@ -803,6 +829,8 @@ defmodule DatagroutConduit.Client do
     request_opts =
       %{method: method, params: params, id: id}
       |> maybe_put(:session_id, state.mcp_session_id)
+      # Unresolved, so a 401 can invalidate the provider and rebuild the header.
+      |> maybe_put(:auth, state.auth)
 
     case state.transport_mod.send_request(req, request_opts) do
       {:ok, result, new_session_id} when is_binary(new_session_id) ->
@@ -823,19 +851,6 @@ defmodule DatagroutConduit.Client do
     id = state.request_id + 1
     {id, %{state | request_id: id}}
   end
-
-  defp resolve_auth({:oauth, provider}) do
-    case DatagroutConduit.OAuth.get_token(provider) do
-      {:ok, token} ->
-        {:bearer, token}
-
-      {:error, reason} ->
-        Logger.warning("OAuth token fetch failed: #{inspect(reason)}, proceeding without auth")
-        nil
-    end
-  end
-
-  defp resolve_auth(other), do: other
 
   defp update_auth_header(req, {:bearer, token}) do
     Req.merge(req, headers: [{"authorization", "Bearer #{token}"}])

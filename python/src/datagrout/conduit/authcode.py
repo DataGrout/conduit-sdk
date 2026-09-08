@@ -603,22 +603,53 @@ class AuthCodeProvider:
     def __init__(self, grant: Grant) -> None:
         self._grant = grant
         self._dirty = False
+        # Held only to hand off leadership of a refresh, never across the
+        # request itself. The in-flight refresh is shared as a task so
+        # concurrent callers await one round trip and one outcome.
         self._lock = asyncio.Lock()
+        self._refresh: Optional["asyncio.Task[Grant]"] = None
 
     async def get_token(self, http_client: httpx.AsyncClient) -> str:
-        """The current access token, refreshing first if it is at or near expiry."""
-        if not self._grant.is_expired():
-            return self._grant.access_token
+        """The current access token, refreshing first if it is at or near expiry.
+
+        Concurrent callers that arrive while a refresh is in flight await that
+        same refresh rather than starting their own, and share its outcome —
+        including its failure. A dead token endpoint therefore costs one
+        request, not one per waiter.
+        """
+        grant = self._grant
+        if not grant.is_expired():
+            return grant.access_token
+
+        return (await self._refresh_once(http_client)).access_token
+
+    async def _refresh_once(self, http_client: httpx.AsyncClient) -> Grant:
+        async with self._lock:
+            # Re-check: a refresh may have landed while we waited for the lock.
+            if not self._grant.is_expired():
+                return self._grant
+
+            task = self._refresh
+            if task is None or task.done():
+                task = asyncio.create_task(self._grant.refresh(http_client))
+                self._refresh = task
+
+        # The lock is released before awaiting, so the state stays readable —
+        # a persistence loop calling take_if_dirty() must not stall behind a
+        # slow token endpoint. Shielded because a caller giving up must not
+        # cancel the refresh every other waiter is depending on.
+        refreshed = await asyncio.shield(task)
 
         async with self._lock:
-            # Re-check under the lock so concurrent callers refresh once.
-            if not self._grant.is_expired():
-                return self._grant.access_token
+            # Whichever waiter gets here first applies it; the rest find it
+            # already applied and leave it alone.
+            if self._refresh is task:
+                self._grant = refreshed
+                self._dirty = True
+                self._refresh = None
+                logger.debug("conduit: refreshed authorization-code grant")
 
-            self._grant = await self._grant.refresh(http_client)
-            self._dirty = True
-            logger.debug("conduit: refreshed authorization-code grant")
-            return self._grant.access_token
+        return refreshed
 
     def grant(self) -> Grant:
         """A snapshot of the current grant, for persisting."""
