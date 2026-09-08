@@ -41,6 +41,64 @@ client = Client(
 
 The SDK automatically fetches, caches, and refreshes JWTs before they expire.
 
+### OAuth 2.1 (authorization code + PKCE)
+
+`client_credentials` authenticates a *machine*, with a secret issued out of
+band. To authenticate a *person* — and to reach
+`https://gateway.datagrout.ai/connect`, where the server binding is chosen at
+consent time and lives in the token rather than the URL — run the
+browser-consent flow once and persist the grant:
+
+```python
+from datagrout.conduit import AuthCodeFlow, LoopbackListener
+
+listener = await LoopbackListener.bind()          # 127.0.0.1, OS-chosen port
+flow = await AuthCodeFlow.discover("https://gateway.datagrout.ai/connect")
+registered = await flow.register("My App", listener.redirect_uri)
+
+url, pending = flow.authorize_url()
+print(f"Open this to sign in:\n{url}")            # the SDK never opens a browser
+
+redirect = await listener.wait(timeout=300)
+grant = await flow.exchange(pending, redirect.code, redirect.state)
+
+# Persist BOTH: a client id without its redirect URI cannot be reused, because
+# the authorization server matches redirect URIs exactly.
+save_somewhere({"registered": registered.to_dict(), "grant": grant.to_dict()})
+```
+
+On later runs, skip straight to the grant:
+
+```python
+client = Client(
+    "https://gateway.datagrout.ai/connect",
+    auth={"authorization_code": grant},
+)
+```
+
+DataGrout **rotates refresh tokens**, so a grant that is refreshed and not
+written back leaves a consumed token on disk. Own the provider when you care:
+
+```python
+from datagrout.conduit import AuthCodeProvider
+
+provider = AuthCodeProvider(grant)
+client = Client(url, auth={"authorization_code": provider})
+
+# ...periodically, or once on shutdown:
+rotated = provider.take_if_dirty()
+if rotated is not None:
+    save_somewhere({"registered": registered.to_dict(), "grant": rotated.to_dict()})
+```
+
+Where the grant lives is your decision — a keychain, a config file, a vault.
+The SDK owns its shape and its refresh, and deliberately picks no location.
+The shape is identical across every conduit SDK, so a grant written by the
+TypeScript client is readable by this one.
+
+See [`examples/browser_signin.py`](examples/browser_signin.py) for a complete
+run that registers, signs in, saves, and reuses.
+
 ### mTLS (Mutual TLS)
 
 After bootstrapping, the client certificate handles authentication at the TLS layer — no tokens needed.
@@ -185,7 +243,8 @@ print(event.event, event.data)
 ```python
 Client(
     url: str,
-    auth: dict = None,                    # {"bearer": "..."} or {"client_credentials": {...}}
+    auth: dict = None,                    # {"bearer": ...}, {"client_credentials": {...}},
+                                          # or {"authorization_code": Grant | AuthCodeProvider}
     transport: str = "jsonrpc",           # "jsonrpc", "mcp", or "websocket"
     use_intelligent_interface: bool = False,
     identity: ConduitIdentity = None,     # explicit mTLS identity

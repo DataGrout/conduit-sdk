@@ -17,7 +17,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 > |---|---|---|
 > | Rust (reference) | ✅ | ✅ |
 > | TypeScript | ✅ | ✅ |
-> | Python | ☐ | ☐ |
+> | Python | ✅ | ✅ |
 > | Ruby | ☐ | ☐ |
 > | Elixir | ☐ | ☐ |
 
@@ -99,6 +99,37 @@ endpoint is derived from the `ws://` URL with the scheme mapped across to
 Example: `npx tsx examples/browserSignin.ts`. 56 new tests, including a
 capturing WebSocket stub that drives the real `connect()` — the bug lived in
 exactly the wiring that the existing mocked-transport tests skip.
+
+#### Python
+
+The same surface, async throughout. `Grant`, `RegisteredClient` and
+`AuthServerMetadata` are dataclasses with `to_dict`/`from_dict` producing the
+cross-language shape; `to_dict` omits absent optionals rather than writing
+nulls. `AuthCodeError` subclasses `ConduitError` and carries an
+`AuthCodeErrorKind` — a `str`-valued enum, so the wire names compare equal to
+plain strings. `AuthCodeFlow` is an async context manager and closes only an
+`httpx` client it created itself, so a caller-supplied client survives the
+flow.
+
+`auth={"authorization_code": ...}` accepts a `Grant`, a grant dict straight
+from JSON, or an `AuthCodeProvider` you keep — the third being what you want
+when a rotated refresh token has to be written back.
+`LoopbackListener` lives in `datagrout.conduit.loopback`, mirroring the Rust
+feature split, and is re-exported from the package root. It runs on
+`asyncio.start_server` and needs no dependency beyond the standard library.
+
+As in TypeScript, the WS fix here also covers `client_credentials`: that
+transport built its upgrade headers synchronously and never constructed a
+provider at all, so *neither* grant authenticated over WS. Both do now, and the
+token endpoint is derived from the `ws://` URL with the scheme mapped across to
+`http://`. The transport closes the `httpx` client it creates for token fetches
+on disconnect.
+
+Example: `python examples/browser_signin.py`. 92 new tests: the loopback suite
+binds real sockets and drives them with real requests, and the WS suite drives
+the real `connect()` and reads the headers handed to `websockets`. The transport
+suite runs every case against both HTTP transports, which carry independent
+copies of the header-building and 401-retry paths.
 
 ### Porting brief — TypeScript, Python, Ruby, Elixir
 

@@ -13,6 +13,7 @@ from ..errors import (
     RateLimitError as _BaseRateLimitError,
 )
 from ..oauth import OAuthTokenProvider, derive_token_endpoint
+from ..authcode import AuthCodeProvider, provider_from_auth
 from ..types import RateLimitPerHour, RateLimitStatus
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,11 @@ class JSONRPCTransport(Transport):
                 scope=cc.get("scope"),
             )
 
+        # Authorization-code grant: a signed-in person rather than a machine.
+        self._authcode: Optional[AuthCodeProvider] = provider_from_auth(
+            self.auth.get("authorization_code")
+        )
+
         if identity is not None and identity.needs_rotation(30):
             logger.warning("conduit: mTLS certificate expires within 30 days — consider rotating")
 
@@ -104,6 +110,10 @@ class JSONRPCTransport(Transport):
         if self._oauth is not None:
             assert self._client is not None
             token = await self._oauth.get_token(self._client)
+            return {"Authorization": f"Bearer {token}"}
+        if self._authcode is not None:
+            assert self._client is not None
+            token = await self._authcode.get_token(self._client)
             return {"Authorization": f"Bearer {token}"}
         if "bearer" in self.auth:
             return {"Authorization": f"Bearer {self.auth['bearer']}"}
@@ -154,10 +164,17 @@ class JSONRPCTransport(Transport):
         if response.status_code == 429:
             raise RateLimitError(_parse_rate_limit_status(response))
 
-        if response.status_code == 401:
-            if self._oauth is not None and not is_retry:
+        if response.status_code == 401 and not is_retry:
+            # Either grant recovers by refreshing; an expired access token
+            # should not surface to the caller as an auth failure.
+            if self._oauth is not None:
                 self._oauth.invalidate()
                 return await self._call_with_retry(method, params, is_retry=True)
+            if self._authcode is not None:
+                self._authcode.invalidate()
+                return await self._call_with_retry(method, params, is_retry=True)
+
+        if response.status_code == 401:
             raise AuthError(
                 f"Authentication failed (HTTP 401). Check your credentials and try again."
             )

@@ -11,6 +11,24 @@ from .namespaces import (
     FlowNamespace,
 )
 from .oauth import OAuthTokenProvider, derive_token_endpoint
+from .authcode import (
+    DEFAULT_SCOPE,
+    AuthCodeError,
+    AuthCodeErrorKind,
+    AuthCodeFlow,
+    AuthCodeProvider,
+    AuthServerMetadata,
+    Grant,
+    PendingAuthorization,
+    RegisteredClient,
+    challenge_s256,
+    generate_verifier,
+)
+
+# The loopback listener lives in its own module so a headless caller can take
+# the flow without one, but it is re-exported here — the same surface every
+# conduit SDK presents — and it needs nothing beyond asyncio.
+from .loopback import LoopbackListener, Redirect
 from .registration import (
     DG_CA_URL,
     Byok,
@@ -92,6 +110,20 @@ __all__ = [
     "register_and_exchange",
     # OAuth 2.1
     "OAuthTokenProvider",
+    # OAuth 2.1 authorization code + PKCE
+    "AuthCodeFlow",
+    "AuthCodeProvider",
+    "AuthCodeError",
+    "AuthCodeErrorKind",
+    "AuthServerMetadata",
+    "Grant",
+    "PendingAuthorization",
+    "RegisteredClient",
+    "DEFAULT_SCOPE",
+    "LoopbackListener",
+    "Redirect",
+    "challenge_s256",
+    "generate_verifier",
     "derive_token_endpoint",
     # Rate limiting
     "RateLimitError",

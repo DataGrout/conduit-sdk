@@ -42,6 +42,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Optional, Tuple
 
+import httpx
+
+from ..authcode import AuthCodeProvider, provider_from_auth
+from ..oauth import OAuthTokenProvider, derive_token_endpoint
+
 try:
     import websockets
     from websockets.asyncio.client import connect as ws_connect, ClientConnection
@@ -165,6 +170,30 @@ class WsTransport(Transport):
         self._auth = auth or {}
         self._identity = identity
 
+        # OAuth providers, built once so a token survives reconnects. Resolved
+        # in _resolve_bearer() before the upgrade request is built — see the
+        # note there on why that cannot happen inside the header builder.
+        self._oauth: Optional[OAuthTokenProvider] = None
+        if "client_credentials" in self._auth:
+            cc = self._auth["client_credentials"]
+            # The token endpoint is an HTTP URL; this transport's own URL is
+            # ws:// or wss://, so map the scheme across before deriving.
+            endpoint = cc.get("token_endpoint") or derive_token_endpoint(
+                "http" + url[2:] if url.startswith("ws") else url
+            )
+            self._oauth = OAuthTokenProvider(
+                client_id=cc["client_id"],
+                client_secret=cc["client_secret"],
+                token_endpoint=endpoint,
+                scope=cc.get("scope"),
+            )
+
+        self._authcode: Optional[AuthCodeProvider] = provider_from_auth(
+            self._auth.get("authorization_code")
+        )
+        #: HTTP client for token fetches, created lazily on first use.
+        self._token_http: Optional[httpx.AsyncClient] = None
+
         # Seconds between client-initiated ping frames.  Defaults to
         # PING_INTERVAL_SECONDS; tests may override with a small value.
         self._ping_interval: float = (
@@ -190,7 +219,7 @@ class WsTransport(Transport):
         if self._ws is not None:
             return
 
-        extra_headers = self._build_extra_headers()
+        extra_headers = self._build_extra_headers(await self._resolve_bearer())
         ssl_ctx = self._build_ssl_context()
 
         connect_kwargs: Dict[str, Any] = {
@@ -228,6 +257,14 @@ class WsTransport(Transport):
             except Exception:
                 pass
             self._ws = None
+
+        # The token client is ours, so it closes with us.
+        if self._token_http is not None:
+            try:
+                await self._token_http.aclose()
+            except Exception:
+                pass
+            self._token_http = None
 
         # Propagate closure to all pending callers.
         err = RuntimeError("WS connection closed")
@@ -367,8 +404,34 @@ class WsTransport(Transport):
                 "WS transport not connected. Call connect() first or use 'async with'."
             )
 
-    def _build_extra_headers(self) -> Dict[str, str]:
+    async def _resolve_bearer(self) -> Optional[str]:
+        """The bearer to put on the upgrade request, if any.
+
+        Resolved *before* the handshake is built. Fetching a token is async
+        while header construction is not, so a provider-backed token could
+        never reach the upgrade if it were resolved inside the header builder —
+        which is exactly the bug this replaced: an OAuth client authenticated
+        over WS only if it also happened to present an mTLS identity.
+        """
+        if self._oauth is None and self._authcode is None:
+            return None
+
+        if self._token_http is None:
+            self._token_http = httpx.AsyncClient()
+
+        if self._oauth is not None:
+            return await self._oauth.get_token(self._token_http)
+        assert self._authcode is not None
+        return await self._authcode.get_token(self._token_http)
+
+    def _build_extra_headers(self, resolved_bearer: Optional[str] = None) -> Dict[str, str]:
         headers: Dict[str, str] = {}
+
+        # A provider-backed token is the live one, so it wins over the config.
+        if resolved_bearer is not None:
+            headers["Authorization"] = f"Bearer {resolved_bearer}"
+            return headers
+
         auth = self._auth
 
         if bearer := auth.get("bearer"):
