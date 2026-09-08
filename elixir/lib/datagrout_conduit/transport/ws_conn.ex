@@ -27,12 +27,13 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
 
   # Public so the options can be asserted on without opening a socket.
   #
-  # An mTLS identity rides the `wss://` handshake as WebSockex `:ssl_options`,
-  # which it merges into the `:ssl.connect/4` options. The HTTP transports hand
-  # the same identity to Finch as `transport_opts`; this previously discarded it,
-  # so a WS connection presented no client certificate. Mirrors `build_connector`
-  # in the Rust reference: present the cert, and trust the identity's CA when it
-  # has one.
+  # Every `wss://` connection carries explicit `:ssl_options`. WebSockex's own
+  # default is `insecure: true` — no peer verification at all — which neither the
+  # Finch-backed HTTP transports nor the Rust reference (`build_connector`, webpki
+  # roots) ever accept. Supplying `:ssl_options` replaces that default, so the
+  # trust store, SNI and hostname check are named here for identity-less and
+  # identity-carrying connections alike; an mTLS identity additionally presents
+  # its cert and key, and its CA becomes the trust store when it has one.
   @doc false
   def build_ws_opts(url, headers, identity) do
     base = [extra_headers: headers, handle_initial_conn_failure: true]
@@ -43,7 +44,7 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
     end
   end
 
-  defp ssl_options("wss://" <> _ = url, %DatagroutConduit.Identity{} = identity) do
+  defp ssl_options("wss://" <> _ = url, identity) do
     [
       verify: :verify_peer,
       depth: 3,
@@ -51,13 +52,20 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
       customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
     ]
     |> Keyword.merge(trust_store(identity))
+    |> client_identity(identity)
+  end
+
+  defp ssl_options(_url, _identity), do: []
+
+  defp client_identity(opts, %DatagroutConduit.Identity{} = identity) do
+    opts
     |> maybe_add(:certfile, identity.cert_path)
     |> maybe_add(:keyfile, identity.key_path)
     |> maybe_add_pem(:cert, identity.cert_pem)
     |> maybe_add_pem(:key, identity.key_pem)
   end
 
-  defp ssl_options(_url, _identity), do: []
+  defp client_identity(opts, _no_identity), do: opts
 
   # Passing `:ssl_options` replaces WebSockex's own TLS defaults, so the trust
   # store has to be named here: the identity's CA when it has one, otherwise the

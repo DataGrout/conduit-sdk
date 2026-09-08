@@ -58,9 +58,17 @@ cert and were not changed.
   `verify: :verify_peer`, SNI, and a trust store that is the identity's CA
   (`cacerts` from PEM, `cacertfile` from a path) or the CAStore bundle the
   Finch-backed transports already verify against. Applied to `wss://` only.
-  Note that supplying `:ssl_options` replaces WebSockex's defaults, so a
-  connection carrying an identity now verifies the peer where an
-  identity-less one still uses WebSockex's `insecure: true` default.
+
+### Fixed — Elixir `wss://` connections verify the server without an identity
+
+WebSockex defaults to `insecure: true`, so an Elixir WebSocket connection that
+carried no mTLS identity performed no peer verification at all — unlike the
+Finch-backed HTTP transports and the Rust reference, which always verify
+against a real trust store. `Transport.Ws.Conn` now sets `verify: :verify_peer`,
+SNI, the `:https` hostname check and the CAStore bundle on every `wss://`
+connection, identity or not. Behaviour change: a `wss://` endpoint with a
+self-signed or otherwise untrusted server certificate that used to connect will
+now be refused, as it already was over HTTP.
 
 ### Added — OAuth 2.1 authorization code + PKCE
 

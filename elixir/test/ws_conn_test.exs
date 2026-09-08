@@ -17,11 +17,28 @@ defmodule DatagroutConduit.Transport.Ws.ConnTest do
   @headers [{"authorization", "Bearer t"}]
 
   describe "build_ws_opts/3 without an identity" do
-    test "carries only the upgrade headers and reconnect flag" do
+    test "still verifies the server on wss:// instead of WebSockex's insecure default" do
       opts = Conn.build_ws_opts(@url, @headers, nil)
+      ssl = opts[:ssl_options]
 
       assert opts[:extra_headers] == @headers
       assert opts[:handle_initial_conn_failure] == true
+
+      assert ssl[:verify] == :verify_peer
+      assert ssl[:cacertfile] == CAStore.file_path()
+      assert ssl[:server_name_indication] == ~c"gateway.datagrout.ai"
+      assert [match_fun: _] = ssl[:customize_hostname_check]
+
+      # No identity, so nothing to present.
+      for key <- [:cert, :key, :certfile, :keyfile, :cacerts] do
+        refute Keyword.has_key?(ssl, key), "unexpected #{inspect(key)} without an identity"
+      end
+    end
+
+    test "adds no TLS options to a plain ws:// connection" do
+      opts = Conn.build_ws_opts("ws://localhost:4000/ws", @headers, nil)
+
+      assert opts[:extra_headers] == @headers
       refute Keyword.has_key?(opts, :ssl_options)
     end
   end
