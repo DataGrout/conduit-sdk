@@ -9,6 +9,30 @@ export { ConduitIdentity, fetchWithIdentity } from "./identity";
 export type { MtlsConfig } from "./identity";
 export { OAuthTokenProvider, deriveTokenEndpoint } from "./oauth";
 export {
+  AuthCodeFlow,
+  AuthCodeProvider,
+  AuthCodeError,
+  DEFAULT_SCOPE,
+  authCodeProviderFrom,
+  challengeS256,
+  generateVerifier,
+  isGrantExpired,
+  isGrantRefreshable,
+  refreshGrant,
+  supportsS256,
+} from "./authcode";
+export type {
+  AuthCodeErrorKind,
+  AuthServerMetadata,
+  Grant,
+  PendingAuthorization,
+  RegisteredClient,
+} from "./authcode";
+// The loopback listener is its own module so a headless caller can import the
+// flow without an HTTP server; it is re-exported here for convenience.
+export { LoopbackListener } from "./loopback";
+export type { Redirect } from "./loopback";
+export {
   DG_CA_URL,
   DG_SUBSTRATE_ENDPOINT,
   DEFAULT_IDENTITY_DIR,

@@ -5,6 +5,7 @@
 import { Transport } from "./base";
 import { ConduitIdentity, fetchWithIdentity } from "../identity";
 import { OAuthTokenProvider } from "../oauth";
+import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
 import type {
   AuthConfig,
   MCPTool,
@@ -80,6 +81,8 @@ export class JSONRPCTransport extends Transport {
   private requestId = 0;
   /** Resolved token provider, present only when `auth.clientCredentials` is set. */
   private oauthProvider?: OAuthTokenProvider;
+  /** Present only when `auth.authorizationCode` is set. */
+  private authCodeProvider?: AuthCodeProvider;
 
   constructor(
     url: string,
@@ -115,6 +118,8 @@ export class JSONRPCTransport extends Transport {
         scope: cc.scope,
       });
     }
+
+    this.authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
   }
 
   async connect(): Promise<void> {
@@ -141,6 +146,9 @@ export class JSONRPCTransport extends Transport {
     // Handle auth — OAuth token fetched asynchronously.
     if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } else if (this.authCodeProvider) {
+      const token = await this.authCodeProvider.getToken();
       headers["Authorization"] = `Bearer ${token}`;
     } else if (this.auth?.bearer) {
       headers["Authorization"] = `Bearer ${this.auth.bearer}`;
@@ -179,10 +187,18 @@ export class JSONRPCTransport extends Transport {
         throw parseRateLimitError(response);
       }
 
-      // On 401, invalidate the cached OAuth token and retry once.
-      if (response.status === 401 && this.oauthProvider && !isRetry) {
-        this.oauthProvider.invalidate();
-        return this._callWithRetry(method, params, true);
+      // On 401, invalidate the cached OAuth token and retry once. Both grant
+      // types go through the same choke point, so an expired authorization-code
+      // access token recovers by refreshing rather than surfacing to the caller.
+      if (response.status === 401 && !isRetry) {
+        if (this.oauthProvider) {
+          this.oauthProvider.invalidate();
+          return this._callWithRetry(method, params, true);
+        }
+        if (this.authCodeProvider) {
+          this.authCodeProvider.invalidate();
+          return this._callWithRetry(method, params, true);
+        }
       }
 
       if (!response.ok) {

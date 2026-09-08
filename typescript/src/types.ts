@@ -242,6 +242,18 @@ export interface AuthConfig {
     /** Optional space-separated scope string (e.g. `"mcp tools"`). */
     scope?: string;
   };
+  /**
+   * OAuth 2.1 **authorization code** grant — a signed-in *person* rather than
+   * a machine. Obtain one with `AuthCodeFlow`, persist it, and pass it here on
+   * later runs.
+   *
+   * Pass a `Grant` and the SDK wraps it. Pass an `AuthCodeProvider` to keep
+   * ownership, which is what you want when a rotated refresh token has to be
+   * written back: poll `takeIfDirty()` and persist whatever it returns.
+   */
+  authorizationCode?:
+    | import("./authcode").Grant
+    | import("./authcode").AuthCodeProvider;
   custom?: Record<string, string>;
 }
 

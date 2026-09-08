@@ -28,6 +28,8 @@
 
 import type { MCPTool, MCPResource, MCPPrompt, AuthConfig } from "../types";
 import type { ConduitIdentity } from "../identity";
+import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
+import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
 import { Transport } from "./base";
 
 export const SUBPROTOCOL = "datagrout-jsonrpc.v1";
@@ -162,6 +164,15 @@ export class WsTransport extends Transport {
   private readonly _url: string;
   private readonly _auth?: AuthConfig;
 
+  /**
+   * Resolved OAuth providers, built once so a token survives reconnects.
+   *
+   * Both are consulted in {@link _resolveBearer} before the upgrade request is
+   * built — see the note there on why that has to happen up front.
+   */
+  private readonly _oauthProvider?: OAuthTokenProvider;
+  private readonly _authCodeProvider?: AuthCodeProvider;
+
   private _ws: WebSocket | null = null;
   private _nextId = 0;
 
@@ -199,15 +210,49 @@ export class WsTransport extends Transport {
 
     this._url = url;
     this._auth = auth;
+
+    if (auth?.clientCredentials) {
+      const cc = auth.clientCredentials;
+      // The token endpoint is an HTTP URL; this transport's own URL is
+      // ws:// or wss://, so map the scheme across before deriving.
+      const tokenEndpoint =
+        cc.tokenEndpoint ?? deriveTokenEndpoint(url.replace(/^ws/, "http"));
+      this._oauthProvider = new OAuthTokenProvider({
+        clientId: cc.clientId,
+        clientSecret: cc.clientSecret,
+        tokenEndpoint,
+        scope: cc.scope,
+      });
+    }
+
+    this._authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  /**
+   * The bearer to put on the upgrade request, if any.
+   *
+   * Resolved *before* the handshake is built. Fetching a token is async while
+   * header construction is not, so a provider-backed token could never reach
+   * the upgrade if it were resolved inside the header builder — which is
+   * exactly the bug this replaced: an OAuth client authenticated over WS only
+   * if it also happened to present an mTLS identity.
+   */
+  private async _resolveBearer(): Promise<string | undefined> {
+    if (this._oauthProvider) return this._oauthProvider.getToken();
+    if (this._authCodeProvider) return this._authCodeProvider.getToken();
+    return undefined;
+  }
 
   async connect(): Promise<void> {
     if (this._ws !== null) return;
 
     const WsImpl = await resolveWebSocketImpl();
-    const headers = buildUpgradeHeaders(this._auth);
+    const headers = buildUpgradeHeaders(
+      this._auth,
+      await this._resolveBearer(),
+    );
 
     // The `ws` package accepts `{ headers }` as the third argument to the
     // constructor; browsers ignore unknown options.
@@ -514,9 +559,23 @@ export class WsTransport extends Transport {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Build upgrade request headers from the auth config. */
-function buildUpgradeHeaders(auth?: AuthConfig): Record<string, string> {
+/**
+ * Build upgrade request headers from the auth config.
+ *
+ * `resolvedBearer` is an OAuth token already fetched by the caller — it wins
+ * over the static config, because a provider-backed token is the live one.
+ */
+function buildUpgradeHeaders(
+  auth?: AuthConfig,
+  resolvedBearer?: string,
+): Record<string, string> {
   const headers: Record<string, string> = {};
+
+  if (resolvedBearer !== undefined) {
+    headers["Authorization"] = `Bearer ${resolvedBearer}`;
+    return headers;
+  }
+
   if (auth === undefined) return headers;
 
   if ("bearer" in auth && auth.bearer !== undefined) {

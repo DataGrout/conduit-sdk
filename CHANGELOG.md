@@ -16,7 +16,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 > | language | authcode | WS OAuth handshake fix |
 > |---|---|---|
 > | Rust (reference) | ✅ | ✅ |
-> | TypeScript | ☐ | ☐ |
+> | TypeScript | ✅ | ✅ |
 > | Python | ☐ | ☐ |
 > | Ruby | ☐ | ☐ |
 > | Elixir | ☐ | ☐ |
@@ -34,7 +34,7 @@ Behaviour change for existing `client_credentials` users: WS upgrades now carry
 an `Authorization: Bearer` header. Servers that were relying on the absence of
 that header will see it.
 
-### Added — OAuth 2.1 authorization code + PKCE (Rust only so far)
+### Added — OAuth 2.1 authorization code + PKCE
 
 Browser-consent sign-in, behind the new `authcode` feature. Until now every
 conduit SDK could authenticate a *machine* (`client_credentials`, or the onramp
@@ -74,6 +74,31 @@ handshake, so authorization-code grants authenticate over WS.
 `ClientCredentials` keeps its existing WS behaviour (mTLS, or a token in the
 first subscribe frame) — the same treatment would likely suit it, but that
 would change existing behaviour and is left for a separate change.
+
+#### TypeScript
+
+The same surface, idiomatically. `Grant` is a plain interface, so
+`JSON.stringify` produces the cross-language shape with no `toJSON` to forget,
+and the helpers are free functions (`isGrantExpired`, `isGrantRefreshable`,
+`refreshGrant`). The error taxonomy is one `AuthCodeError` carrying a `kind`
+from a string-literal union, which is how a TypeScript caller branches.
+`auth.authorizationCode` accepts either a bare `Grant` or an
+`AuthCodeProvider` you keep — the second being what you want when a rotated
+refresh token has to be written back.
+
+`LoopbackListener` lives in its own module (`src/loopback.ts`) rather than
+inside `authcode`, mirroring the Rust feature split so a headless caller can
+take the flow without an HTTP server.
+
+Unlike Rust, the WS fix here also covers `client_credentials`: that transport
+built its upgrade headers synchronously and never constructed a provider at
+all, so *neither* grant authenticated over WS. Both do now, and the token
+endpoint is derived from the `ws://` URL with the scheme mapped across to
+`http://`, since a `ws://` token endpoint is nonsense.
+
+Example: `npx tsx examples/browserSignin.ts`. 56 new tests, including a
+capturing WebSocket stub that drives the real `connect()` — the bug lived in
+exactly the wiring that the existing mocked-transport tests skip.
 
 ### Porting brief — TypeScript, Python, Ruby, Elixir
 

@@ -6,6 +6,7 @@ import { Transport } from "./base";
 import type { AuthConfig, MCPTool, MCPResource, MCPPrompt } from "../types";
 import type { ConduitIdentity } from "../identity";
 import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
+import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -17,6 +18,8 @@ export class MCPTransport extends Transport {
   private client?: Client;
   private clientTransport?: SSEClientTransport | StdioClientTransport;
   private oauthProvider?: OAuthTokenProvider;
+  /** Present only when `auth.authorizationCode` is set. */
+  private authCodeProvider?: AuthCodeProvider;
 
   constructor(url: string, auth?: AuthConfig, identity?: ConduitIdentity) {
     super();
@@ -34,6 +37,8 @@ export class MCPTransport extends Transport {
         scope: cc.scope,
       });
     }
+
+    this.authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
   }
 
   private async buildHeaders(): Promise<Record<string, string>> {
@@ -41,6 +46,9 @@ export class MCPTransport extends Transport {
 
     if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } else if (this.authCodeProvider) {
+      const token = await this.authCodeProvider.getToken();
       headers["Authorization"] = `Bearer ${token}`;
     } else if (this.auth?.bearer) {
       headers["Authorization"] = `Bearer ${this.auth.bearer}`;

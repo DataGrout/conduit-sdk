@@ -49,6 +49,61 @@ const client = new Client({
 
 The SDK automatically fetches, caches, and refreshes JWTs before they expire.
 
+### OAuth 2.1 (authorization code + PKCE)
+
+`client_credentials` authenticates a *machine*, with a secret issued out of
+band. To authenticate a *person* — and to reach
+`https://gateway.datagrout.ai/connect`, where the server binding is chosen at
+consent time and lives in the token rather than the URL — run the
+browser-consent flow once and persist the grant:
+
+```typescript
+import { AuthCodeFlow, LoopbackListener } from '@datagrout/conduit';
+
+const listener = await LoopbackListener.bind();          // 127.0.0.1, OS-chosen port
+const flow = await AuthCodeFlow.discover('https://gateway.datagrout.ai/connect');
+const registered = await flow.register('My App', listener.redirectUri);
+
+const { url, pending } = flow.authorizeUrl();
+console.log(`Open this to sign in:\n${url}`);            // the SDK never opens a browser
+
+const redirect = await listener.wait(300_000);
+const grant = await flow.exchange(pending, redirect.code, redirect.state);
+
+// Persist BOTH: a client id without its redirect URI cannot be reused, because
+// the authorization server matches redirect URIs exactly.
+saveSomewhere({ registered, grant });
+```
+
+On later runs, skip straight to the grant:
+
+```typescript
+const client = new Client({
+  url: 'https://gateway.datagrout.ai/connect',
+  auth: { authorizationCode: grant },
+});
+```
+
+DataGrout **rotates refresh tokens**, so a grant that is refreshed and not
+written back leaves a consumed token on disk. Own the provider when you care:
+
+```typescript
+import { AuthCodeProvider } from '@datagrout/conduit';
+
+const provider = new AuthCodeProvider(grant);
+const client = new Client({ url, auth: { authorizationCode: provider } });
+
+setInterval(() => {
+  const rotated = provider.takeIfDirty();
+  if (rotated) saveSomewhere({ registered, grant: rotated });
+}, 30_000);
+```
+
+Where the grant lives is your decision — a keychain, a config file, a vault.
+The SDK owns its shape and its refresh, and deliberately picks no location.
+The shape is identical across every conduit SDK, so a grant written by the
+Python client is readable by this one.
+
 ### mTLS (Mutual TLS)
 
 After bootstrapping, the client certificate handles authentication at the TLS layer — no tokens needed.
@@ -217,7 +272,12 @@ Supported topics:
 ```typescript
 new Client(options: {
   url: string;
-  auth?: { bearer?: string; apiKey?: string; clientCredentials?: {...} };
+  auth?: {
+    bearer?: string;
+    apiKey?: string;
+    clientCredentials?: {...};
+    authorizationCode?: Grant | AuthCodeProvider;
+  };
   transport?: 'mcp' | 'jsonrpc' | 'websocket';
   useIntelligentInterface?: boolean;
   identity?: ConduitIdentity;
