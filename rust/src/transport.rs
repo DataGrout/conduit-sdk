@@ -591,3 +591,238 @@ impl TransportTrait for JsonRpcTransport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // This module had no tests at all, so the 401-retry path — the one place a
+    // provider-backed grant gets a second chance — was never exercised in Rust,
+    // for either grant. The other four SDKs grew transport-level auth tests when
+    // the authorization-code grant landed; this closes the gap in the reference.
+
+    fn unix_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    #[cfg(feature = "authcode")]
+    fn grant(expires_at: u64, token_endpoint: &str) -> crate::authcode::Grant {
+        crate::authcode::Grant {
+            access_token: "user_access_token".into(),
+            refresh_token: Some("rt".into()),
+            expires_at: Some(expires_at),
+            client_id: "client_abc".into(),
+            token_endpoint: token_endpoint.into(),
+            scope: None,
+            resource: None,
+        }
+    }
+
+    fn request() -> JsonRpcRequest {
+        JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some("1".into()),
+            method: "tools/list".into(),
+            params: None,
+        }
+    }
+
+    fn header_value(headers: &header::HeaderMap, name: header::HeaderName) -> Option<String> {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    }
+
+    // ─── inject_oauth_token ──────────────────────────────────────────────
+
+    #[cfg(feature = "authcode")]
+    #[tokio::test]
+    async fn inject_oauth_token_sets_a_bearer_for_an_authorization_code_grant() {
+        let provider = crate::authcode::AuthCodeProvider::new(grant(
+            unix_secs() + 3600,
+            "https://gateway.example.com/oauth/token",
+        ));
+        let auth = AuthConfig::AuthorizationCode(provider);
+
+        let mut headers = header::HeaderMap::new();
+        inject_oauth_token(&auth, &HttpClient::new(), &mut headers)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            header_value(&headers, header::AUTHORIZATION).as_deref(),
+            Some("Bearer user_access_token")
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_oauth_token_is_a_no_op_for_synchronous_auth() {
+        // These build their header in `build_headers`; there is nothing to
+        // fetch, and injecting an empty bearer would overwrite it.
+        for auth in [
+            AuthConfig::None,
+            AuthConfig::Bearer("static".into()),
+            AuthConfig::ApiKey("k".into()),
+        ] {
+            let mut headers = header::HeaderMap::new();
+            inject_oauth_token(&auth, &HttpClient::new(), &mut headers)
+                .await
+                .unwrap();
+            assert!(headers.get(header::AUTHORIZATION).is_none());
+        }
+    }
+
+    // ─── invalidate_oauth ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn invalidate_oauth_reports_whether_a_retry_could_help() {
+        // The 401 retry is only worth taking when a refresh could change the
+        // outcome. A static credential was rejected for a reason retrying will
+        // not fix.
+        assert!(!invalidate_oauth(&AuthConfig::None).await);
+        assert!(!invalidate_oauth(&AuthConfig::Bearer("static".into())).await);
+        assert!(!invalidate_oauth(&AuthConfig::ApiKey("k".into())).await);
+
+        let provider = OAuthTokenProvider::new(
+            "id",
+            "secret",
+            "https://gateway.example.com/oauth/token",
+            None,
+        );
+        assert!(invalidate_oauth(&AuthConfig::ClientCredentials(provider)).await);
+    }
+
+    #[cfg(feature = "authcode")]
+    #[tokio::test]
+    async fn invalidate_oauth_covers_the_authorization_code_grant_too() {
+        let provider = crate::authcode::AuthCodeProvider::new(grant(
+            unix_secs() + 3600,
+            "https://gateway.example.com/oauth/token",
+        ));
+        assert!(invalidate_oauth(&AuthConfig::AuthorizationCode(provider)).await);
+    }
+
+    // ─── the 401 retry ───────────────────────────────────────────────────
+
+    #[cfg(feature = "authcode")]
+    #[tokio::test]
+    async fn a_401_refreshes_an_authorization_code_grant_and_retries_once() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Matching on the bearer is what makes this deterministic: the first
+        // attempt carries the stale token, the retry must carry the fresh one.
+        let stale = server
+            .mock("POST", "/mcp")
+            .match_header("authorization", "Bearer user_access_token")
+            .with_status(401)
+            .with_body("unauthorized")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let refreshed = server
+            .mock("POST", "/mcp")
+            .match_header("authorization", "Bearer refreshed")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"jsonrpc":"2.0","id":"1","result":{"ok":true}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let token = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"refreshed","token_type":"Bearer","expires_in":3600}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Live by the clock: an already-expired grant would be refreshed
+        // before the first request and never earn a 401. The case the retry
+        // path exists for is a token rotated or revoked server-side.
+        let provider = crate::authcode::AuthCodeProvider::new(grant(
+            unix_secs() + 3600,
+            &format!("{}/oauth/token", server.url()),
+        ));
+
+        let mut transport = McpTransport::new(
+            format!("{}/mcp", server.url()),
+            AuthConfig::AuthorizationCode(provider),
+        )
+        .unwrap();
+        transport.connect().await.unwrap();
+
+        let response = transport.send_request(request()).await.unwrap();
+        assert_eq!(response.result.unwrap()["ok"], serde_json::json!(true));
+
+        // One stale attempt, one refresh, one retry — and no third attempt.
+        stale.assert_async().await;
+        token.assert_async().await;
+        refreshed.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_401_on_a_static_bearer_is_not_retried() {
+        let mut server = mockito::Server::new_async().await;
+        let rpc = server
+            .mock("POST", "/mcp")
+            .with_status(401)
+            .with_body("unauthorized")
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mut transport = McpTransport::new(
+            format!("{}/mcp", server.url()),
+            AuthConfig::Bearer("static".into()),
+        )
+        .unwrap();
+        transport.connect().await.unwrap();
+
+        // Nothing to refresh, so nothing to retry.
+        assert!(transport.send_request(request()).await.is_err());
+        rpc.assert_async().await;
+    }
+
+    #[cfg(feature = "authcode")]
+    #[tokio::test]
+    async fn a_401_that_survives_the_refresh_is_reported_as_an_auth_error() {
+        let mut server = mockito::Server::new_async().await;
+        let rpc = server
+            .mock("POST", "/mcp")
+            .with_status(401)
+            .with_body("unauthorized")
+            .expect(2)
+            .create_async()
+            .await;
+
+        let _token = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(r#"{"access_token":"still_bad","token_type":"Bearer","expires_in":3600}"#)
+            .create_async()
+            .await;
+
+        let provider = crate::authcode::AuthCodeProvider::new(grant(
+            unix_secs() + 3600,
+            &format!("{}/oauth/token", server.url()),
+        ));
+
+        let mut transport = JsonRpcTransport::new(
+            format!("{}/mcp", server.url()),
+            AuthConfig::AuthorizationCode(provider),
+        )
+        .unwrap();
+        transport.connect().await.unwrap();
+
+        let err = transport.send_request(request()).await.unwrap_err();
+        assert!(matches!(err, Error::Auth(_)), "got {err:?}");
+        // Exactly one retry: a revoked grant fails fast instead of recursing.
+        rpc.assert_async().await;
+    }
+}

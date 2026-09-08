@@ -148,6 +148,39 @@ pub enum AuthCodeError {
     Http(String),
 }
 
+impl AuthCodeError {
+    /// The cross-language name for this failure.
+    ///
+    /// Every conduit SDK distinguishes the same cases under the same names, so
+    /// this is what to log, report or compare against another SDK's error. Rust
+    /// callers branching on the failure should match the variant instead — this
+    /// exists for the contract, not for control flow.
+    ///
+    /// The `match` is exhaustive on purpose: a new variant will not compile
+    /// until it is named here, which is what keeps the taxonomy from drifting
+    /// away from the other four languages.
+    ///
+    /// ```
+    /// use datagrout_conduit::authcode::AuthCodeError;
+    ///
+    /// assert_eq!(AuthCodeError::StateMismatch.kind(), "state_mismatch");
+    /// ```
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Discovery(_) => "discovery",
+            Self::NoRegistrationEndpoint => "no_registration_endpoint",
+            Self::RegistrationRejected { .. } => "registration_rejected",
+            Self::NoClientId => "no_client_id",
+            Self::PkceUnsupported => "pkce_unsupported",
+            Self::StateMismatch => "state_mismatch",
+            Self::TokenExchange { .. } => "token_exchange",
+            Self::NotRefreshable => "not_refreshable",
+            Self::Denied { .. } => "denied",
+            Self::Http(_) => "http",
+        }
+    }
+}
+
 impl From<AuthCodeError> for Error {
     fn from(e: AuthCodeError) -> Self {
         Error::Auth(e.to_string())
@@ -1443,9 +1476,6 @@ mod tests {
     // every language SDK checks, so a grant written here is provably readable
     // elsewhere. See `testdata/README.md`.
     //
-    // `error_kinds` is not checked here: `AuthCodeError` is a `thiserror` enum
-    // with no string form, and giving it one would mean new public API. Python
-    // and TypeScript enumerate theirs and cover that row.
     // ---------------------------------------------------------------------
 
     fn contract() -> serde_json::Value {
@@ -1504,5 +1534,48 @@ mod tests {
     #[test]
     fn contract_fixture_pins_the_default_scope() {
         assert_eq!(DEFAULT_SCOPE, contract()["default_scope"].as_str().unwrap());
+    }
+
+    #[test]
+    fn contract_fixture_pins_the_error_taxonomy() {
+        // One of every variant. The list is hand-written, as it is in Ruby and
+        // Elixir — but unlike them, a variant added without a `kind()` arm does
+        // not compile, so the two halves together catch both a renamed kind and
+        // an added one.
+        let mut kinds: Vec<&'static str> = vec![
+            AuthCodeError::Discovery(String::new()).kind(),
+            AuthCodeError::NoRegistrationEndpoint.kind(),
+            AuthCodeError::RegistrationRejected {
+                status: 400,
+                body: String::new(),
+            }
+            .kind(),
+            AuthCodeError::NoClientId.kind(),
+            AuthCodeError::PkceUnsupported.kind(),
+            AuthCodeError::StateMismatch.kind(),
+            AuthCodeError::TokenExchange {
+                status: 400,
+                body: String::new(),
+            }
+            .kind(),
+            AuthCodeError::NotRefreshable.kind(),
+            AuthCodeError::Denied {
+                error: String::new(),
+                description: None,
+            }
+            .kind(),
+            AuthCodeError::Http(String::new()).kind(),
+        ];
+        kinds.sort_unstable();
+
+        let mut expected: Vec<String> = contract()["error_kinds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|k| k.as_str().unwrap().to_string())
+            .collect();
+        expected.sort();
+
+        assert_eq!(kinds, expected);
     }
 }

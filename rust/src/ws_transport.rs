@@ -831,6 +831,193 @@ mod tests {
         assert!(matches!(connector, Connector::Rustls(_)));
     }
 
+    // ─── mTLS on the upgrade ─────────────────────────────────────────────
+    //
+    // `build_connector` was only ever tested with `None`, so nothing checked
+    // that an identity handed to a `wss://` connection actually reaches the
+    // TLS config. TypeScript and Elixir grew tests for exactly this when their
+    // WS transports were fixed to present a certificate.
+
+    /// A real ephemeral self-signed cert+key, because rustls parses these for
+    /// real — a placeholder PEM would prove nothing.
+    fn real_identity(ca_pem: Option<&[u8]>) -> ConduitIdentity {
+        use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+
+        let key_pair = KeyPair::generate().expect("key generation");
+        let mut params = CertificateParams::default();
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, "test-conduit");
+        params.distinguished_name = dn;
+        let cert = params.self_signed(&key_pair).expect("self-signed cert");
+
+        ConduitIdentity::from_pem(
+            cert.pem().as_bytes(),
+            key_pair.serialize_pem().as_bytes(),
+            ca_pem,
+        )
+        .expect("real cert should load")
+    }
+
+    #[test]
+    fn connector_presents_a_client_certificate() {
+        let identity = real_identity(None);
+        let connector = build_connector(Some(&identity)).unwrap();
+        assert!(matches!(connector, Connector::Rustls(_)));
+    }
+
+    #[test]
+    fn connector_trusts_the_identitys_own_ca() {
+        // A second cert standing in as the CA: what matters is that a CA PEM
+        // is parsed and added to the roots rather than ignored.
+        let ca = real_identity(None);
+        let identity = real_identity(Some(ca.cert_pem_bytes()));
+        assert!(build_connector(Some(&identity)).is_ok());
+    }
+
+    #[test]
+    fn connector_refuses_an_identity_it_cannot_parse() {
+        // Proves the identity is consumed rather than quietly dropped: these
+        // PEMs satisfy `from_pem`'s header check but carry nothing rustls can
+        // read, so building the connector must fail loudly.
+        const STUB_CERT: &str =
+            "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END CERTIFICATE-----\n";
+        const STUB_KEY: &str =
+            "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEA\n-----END PRIVATE KEY-----\n";
+
+        let identity =
+            ConduitIdentity::from_pem(STUB_CERT, STUB_KEY, None::<Vec<u8>>).expect("loads");
+        assert!(build_connector(Some(&identity)).is_err());
+    }
+
+    // ─── OAuth on the upgrade ────────────────────────────────────────────
+    //
+    // `resolve_async_token` is the whole of the WS OAuth fix: the handshake
+    // builder is synchronous, so this is the only point at which a
+    // provider-backed credential can reach the upgrade. Neither it nor the
+    // branch that consumes its result was covered.
+
+    fn auth_header(req: &WsRequest) -> Option<String> {
+        req.headers()
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    }
+
+    #[cfg(feature = "authcode")]
+    fn live_authcode_provider() -> crate::authcode::AuthCodeProvider {
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+            + 3600;
+
+        crate::authcode::AuthCodeProvider::new(crate::authcode::Grant {
+            access_token: "user_access_token".into(),
+            refresh_token: Some("rt".into()),
+            expires_at: Some(expires_at),
+            client_id: "client_abc".into(),
+            token_endpoint: "https://gateway.example.com/oauth/token".into(),
+            scope: None,
+            resource: None,
+        })
+    }
+
+    #[cfg(feature = "authcode")]
+    #[tokio::test]
+    async fn resolve_async_token_yields_an_authorization_code_bearer() {
+        let auth = AuthConfig::AuthorizationCode(live_authcode_provider());
+        let token = resolve_async_token(&auth).await.unwrap();
+        assert_eq!(token.as_deref(), Some("user_access_token"));
+    }
+
+    #[tokio::test]
+    async fn resolve_async_token_yields_a_client_credentials_bearer() {
+        let mut server = mockito::Server::new_async().await;
+        let _token = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(
+                r#"{"access_token":"machine_token","token_type":"Bearer","expires_in":3600}"#,
+            )
+            .create_async()
+            .await;
+
+        let provider = crate::oauth::OAuthTokenProvider::new(
+            "id",
+            "secret",
+            format!("{}/oauth/token", server.url()),
+            None,
+        );
+
+        let token = resolve_async_token(&AuthConfig::ClientCredentials(provider))
+            .await
+            .unwrap();
+        assert_eq!(token.as_deref(), Some("machine_token"));
+    }
+
+    #[tokio::test]
+    async fn resolve_async_token_is_none_for_synchronous_auth() {
+        // These build their header directly; there is nothing to fetch.
+        for auth in [
+            AuthConfig::None,
+            AuthConfig::Bearer("static".into()),
+            AuthConfig::ApiKey("k".into()),
+        ] {
+            assert!(resolve_async_token(&auth).await.unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn handshake_carries_a_resolved_provider_token() {
+        // The fixed branch: a token fetched asynchronously reaches the upgrade.
+        let req = build_handshake_request(
+            "wss://example.com/ws",
+            &AuthConfig::None,
+            Some("resolved_abc"),
+        )
+        .unwrap();
+        assert_eq!(auth_header(&req).as_deref(), Some("Bearer resolved_abc"));
+    }
+
+    #[test]
+    fn a_resolved_token_wins_over_a_static_bearer() {
+        let req = build_handshake_request(
+            "wss://example.com/ws",
+            &AuthConfig::Bearer("static".into()),
+            Some("resolved"),
+        )
+        .unwrap();
+        assert_eq!(auth_header(&req).as_deref(), Some("Bearer resolved"));
+    }
+
+    #[cfg(feature = "authcode")]
+    #[test]
+    fn an_unresolved_authorization_code_grant_sends_no_credential() {
+        // Deliberate: reaching the sync builder unresolved means something
+        // skipped `connect`, and sending no credential beats sending a wrong
+        // one — the server's 401 is legible, a bad bearer is not.
+        let auth = AuthConfig::AuthorizationCode(live_authcode_provider());
+        let req = build_handshake_request("wss://example.com/ws", &auth, None).unwrap();
+
+        assert!(auth_header(&req).is_none());
+        // Still a well-formed upgrade otherwise.
+        assert!(req.headers().get(SEC_WEBSOCKET_PROTOCOL).is_some());
+    }
+
+    #[tokio::test]
+    async fn an_unresolved_client_credentials_grant_sends_no_credential() {
+        let provider = crate::oauth::OAuthTokenProvider::new(
+            "id",
+            "secret",
+            "https://gateway.example.com/oauth/token",
+            None,
+        );
+        let auth = AuthConfig::ClientCredentials(provider);
+        let req = build_handshake_request("wss://example.com/ws", &auth, None).unwrap();
+
+        assert!(auth_header(&req).is_none());
+    }
+
     #[test]
     fn route_notification_drops_unknown_sub() {
         let mut state = ConnectionState::new();

@@ -98,6 +98,11 @@ desktop or CLI application.
   `127.0.0.1` redirect capture.
 - `ClientBuilder::auth_authorization_code(grant)` and
   `auth_authorization_code_provider(provider)`.
+- `AuthCodeError::kind()` — the cross-language name for a failure, for logging
+  and for comparing against another SDK's error. Rust callers branching on a
+  failure should match the variant; this exists for the contract. The `match`
+  behind it is exhaustive, so a variant added without naming its kind does not
+  compile.
 - Example: `cargo run --example browser_signin --features authcode-loopback`.
 
 **Additive:** with the feature off, nothing changes. The new
@@ -339,6 +344,30 @@ The memoized failure belongs to the callers that queued behind it, not to the
 future: once an attempt has settled, the next call refreshes again rather than
 replaying the error. Each language has a test for both halves.
 
+#### Tests — the Rust WebSocket and HTTP auth paths were the least covered
+
+Rust originated both WS fixes and had the thinnest tests for them, which only
+became obvious once TypeScript and Elixir grew real suites for the same code.
+No behaviour changed here; these cover what was already there.
+
+- `resolve_async_token` — the whole of the WS OAuth fix, since the handshake
+  builder is synchronous and this is the only point a provider-backed
+  credential can reach the upgrade — had no test, for either grant.
+- `build_handshake_request` was only ever called with `None`, so the branch that
+  consumes a resolved token was untested, as was the deliberate decision to send
+  *no* credential when a provider grant arrives unresolved.
+- `build_connector` was only tested with `None`. It now has an identity that
+  really is presented, a CA that is really trusted, and an unparseable identity
+  that must fail loudly rather than be silently dropped.
+- `src/transport.rs` had no test module at all, so `inject_oauth_token`,
+  `invalidate_oauth` and the 401-retry-once path were unexercised in Rust for
+  both grants — the one part of the authorization-code work the other four SDKs
+  covered and the reference did not.
+
+The 401 tests use a grant that is live by the clock but rejected by the server,
+which is the case the retry path exists for: an already-expired grant is
+refreshed before the first request and never earns a 401.
+
 #### Invariants 1, 2, 9 and 10 are now enforced, not just written down
 
 `testdata/contract.json` holds the canonical grant, minimal grant, registered
@@ -348,13 +377,11 @@ loads that one file. Before it, each suite round-tripped a grant through its
 long as it is wrong consistently. Nothing actually checked that a grant written
 by Python could be read by Ruby, which is the property invariant 1 promises.
 
-Coverage is deliberately uneven and `testdata/README.md` says why: Python
-enumerates a real `Enum` and TypeScript uses an exhaustive
-`Record<AuthCodeErrorKind, true>`, so both fail when a kind is added and not
-declared; Ruby and Elixir have no runtime registry and compare a hand-written
-list, catching a rename but not an addition; Rust's `thiserror` enum has no
-string form and sits that row out. The grant and client shapes are checked in
-all five.
+Every row is checked in all five. They differ only in whether an *added* kind is
+caught as well as a renamed one: Rust and TypeScript catch it at compile time
+(an exhaustive `match` and an exhaustive `Record`), Python enumerates a real
+`Enum`, and Ruby and Elixir have no runtime registry so their hand-written lists
+catch a rename only. `testdata/README.md` has the table.
 
 ---
 

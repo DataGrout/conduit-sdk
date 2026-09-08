@@ -27,17 +27,22 @@ property invariant #1 in `CHANGELOG.md` promises.
 - Ruby — `ruby/test/contract_test.rb`
 - Elixir — `elixir/test/contract_test.exs`
 
-## Coverage is not uniform, deliberately
+## How strictly each language is held
 
-`error_kinds` is checked in four of the five. Python enumerates a real `Enum`
-and TypeScript uses an exhaustive `Record<AuthCodeErrorKind, true>`, so both
-fail if a kind is added to the SDK and not to this file. Ruby and Elixir express
-the taxonomy as classes and atoms with no runtime registry, so their tests
-compare a hand-written list against this file — that catches a *renamed* kind but
-not an *added* one. Rust models it as a `thiserror` enum with no string form at
-all, so it does not participate; adding one would mean new public API.
+All five check every row. They differ in whether an *added* kind is caught as
+well as a *renamed* one:
 
-The grant and client shapes are checked in all five.
+| language | renamed kind | added kind |
+|---|---|---|
+| Rust | test | compiler — `AuthCodeError::kind()` matches exhaustively |
+| TypeScript | test | compiler — exhaustive `Record<AuthCodeErrorKind, true>` |
+| Python | test | test — enumerates a real `Enum` |
+| Ruby | test | not caught — no runtime registry, list is hand-written |
+| Elixir | test | not caught — same |
+
+Ruby and Elixir express the taxonomy as classes and atoms with nothing to
+enumerate at runtime, so a kind added to the SDK and not to this file slips past
+them. The other three would fail, which is enough to stop the drift.
 
 ## Adding a sixth language
 
