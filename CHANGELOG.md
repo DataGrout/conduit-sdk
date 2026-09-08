@@ -12,13 +12,13 @@ This project follows [Semantic Versioning](https://semver.org/).
 > had shipped the changes below. Parity is the promise; a one-language release
 > is how a temporary gap becomes a permanent one. All five are in.
 >
-> | language | authcode | WS OAuth handshake fix |
-> |---|---|---|
-> | Rust (reference) | ✅ | ✅ |
-> | TypeScript | ✅ | ✅ |
-> | Python | ✅ | ✅ |
-> | Ruby | ✅ | n/a — never broken, see below |
-> | Elixir | ✅ | ✅ |
+> | language | authcode | WS OAuth handshake fix | WS mTLS handshake fix |
+> |---|---|---|---|
+> | Rust (reference) | ✅ | ✅ | n/a — never broken |
+> | TypeScript | ✅ | ✅ | ✅ |
+> | Python | ✅ | ✅ | n/a — never broken |
+> | Ruby | ✅ | n/a — never broken, see below | n/a — never broken |
+> | Elixir | ✅ | ✅ | ✅ |
 >
 > The WS column is not one bug in five places. Rust, TypeScript and Python built
 > the upgrade headers synchronously and so could never attach an
@@ -39,6 +39,28 @@ both grants.
 Behaviour change for existing `client_credentials` users: WS upgrades now carry
 an `Authorization: Bearer` header. Servers that were relying on the absence of
 that header will see it.
+
+### Fixed — mTLS identities now present a client certificate on the WebSocket handshake
+
+Two WebSocket transports accepted a `ConduitIdentity` and silently dropped it,
+so a `wss://` connection presented no client certificate even though the HTTP
+transports in the same language did. Rust (`build_connector`), Python
+(`_build_ssl_context`) and Ruby (`build_ssl_context`) already presented the
+cert and were not changed.
+
+- **TypeScript** — `WsTransport` now passes the identity's PEMs to the `ws`
+  client as `cert`, `key` and (when set) `ca`, which flow to `tls.connect` —
+  the same options `fetchWithIdentity` hands to `https.request`. Outside Node
+  it warns and connects without the cert, as `fetchWithIdentity` does. Applied
+  to `wss://` only; a plain `ws://` connection never carries one.
+- **Elixir** — `Transport.Ws.Conn` now builds `:ssl_options` for WebSockex from
+  the identity: `cert`/`key` from PEM or `certfile`/`keyfile` from paths,
+  `verify: :verify_peer`, SNI, and a trust store that is the identity's CA
+  (`cacerts` from PEM, `cacertfile` from a path) or the CAStore bundle the
+  Finch-backed transports already verify against. Applied to `wss://` only.
+  Note that supplying `:ssl_options` replaces WebSockex's defaults, so a
+  connection carrying an identity now verifies the peer where an
+  identity-less one still uses WebSockex's `insecure: true` default.
 
 ### Added — OAuth 2.1 authorization code + PKCE
 

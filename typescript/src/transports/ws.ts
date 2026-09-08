@@ -165,6 +165,14 @@ export class WsTransport extends Transport {
   private readonly _auth?: AuthConfig;
 
   /**
+   * mTLS identity presented on the `wss://` handshake, if any.  The HTTP
+   * transports route through {@link fetchWithIdentity}; here the PEMs go to the
+   * `ws` client as `cert` / `key` / `ca` options, which it forwards to
+   * `tls.connect`.  Mirrors `build_connector` in the Rust reference.
+   */
+  private readonly _identity?: ConduitIdentity;
+
+  /**
    * Resolved OAuth providers, built once so a token survives reconnects.
    *
    * Both are consulted in {@link _resolveBearer} before the upgrade request is
@@ -197,7 +205,7 @@ export class WsTransport extends Transport {
     url: string,
     auth?: AuthConfig,
     _timeout?: number,
-    _identity?: ConduitIdentity,
+    identity?: ConduitIdentity,
   ) {
     super();
 
@@ -210,6 +218,7 @@ export class WsTransport extends Transport {
 
     this._url = url;
     this._auth = auth;
+    this._identity = identity;
 
     if (auth?.clientCredentials) {
       const cc = auth.clientCredentials;
@@ -254,10 +263,12 @@ export class WsTransport extends Transport {
       await this._resolveBearer(),
     );
 
-    // The `ws` package accepts `{ headers }` as the third argument to the
-    // constructor; browsers ignore unknown options.
+    // The `ws` package accepts `{ headers, cert, key, ca }` as the third
+    // argument to the constructor (the TLS keys flow to `tls.connect`);
+    // browsers ignore unknown options.
     const ws: WebSocket = new (WsImpl as any)(this._url, [SUBPROTOCOL], {
       headers,
+      ...buildTlsOptions(this._url, this._identity),
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -590,6 +601,47 @@ function buildUpgradeHeaders(
   }
 
   return headers;
+}
+
+/** Client-certificate options understood by the `ws` package / `tls.connect`. */
+export interface WsTlsOptions {
+  cert?: string;
+  key?: string;
+  ca?: string;
+}
+
+/**
+ * Build the TLS client options for the handshake from an mTLS identity.
+ *
+ * Only a `wss://` connection can present a certificate, and only Node can
+ * supply one to the socket — a browser `WebSocket` takes no TLS options at
+ * all. Outside Node we warn and connect without the cert, exactly as
+ * `fetchWithIdentity` does for the HTTP transports. Without an identity the
+ * result is empty, so the `ws` client sees only `{ headers }` as before.
+ *
+ * The identity's CA, when present, is handed to `tls.connect` as `ca`, which
+ * is how `fetchWithIdentity` trusts it for the HTTP transports.
+ */
+export function buildTlsOptions(
+  url: string,
+  identity?: ConduitIdentity,
+): WsTlsOptions {
+  if (identity === undefined) return {};
+  if (!url.startsWith("wss:")) return {};
+
+  if (typeof process === "undefined" || !process.versions?.node) {
+    console.warn(
+      "[conduit] mTLS identity is set but this environment does not support client " +
+        "certificates on WebSocket.  The connection will proceed without mTLS.",
+    );
+    return {};
+  }
+
+  return {
+    cert: identity.certPem,
+    key: identity.keyPem,
+    ...(identity.caPem ? { ca: identity.caPem } : {}),
+  };
 }
 
 /**
