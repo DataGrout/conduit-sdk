@@ -344,7 +344,10 @@ module DatagroutConduit
         when :basic
           encoded = Base64.strict_encode64("#{@auth[:username]}:#{@auth[:password]}")
           headers["Authorization"] = "Basic #{encoded}"
-        when :oauth
+        when :oauth, :authcode
+          # Resolving a token is synchronous in Ruby, so it can happen here and
+          # the upgrade carries the bearer. The async SDKs had to hoist this
+          # out of header construction to get the same result.
           token = @auth[:provider].get_token
           headers["Authorization"] = "Bearer #{token}"
         end
@@ -524,6 +527,10 @@ module DatagroutConduit
           { type: :basic, username: auth[:basic][:username], password: auth[:basic][:password] }
         elsif auth[:oauth] || auth[:provider]
           { type: :oauth, provider: auth[:oauth] || auth[:provider] }
+        elsif auth[:authorization_code]
+          # A Grant, a grant Hash straight from JSON, or an AuthCode::Provider
+          # the caller keeps so a rotated refresh token can be written back.
+          { type: :authcode, provider: AuthCode::Provider.from_auth(auth[:authorization_code]) }
         else
           { type: :none }
         end

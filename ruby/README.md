@@ -81,6 +81,61 @@ client = DatagroutConduit::Client.new(
 
 The token endpoint is auto-derived from MCP URLs — `/mcp` becomes `/oauth/token`. Tokens are cached and refreshed 60 seconds before expiry.
 
+### OAuth 2.1 (authorization code + PKCE)
+
+Client credentials authenticate a *machine*, with a secret issued out of band.
+To authenticate a *person* — and to reach
+`https://gateway.datagrout.ai/connect`, where the server binding is chosen at
+consent time and lives in the token rather than the URL — run the
+browser-consent flow once and persist the grant:
+
+```ruby
+AC = DatagroutConduit::AuthCode
+
+listener = AC::LoopbackListener.bind           # 127.0.0.1, OS-chosen port
+flow = AC::Flow.discover("https://gateway.datagrout.ai/connect")
+registered = flow.register("My App", listener.redirect_uri)
+
+url, pending = flow.authorize_url
+puts "Open this to sign in:\n#{url}"           # the SDK never opens a browser
+
+redirect = listener.wait(timeout: 300)
+grant = flow.exchange(pending, redirect.code, redirect.state)
+
+# Persist BOTH: a client id without its redirect URI cannot be reused, because
+# the authorization server matches redirect URIs exactly.
+save_somewhere(registered: registered.to_h, grant: grant.to_h)
+```
+
+On later runs, skip straight to the grant:
+
+```ruby
+client = DatagroutConduit::Client.new(
+  url: "https://gateway.datagrout.ai/connect",
+  auth: { authorization_code: grant }
+)
+```
+
+DataGrout **rotates refresh tokens**, so a grant that is refreshed and not
+written back leaves a consumed token on disk. Own the provider when you care:
+
+```ruby
+provider = AC::Provider.new(grant)
+client = DatagroutConduit::Client.new(url: url, auth: { authorization_code: provider })
+
+# ...periodically, or once on shutdown:
+rotated = provider.take_if_dirty
+save_somewhere(registered: registered.to_h, grant: rotated.to_h) if rotated
+```
+
+Where the grant lives is your decision — a keychain, a config file, a vault.
+The SDK owns its shape and its refresh, and deliberately picks no location. The
+shape is identical across every conduit SDK, so a grant written by the Python
+client is readable by this one.
+
+See [`examples/browser_signin.rb`](examples/browser_signin.rb) for a complete
+run that registers, signs in, saves, and reuses.
+
 ### mTLS (Mutual TLS)
 
 ```ruby

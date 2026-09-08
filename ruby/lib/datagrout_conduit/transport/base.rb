@@ -79,7 +79,9 @@ module DatagroutConduit
         when :basic
           encoded = Base64.strict_encode64("#{@auth[:username]}:#{@auth[:password]}")
           headers["Authorization"] = "Basic #{encoded}"
-        when :oauth
+        when :oauth, :authcode
+          # Both grants expose the same provider interface, so one branch
+          # serves them: get_token on the way out, invalidate! on a 401.
           token = @auth[:provider].get_token
           headers["Authorization"] = "Bearer #{token}"
         end
@@ -100,7 +102,9 @@ module DatagroutConduit
       def handle_response(response)
         check_rate_limit!(response)
 
-        if response.status == 401 && @auth[:type] == :oauth
+        # Either grant recovers by refreshing; an expired access token should
+        # not surface to the caller as an auth failure.
+        if response.status == 401 && provider_backed?
           @auth[:provider].invalidate!
           return :retry_oauth
         end
@@ -136,6 +140,12 @@ module DatagroutConduit
         raise RateLimitedError.new(used: used, limit: limit)
       end
 
+      # Whether the configured auth carries a token provider, and so can
+      # recover from a 401 by refreshing.
+      def provider_backed?
+        %i[oauth authcode].include?(@auth[:type])
+      end
+
       def normalize_auth(auth)
         return { type: :none } if auth.nil? || auth.empty?
 
@@ -149,6 +159,10 @@ module DatagroutConduit
           { type: :basic, username: auth[:basic][:username], password: auth[:basic][:password] }
         elsif auth[:oauth] || auth[:provider]
           { type: :oauth, provider: auth[:oauth] || auth[:provider] }
+        elsif auth[:authorization_code]
+          # A Grant, a grant Hash straight from JSON, or an AuthCode::Provider
+          # the caller keeps so a rotated refresh token can be written back.
+          { type: :authcode, provider: AuthCode::Provider.from_auth(auth[:authorization_code]) }
         else
           { type: :none }
         end

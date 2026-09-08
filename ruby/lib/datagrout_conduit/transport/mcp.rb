@@ -56,7 +56,9 @@ module DatagroutConduit
       def handle_response(response)
         check_rate_limit!(response)
 
-        if response.status == 401 && @auth[:type] == :oauth
+        # Either grant recovers by refreshing; an expired access token should
+        # not surface to the caller as an auth failure.
+        if response.status == 401 && provider_backed?
           @auth[:provider].invalidate!
           return :retry_oauth
         end

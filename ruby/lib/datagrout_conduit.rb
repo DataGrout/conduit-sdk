@@ -7,6 +7,11 @@ require_relative "datagrout_conduit/errors"
 require_relative "datagrout_conduit/types"
 require_relative "datagrout_conduit/identity"
 require_relative "datagrout_conduit/oauth"
+require_relative "datagrout_conduit/authcode"
+# The loopback listener lives in its own file so a headless caller can take the
+# flow without one, but it is required here — the same surface every conduit SDK
+# presents — and it needs nothing beyond the standard library.
+require_relative "datagrout_conduit/authcode/loopback"
 require_relative "datagrout_conduit/registration"
 require_relative "datagrout_conduit/onramp"
 require_relative "datagrout_conduit/transport/base"

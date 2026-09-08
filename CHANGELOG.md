@@ -18,7 +18,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 > | Rust (reference) | ✅ | ✅ |
 > | TypeScript | ✅ | ✅ |
 > | Python | ✅ | ✅ |
-> | Ruby | ☐ | ☐ |
+> | Ruby | ✅ | n/a — never broken, see below |
 > | Elixir | ☐ | ☐ |
 
 ### Fixed — OAuth tokens now authenticate the WebSocket handshake
@@ -130,6 +130,36 @@ binds real sockets and drives them with real requests, and the WS suite drives
 the real `connect()` and reads the headers handed to `websockets`. The transport
 suite runs every case against both HTTP transports, which carry independent
 copies of the header-building and 401-retry paths.
+
+#### Ruby
+
+The same surface, synchronous. `AuthCode::Grant`, `AuthCode::RegisteredClient`
+and `AuthCode::ServerMetadata` carry `to_h`/`from_h` producing the
+cross-language shape, with absent optionals omitted rather than written as
+nulls. The error taxonomy is a class per kind under `AuthCode::Error`, so a
+caller branches by rescuing the one it cares about; every one of them also
+answers `#kind` with the shared wire name, and all descend from
+`DatagroutConduit::AuthError`, so code that only cares that authentication
+failed keeps working.
+
+`auth: { authorization_code: ... }` accepts a `Grant`, a grant `Hash` straight
+from JSON (either key style), or an `AuthCode::Provider` you keep — the third
+being what you want when a rotated refresh token has to be written back.
+`AuthCode::Provider` mirrors `OAuth::TokenProvider`, `Mutex` and all, down to
+`get_token` and `invalidate!`, so both grants reach the transports through one
+branch. `AuthCode::LoopbackListener` lives in its own file, mirroring the Rust
+feature split, and runs on `TCPServer` — no new dependency.
+
+**The WebSocket handshake was never broken here.** Resolving a token is
+synchronous in Ruby, so `build_upgrade_headers` could always call `get_token`
+directly; the async SDKs had to hoist that out of header construction to reach
+the same place. The authorization-code grant joins `client_credentials` on that
+path, and the tests now pin both down.
+
+Example: `ruby -Ilib examples/browser_signin.rb`. 84 new tests: the loopback
+suite binds real sockets and drives them with raw HTTP requests, and the
+transport suite runs each case against MCP, JSONRPC and WebSocket, since the
+three build their headers independently.
 
 ### Porting brief — TypeScript, Python, Ruby, Elixir
 
