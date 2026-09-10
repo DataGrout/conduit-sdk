@@ -12,6 +12,9 @@ require_relative "datagrout_conduit/authcode"
 # flow without one, but it is required here — the same surface every conduit SDK
 # presents — and it needs nothing beyond the standard library.
 require_relative "datagrout_conduit/authcode/loopback"
+# RFC 8693 delegation. Loaded after both grants, since a delegated token's
+# subject and actor can come from either of them.
+require_relative "datagrout_conduit/delegation"
 require_relative "datagrout_conduit/registration"
 require_relative "datagrout_conduit/onramp"
 require_relative "datagrout_conduit/transport/base"

@@ -344,10 +344,11 @@ module DatagroutConduit
         when :basic
           encoded = Base64.strict_encode64("#{@auth[:username]}:#{@auth[:password]}")
           headers["Authorization"] = "Basic #{encoded}"
-        when :oauth, :authcode
-          # Resolving a token is synchronous in Ruby, so it can happen here and
-          # the upgrade carries the bearer. The async SDKs had to hoist this
-          # out of header construction to get the same result.
+        when :oauth, :authcode, :delegation
+          # Resolving a token is synchronous in Ruby, so it can happen here —
+          # before the handshake — and the upgrade carries the bearer. The
+          # async SDKs had to hoist this out of header construction to get the
+          # same result. A delegated bearer is exchanged for at this point.
           token = @auth[:provider].get_token
           headers["Authorization"] = "Bearer #{token}"
         end
@@ -525,6 +526,16 @@ module DatagroutConduit
           { type: :api_key, key: auth[:api_key] }
         elsif auth[:basic]
           { type: :basic, username: auth[:basic][:username], password: auth[:basic][:password] }
+        elsif auth[:delegation]
+          # RFC 8693: a token naming the user as sub and the agent in act. Only
+          # a live Delegation::Provider will do — the exchange needs its token
+          # sources, which a serialized credential cannot carry.
+          #
+          # Ordered ahead of the two provider grants for the same reason as in
+          # `Transport::Base`: a delegating caller normally configures one of
+          # them too, as the exchange's actor or subject source, and losing that
+          # race sends the agent's own token with no `act`.
+          { type: :delegation, provider: Delegation::Provider.from_auth(auth[:delegation]) }
         elsif auth[:oauth] || auth[:provider]
           { type: :oauth, provider: auth[:oauth] || auth[:provider] }
         elsif auth[:authorization_code]

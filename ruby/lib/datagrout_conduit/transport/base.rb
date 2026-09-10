@@ -79,9 +79,9 @@ module DatagroutConduit
         when :basic
           encoded = Base64.strict_encode64("#{@auth[:username]}:#{@auth[:password]}")
           headers["Authorization"] = "Basic #{encoded}"
-        when :oauth, :authcode
-          # Both grants expose the same provider interface, so one branch
-          # serves them: get_token on the way out, invalidate! on a 401.
+        when :oauth, :authcode, :delegation
+          # All three providers expose the same interface, so one branch serves
+          # them: get_token on the way out, invalidate! on a 401.
           token = @auth[:provider].get_token
           headers["Authorization"] = "Bearer #{token}"
         end
@@ -102,8 +102,9 @@ module DatagroutConduit
       def handle_response(response)
         check_rate_limit!(response)
 
-        # Either grant recovers by refreshing; an expired access token should
-        # not surface to the caller as an auth failure.
+        # Every provider recovers on its own terms — a refresh for the two
+        # grants, a re-exchange for a delegated token — so an expired access
+        # token should not surface to the caller as an auth failure.
         if response.status == 401 && provider_backed?
           @auth[:provider].invalidate!
           return :retry_oauth
@@ -141,9 +142,9 @@ module DatagroutConduit
       end
 
       # Whether the configured auth carries a token provider, and so can
-      # recover from a 401 by refreshing.
+      # recover from a 401 by refreshing or re-exchanging.
       def provider_backed?
-        %i[oauth authcode].include?(@auth[:type])
+        %i[oauth authcode delegation].include?(@auth[:type])
       end
 
       def normalize_auth(auth)
@@ -157,6 +158,18 @@ module DatagroutConduit
           { type: :api_key, key: auth[:api_key] }
         elsif auth[:basic]
           { type: :basic, username: auth[:basic][:username], password: auth[:basic][:password] }
+        elsif auth[:delegation]
+          # RFC 8693: a token naming the user as sub and the agent in act. Only
+          # a live Delegation::Provider will do — the exchange needs its token
+          # sources, which a serialized credential cannot carry.
+          #
+          # Checked BEFORE the two provider grants rather than after them: a
+          # delegating caller normally configures one of those as well, because
+          # the exchange consumes it as the actor or subject source. Last in the
+          # chain meant the plainer grant won and the transport quietly sent the
+          # agent's own token carrying no `act` at all — the precise loss this
+          # grant exists to prevent.
+          { type: :delegation, provider: Delegation::Provider.from_auth(auth[:delegation]) }
         elsif auth[:oauth] || auth[:provider]
           { type: :oauth, provider: auth[:oauth] || auth[:provider] }
         elsif auth[:authorization_code]

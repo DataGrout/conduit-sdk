@@ -56,8 +56,9 @@ module DatagroutConduit
       def handle_response(response)
         check_rate_limit!(response)
 
-        # Either grant recovers by refreshing; an expired access token should
-        # not surface to the caller as an auth failure.
+        # Every provider recovers on its own terms — a refresh for the two
+        # grants, a re-exchange for a delegated token — so an expired access
+        # token should not surface to the caller as an auth failure.
         if response.status == 401 && provider_backed?
           @auth[:provider].invalidate!
           return :retry_oauth

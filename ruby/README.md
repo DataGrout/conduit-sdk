@@ -136,6 +136,51 @@ client is readable by this one.
 See [`examples/browser_signin.rb`](examples/browser_signin.rb) for a complete
 run that registers, signs in, saves, and reuses.
 
+### Delegation (RFC 8693 — an agent acting for a user)
+
+Client credentials say *which machine* is calling; authorization code says
+*which person* consented. An agent working on a user's behalf needs both, so
+the resource server can audit, rate-limit and revoke the agent separately from
+the user. An RFC 8693 exchange produces that token from two you already have:
+
+```ruby
+D = DatagroutConduit::Delegation
+
+# The agent's own credential — the actor.
+agent = DatagroutConduit::OAuth::TokenProvider.new(
+  client_id: "agent_client_id",
+  client_secret: "agent_client_secret",
+  token_endpoint: "https://gateway.datagrout.ai/oauth/token"
+)
+
+request = D::Request.new(
+  token_endpoint: "https://gateway.datagrout.ai/oauth/token",
+  client_id: "agent_client_id",
+  client_secret: "agent_client_secret",
+  resource: "https://gateway.datagrout.ai/connect"
+)
+
+provider = D::Provider.new(
+  request,
+  # The user's token — the subject. A long-lived app would pass
+  # D::TokenSource.authorization_code(ac_provider) instead.
+  subject: D::TokenSource.static_token(user_token),
+  actor: D::TokenSource.client_credentials(agent)
+)
+
+client = DatagroutConduit::Client.new(
+  url: "https://gateway.datagrout.ai/connect",
+  auth: { delegation: provider }
+)
+```
+
+The issued token names the user as `sub` and the agent in an `act` claim. An
+**actor token is required by default**; `impersonation: true` on the request is
+the only way to omit it, and DataGrout does not issue impersonation tokens. The
+provider caches the exchanged token, re-exchanges near expiry or after a 401,
+and consults both token sources on every exchange — so an expiring upstream
+credential is handled by the provider that owns it.
+
 ### mTLS (Mutual TLS)
 
 ```ruby
