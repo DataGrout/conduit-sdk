@@ -1,5 +1,76 @@
 {
   "default_scope": "mcp tools",
+  "delegation": {
+    "error_kinds": [
+      "http",
+      "invalid_response",
+      "missing_actor",
+      "missing_subject",
+      "server"
+    ],
+    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+    "request": {
+      "actor_token": "agent_at_contract_fixture",
+      "actor_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "audience": "https://gateway.example.com",
+      "client_id": "agent_client_contract_fixture",
+      "client_secret": "agent_secret_contract_fixture",
+      "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "resource": "https://gateway.example.com/connect",
+      "scope": "mcp tools",
+      "subject_token": "user_at_contract_fixture",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_endpoint": "https://gateway.example.com/oauth/token"
+    },
+    "request_form": [
+      ["grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"],
+      ["subject_token", "user_at_contract_fixture"],
+      ["subject_token_type", "urn:ietf:params:oauth:token-type:jwt"],
+      ["actor_token", "agent_at_contract_fixture"],
+      ["actor_token_type", "urn:ietf:params:oauth:token-type:access_token"],
+      ["client_id", "agent_client_contract_fixture"],
+      ["client_secret", "agent_secret_contract_fixture"],
+      ["audience", "https://gateway.example.com"],
+      ["resource", "https://gateway.example.com/connect"],
+      ["scope", "mcp tools"],
+      ["requested_token_type", "urn:ietf:params:oauth:token-type:access_token"]
+    ],
+    "server_error_codes": [
+      "invalid_client",
+      "invalid_grant",
+      "invalid_request",
+      "invalid_scope",
+      "invalid_target",
+      "unauthorized_client",
+      "unsupported_grant_type"
+    ],
+    "token": {
+      "access_token": "delegated_contract_fixture",
+      "expires_at": 1700000000,
+      "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "scope": "mcp tools",
+      "token_type": "Bearer"
+    },
+    "token_minimal": {
+      "access_token": "delegated_minimal_fixture",
+      "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "token_type": "Bearer"
+    },
+    "token_types": {
+      "access_token": "urn:ietf:params:oauth:token-type:access_token",
+      "id_token": "urn:ietf:params:oauth:token-type:id_token",
+      "jwt": "urn:ietf:params:oauth:token-type:jwt",
+      "refresh_token": "urn:ietf:params:oauth:token-type:refresh_token",
+      "saml2": "urn:ietf:params:oauth:token-type:saml2"
+    },
+    "wire_response": {
+      "access_token": "delegated_contract_fixture",
+      "expires_in": 900,
+      "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
+      "scope": "mcp tools",
+      "token_type": "Bearer"
+    }
+  },
   "error_kinds": [
     "denied",
     "discovery",

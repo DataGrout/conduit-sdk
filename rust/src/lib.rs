@@ -157,6 +157,9 @@ pub mod onramp;
 #[cfg(feature = "authcode")]
 pub mod authcode;
 
+#[cfg(feature = "delegation")]
+pub mod delegation;
+
 pub use client::{
     is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
     GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
@@ -180,6 +183,11 @@ pub use onramp::{
 #[cfg(feature = "authcode")]
 pub use authcode::{
     AuthCodeError, AuthCodeFlow, AuthCodeProvider, Grant, PendingAuthorization, RegisteredClient,
+};
+#[cfg(feature = "delegation")]
+pub use delegation::{
+    ClientAuth, DelegatedProvider, DelegatedToken, DelegationError, DelegationRequest, TokenSource,
+    TokenType,
 };
 pub use transport::{parse_sse_body, Transport};
 pub use types::{

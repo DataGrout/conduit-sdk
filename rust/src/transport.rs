@@ -59,6 +59,15 @@ pub enum AuthConfig {
     /// request and refreshed (via the refresh token) before it expires.
     #[cfg(feature = "authcode")]
     AuthorizationCode(crate::authcode::AuthCodeProvider),
+
+    /// RFC 8693 **token exchange** — a delegated token naming the user as
+    /// `sub` and this agent in `act`.
+    ///
+    /// Behaves like the two OAuth grants from the transport's point of view:
+    /// the bearer is fetched asynchronously per request, re-exchanged before
+    /// it expires, and dropped on a 401 so the retry exchanges afresh.
+    #[cfg(feature = "delegation")]
+    Delegation(crate::delegation::DelegatedProvider),
 }
 
 /// Base transport trait
@@ -158,6 +167,8 @@ fn build_headers(auth: &AuthConfig) -> header::HeaderMap {
         AuthConfig::ClientCredentials(_) | AuthConfig::None => {}
         #[cfg(feature = "authcode")]
         AuthConfig::AuthorizationCode(_) => {}
+        #[cfg(feature = "delegation")]
+        AuthConfig::Delegation(_) => {}
     }
 
     headers
@@ -257,6 +268,11 @@ async fn invalidate_oauth(auth: &AuthConfig) -> bool {
             provider.invalidate().await;
             true
         }
+        #[cfg(feature = "delegation")]
+        AuthConfig::Delegation(provider) => {
+            provider.invalidate().await;
+            true
+        }
         _ => false,
     }
 }
@@ -276,6 +292,8 @@ async fn inject_oauth_token(
         AuthConfig::ClientCredentials(provider) => Some(provider.get_token(http_client).await?),
         #[cfg(feature = "authcode")]
         AuthConfig::AuthorizationCode(provider) => Some(provider.get_token(http_client).await?),
+        #[cfg(feature = "delegation")]
+        AuthConfig::Delegation(provider) => Some(provider.get_token(http_client).await?),
         _ => None,
     };
 
@@ -824,5 +842,103 @@ mod tests {
         assert!(matches!(err, Error::Auth(_)), "got {err:?}");
         // Exactly one retry: a revoked grant fails fast instead of recursing.
         rpc.assert_async().await;
+    }
+
+    // ─── the delegated token rides the same paths ────────────────────────
+
+    #[cfg(feature = "delegation")]
+    fn delegated_provider(token_endpoint: &str) -> crate::delegation::DelegatedProvider {
+        use crate::delegation::{DelegatedProvider, DelegationRequest, TokenSource, TokenType};
+        DelegatedProvider::new(
+            DelegationRequest::new(token_endpoint, "agent_client").client_secret("agent_secret"),
+            TokenSource::static_token("user_at", TokenType::AccessToken),
+            Some(TokenSource::static_token(
+                "agent_at",
+                TokenType::AccessToken,
+            )),
+        )
+    }
+
+    #[cfg(feature = "delegation")]
+    const DELEGATED_BODY: &str = r#"{"access_token":"delegated_1","issued_token_type":"urn:ietf:params:oauth:token-type:access_token","token_type":"Bearer","expires_in":900}"#;
+
+    #[cfg(feature = "delegation")]
+    #[tokio::test]
+    async fn inject_oauth_token_sets_a_bearer_for_a_delegated_token() {
+        let mut server = mockito::Server::new_async().await;
+        let _exchange = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(DELEGATED_BODY)
+            .create_async()
+            .await;
+
+        let auth =
+            AuthConfig::Delegation(delegated_provider(&format!("{}/oauth/token", server.url())));
+        let mut headers = header::HeaderMap::new();
+        inject_oauth_token(&auth, &HttpClient::new(), &mut headers)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            header_value(&headers, header::AUTHORIZATION).as_deref(),
+            Some("Bearer delegated_1")
+        );
+    }
+
+    #[cfg(feature = "delegation")]
+    #[tokio::test]
+    async fn a_401_re_exchanges_a_delegated_token_and_retries_once() {
+        let mut server = mockito::Server::new_async().await;
+
+        // Two exchanges: the first token is rejected by the resource server,
+        // the 401 drops it, and the retry carries the second.
+        let first_exchange = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(DELEGATED_BODY)
+            .expect(1)
+            .create_async()
+            .await;
+        let second_exchange = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(DELEGATED_BODY.replace("delegated_1", "delegated_2"))
+            .expect(1)
+            .create_async()
+            .await;
+
+        let stale = server
+            .mock("POST", "/mcp")
+            .match_header("authorization", "Bearer delegated_1")
+            .with_status(401)
+            .with_body("unauthorized")
+            .expect(1)
+            .create_async()
+            .await;
+        let fresh = server
+            .mock("POST", "/mcp")
+            .match_header("authorization", "Bearer delegated_2")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"jsonrpc":"2.0","id":"1","result":{"ok":true}}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let mut transport = McpTransport::new(
+            format!("{}/mcp", server.url()),
+            AuthConfig::Delegation(delegated_provider(&format!("{}/oauth/token", server.url()))),
+        )
+        .unwrap();
+        transport.connect().await.unwrap();
+
+        let response = transport.send_request(request()).await.unwrap();
+        assert_eq!(response.result.unwrap()["ok"], serde_json::json!(true));
+
+        first_exchange.assert_async().await;
+        stale.assert_async().await;
+        second_exchange.assert_async().await;
+        fresh.assert_async().await;
     }
 }

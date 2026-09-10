@@ -10,7 +10,8 @@ Production-ready MCP client with mTLS identity, OAuth 2.1, semantic discovery, a
 - **MCP Protocol Compliance**: Full JSON-RPC 2.0 over HTTP/SSE support
 - **WebSocket Transport**: Bidirectional push over `datagrout-jsonrpc.v1`; subscribe/unsubscribe to server-pushed events with no polling
 - **mTLS Identity**: Auto-discovery, bootstrap, and rotation of client certificates
-- **OAuth 2.1**: Built-in `client_credentials` token management with auto-refresh
+- **OAuth 2.1**: Built-in `client_credentials` token management with auto-refresh; authorization code + PKCE (`authcode` feature) to sign a user in
+- **Delegation (RFC 8693)**: `delegation` feature — exchange a user's token and the agent's own for one that names the user as `sub` and the agent in `act`, kept fresh on HTTP and the WebSocket upgrade
 - **DataGrout Extensions**: Semantic discovery, guided workflows, cost tracking
 - **Type-Safe**: Strongly typed Rust APIs with comprehensive error handling
 - **Async/Await**: Built on Tokio for high performance

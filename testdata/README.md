@@ -18,10 +18,15 @@ property invariant #1 in `CHANGELOG.md` promises.
 | `registered_client` | #9 | the id/redirect-URI pair no longer persists as one unit |
 | `default_scope` | #10 | someone "improved" the scope string |
 | `error_kinds` | #2 | the error taxonomy drifted in one language |
+| `delegation.grant_type`, `delegation.token_types` | #13 | a URN was mistyped in one language |
+| `delegation.request` → `delegation.request_form` | #13 | the fixture request no longer posts exactly this body, in this order |
+| `delegation.token`, `delegation.token_minimal`, `delegation.wire_response` | #15 | the issued-token shape drifted, or `expires_in` is not becoming absolute `expires_at` |
+| `delegation.error_kinds` | #16 | the delegation error taxonomy drifted |
+| `delegation.server_error_codes` | #16 | the RFC 6749 code list a `server` error can carry drifted |
 
 ## Where the tests live
 
-- Rust — `rust/src/authcode.rs`, `contract_fixture` tests
+- Rust — `rust/src/authcode.rs` and `rust/src/delegation.rs`, `contract_fixture` tests
 - TypeScript — `typescript/tests/contract.test.ts`
 - Python — `python/tests/test_contract.py`
 - Ruby — `ruby/test/contract_test.rb`
@@ -34,7 +39,7 @@ well as a *renamed* one:
 
 | language | renamed kind | added kind |
 |---|---|---|
-| Rust | test | compiler — `AuthCodeError::kind()` matches exhaustively |
+| Rust | test | compiler — `AuthCodeError::kind()` and `DelegationError::kind()` match exhaustively |
 | TypeScript | test | compiler — exhaustive `Record<AuthCodeErrorKind, true>` |
 | Python | test | test — enumerates a real `Enum` |
 | Ruby | test | not caught — no runtime registry, list is hand-written |

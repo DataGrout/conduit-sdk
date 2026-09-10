@@ -86,6 +86,10 @@ authcode = ["dep:sha2"]
 # split exists so the surface matches the other conduit SDKs, where a local HTTP
 # server IS a dependency, and so headless callers can skip it.
 authcode-loopback = ["authcode"]
+# RFC 8693 token exchange: an agent acting for a user (sub = user, act = agent).
+# No extra dependency; the split exists so the surface matches the other
+# conduit SDKs and so callers who never delegate compile none of it.
+delegation = []
 # Full self-service bootstrap: onramp handshake + mTLS identity registration
 bootstrap = ["onramp", "registration"]
 
@@ -97,6 +101,11 @@ path = "examples/basic.rs"
 name = "browser_signin"
 path = "examples/browser_signin.rs"
 required-features = ["authcode-loopback"]
+
+[[example]]
+name = "delegated_agent"
+path = "examples/delegated_agent.rs"
+required-features = ["delegation"]
 
 [[example]]
 name = "discovery"

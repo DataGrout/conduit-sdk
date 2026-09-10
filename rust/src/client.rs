@@ -879,6 +879,35 @@ impl ClientBuilder {
         self
     }
 
+    /// Authenticate as an **agent acting for a user**, with an RFC 8693
+    /// delegated token.
+    ///
+    /// The other two grants each answer one question — `client_credentials`
+    /// says which machine, authorization code says which person. A delegated
+    /// token answers both: the user is `sub`, this agent is `act`, and the
+    /// server can audit and limit the two separately. The
+    /// [`DelegatedProvider`](crate::delegation::DelegatedProvider) exchanges
+    /// the user's token and the agent's own for it, re-exchanges before it
+    /// expires, and again on a 401 — over HTTP and on the WebSocket upgrade.
+    ///
+    /// The client id in the request must be the actor; see
+    /// [`crate::delegation`].
+    ///
+    /// ```rust,no_run
+    /// # use datagrout_conduit::{ClientBuilder, delegation::DelegatedProvider};
+    /// # fn demo(provider: DelegatedProvider) -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = ClientBuilder::new()
+    ///     .url("https://gateway.datagrout.ai/connect")
+    ///     .auth_delegation(provider)
+    ///     .build()?;
+    /// # Ok(()) }
+    /// ```
+    #[cfg(feature = "delegation")]
+    pub fn auth_delegation(mut self, provider: crate::delegation::DelegatedProvider) -> Self {
+        self.auth = Some(AuthConfig::Delegation(provider));
+        self
+    }
+
     /// Provide an explicit mTLS identity (client certificate + key).
     ///
     /// When set, every connection will present this certificate during the TLS

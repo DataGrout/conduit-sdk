@@ -653,6 +653,8 @@ async fn resolve_async_token(auth: &AuthConfig) -> Result<Option<String>> {
         AuthConfig::ClientCredentials(provider) => Ok(Some(provider.get_token(&http).await?)),
         #[cfg(feature = "authcode")]
         AuthConfig::AuthorizationCode(provider) => Ok(Some(provider.get_token(&http).await?)),
+        #[cfg(feature = "delegation")]
+        AuthConfig::Delegation(provider) => Ok(Some(provider.get_token(&http).await?)),
         _ => Ok(None),
     }
 }
@@ -691,6 +693,8 @@ fn build_handshake_request(
         AuthConfig::ClientCredentials(_) => {}
         #[cfg(feature = "authcode")]
         AuthConfig::AuthorizationCode(_) => {}
+        #[cfg(feature = "delegation")]
+        AuthConfig::Delegation(_) => {}
         AuthConfig::Bearer(token) => {
             if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
                 headers.insert(AUTHORIZATION, value);
@@ -1002,6 +1006,54 @@ mod tests {
         assert!(auth_header(&req).is_none());
         // Still a well-formed upgrade otherwise.
         assert!(req.headers().get(SEC_WEBSOCKET_PROTOCOL).is_some());
+    }
+
+    #[cfg(feature = "delegation")]
+    #[tokio::test]
+    async fn resolve_async_token_yields_a_delegated_bearer() {
+        use crate::delegation::{DelegatedProvider, DelegationRequest, TokenSource, TokenType};
+
+        let mut server = mockito::Server::new_async().await;
+        let _exchange = server
+            .mock("POST", "/oauth/token")
+            .with_status(200)
+            .with_body(
+                r#"{"access_token":"delegated_token","issued_token_type":"urn:ietf:params:oauth:token-type:access_token","token_type":"Bearer","expires_in":900}"#,
+            )
+            .create_async()
+            .await;
+
+        let provider = DelegatedProvider::new(
+            DelegationRequest::new(format!("{}/oauth/token", server.url()), "agent_client"),
+            TokenSource::static_token("user_at", TokenType::AccessToken),
+            Some(TokenSource::static_token(
+                "agent_at",
+                TokenType::AccessToken,
+            )),
+        );
+
+        let token = resolve_async_token(&AuthConfig::Delegation(provider))
+            .await
+            .unwrap();
+        assert_eq!(token.as_deref(), Some("delegated_token"));
+    }
+
+    #[cfg(feature = "delegation")]
+    #[test]
+    fn an_unresolved_delegation_sends_no_credential() {
+        use crate::delegation::{DelegatedProvider, DelegationRequest, TokenSource, TokenType};
+
+        let provider = DelegatedProvider::new(
+            DelegationRequest::new("https://as.example.com/oauth/token", "agent_client"),
+            TokenSource::static_token("user_at", TokenType::AccessToken),
+            Some(TokenSource::static_token(
+                "agent_at",
+                TokenType::AccessToken,
+            )),
+        );
+        let auth = AuthConfig::Delegation(provider);
+        let req = build_handshake_request("wss://example.com/ws", &auth, None).unwrap();
+        assert!(auth_header(&req).is_none());
     }
 
     #[tokio::test]
