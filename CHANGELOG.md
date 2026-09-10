@@ -6,6 +6,119 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added — RFC 8693 token exchange (delegation)
+
+An agent can now hold a token that names the **user** as `sub` and **itself**
+in `act`, behind the new `delegation` feature. The two existing grants each
+answer one question — `client_credentials` says which machine, authorization
+code says which person — and neither says both. An agent working on a user's
+behalf needs both: the resource server has to know whose data it is and who is
+actually holding the connection, so it can audit, rate-limit and revoke the two
+separately. RFC 8693 produces exactly that token from two the caller already
+has. The module speaks the RFC, so it works against any compliant token
+endpoint.
+
+**Wire contract.** `POST {token_endpoint}`, form-encoded:
+`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token` +
+`subject_token_type`, `actor_token` + `actor_token_type`, `client_id` +
+`client_secret?` (in the body by default; HTTP Basic on request), and the
+optional `audience`, `resource`, `scope`, `requested_token_type`. `resource` is
+RFC 8707 and is always sent when set, the same invariant the authorization-code
+module keeps. The success body is `{access_token, issued_token_type,
+token_type, expires_in?, scope?}`; failures are RFC 6749
+`{error, error_description?}` with `invalid_request | invalid_client |
+invalid_grant | unauthorized_client | invalid_target | invalid_scope |
+unsupported_grant_type`.
+
+**Why an actor is required by default.** RFC 8693 distinguishes *delegation*
+(the issued token carries `act`, and the resource server can tell agent from
+user) from *impersonation* (the agent simply becomes the user, and nobody can).
+DataGrout issues delegation tokens only and requires `actor_token`. The SDK
+therefore refuses to build a request with no actor — `missing_actor`, before
+any HTTP — unless the caller says `impersonation()` explicitly. Forgetting to
+set an actor is an error, not a silent downgrade to the less accountable mode.
+
+**The client must be the actor.** The `client_id` authenticating the request
+and the principal behind `actor_token` are expected to be the same agent. The
+SDK does not verify this (it cannot without decoding the actor token); the
+server does, and answers `unauthorized_client` when they differ.
+
+- `delegation::DelegationRequest` — builder: `new(token_endpoint, client_id)`,
+  `.client_secret()`, `.client_auth(ClientAuth::Body | Basic)`,
+  `.subject_token(token, TokenType)`, `.actor_token(token, TokenType)`,
+  `.audience()`, `.resource()`, `.scope()`, `.requested_token_type()`,
+  `.impersonation()`; `form_params()` exposes the exact body for tests;
+  `exchange(&http)` performs it.
+- `delegation::TokenType` — `AccessToken`, `Jwt`, `IdToken`, `RefreshToken`,
+  `Saml2`, `Other(String)`; serializes as its URN.
+- `delegation::DelegatedToken` — `{access_token, issued_token_type,
+  token_type, expires_at?, scope?}`. `expires_at` is **Unix seconds**, computed
+  from `expires_in` at receipt, so the shape means the same thing in every
+  language and once written down.
+- `delegation::DelegationError` with `kind()` ∈ `missing_subject`,
+  `missing_actor`, `http`, `server` (carrying `status`, `error`,
+  `error_description`), `invalid_response`. A non-2xx whose body is not an
+  RFC 6749 error — a proxy's HTML — is `invalid_response`, not `server`.
+- `delegation::TokenSource` — where the provider gets each token:
+  `static_token`, `client_credentials(OAuthTokenProvider)`,
+  `authorization_code(AuthCodeProvider)` (with `authcode`), or `dynamic(async
+  fn)`. Consulted on every exchange, so an upstream provider's own refresh is
+  what keeps the subject and actor live.
+- `delegation::DelegatedProvider::new(request, subject, Option<actor>)` — the
+  third token provider, shaped like the other two: `get_token` re-exchanges
+  inside the same 60-second buffer, `invalidate` drops the cached token for the
+  401 retry, exchanges are single-flighted. `AuthConfig::Delegation` resolves
+  through the same `inject_oauth_token` and `resolve_async_token` choke points,
+  so every HTTP transport, the 401-retry path and the **WebSocket upgrade**
+  (invariant 11) carry the delegated bearer unchanged.
+- `ClientBuilder::auth_delegation(provider)`.
+- `delegation::codes` — the seven RFC 6749 error codes as named constants.
+- `testdata/contract.json` gains a `delegation` object: grant type, token-type
+  URNs, a request fixture with the exact form body it must produce, the issued
+  token and its minimal form, the wire response, the error kinds and the
+  server error codes. `testdata/README.md` has the rows.
+- Example: `cargo run --example delegated_agent --features delegation`.
+
+**Additive:** with the feature off, nothing changes. Naming is deliberate:
+"token exchange" elsewhere in this crate (`Error::Onramp { stage:
+"token_exchange" }`, `AuthCodeError::TokenExchange`) means redeeming a
+`client_credentials` or authorization-code grant. This module says
+*delegation* and *exchange* and never reuses that label.
+
+### Porting brief — TypeScript, Python, Ruby, Elixir
+
+Semantics port, signatures do not. Invariants that must hold in every language,
+numbered on from the authorization-code brief below:
+
+13. **The form body is exactly `contract.json` → `delegation.request_form`**,
+    field for field, for the fixture request — including order. `resource`
+    is sent whenever set. `client_secret` is in the body under the default
+    client auth and absent from it under Basic.
+14. **An actor is required unless impersonation is explicit.** A request with
+    no actor fails `missing_actor` *before any HTTP*; a request with no subject
+    fails `missing_subject` likewise. The opt-out is a named call on the
+    builder, never a default or an `Option` that quietly reads as "none".
+15. **`DelegatedToken` is `{access_token, issued_token_type, token_type,
+    expires_at?, scope?}`**, `issued_token_type` a URN string, `expires_at`
+    Unix seconds computed at receipt, absent optionals omitted rather than
+    null. `contract.json` → `delegation.token`, `token_minimal` and
+    `wire_response` pin all three halves.
+16. **Error taxonomy:** `missing_subject`, `missing_actor`, `http`, `server`
+    (status + RFC 6749 `error` + `error_description?`), `invalid_response`. A
+    non-2xx without an RFC 6749 body is `invalid_response`. A 2xx missing
+    `issued_token_type` or `token_type` is `invalid_response`.
+17. **The provider is the third of its kind, not a new kind.** `get_token` and
+    `invalidate`, same 60-second buffer, single-flighted exchange, cached
+    token dropped on 401 and re-exchanged once. It reaches the transports
+    through whatever choke point the other two grants already use — and so
+    reaches the WebSocket upgrade (invariant 11) for free.
+18. **Token sources are consulted on every exchange**, so a provider-backed
+    subject or actor is refreshed by the provider that owns it, and a 401 on
+    the resource server drops only the delegated token, never the sources.
+19. **The client-must-be-the-actor rule is documented, not enforced.**
+
 ## [0.8.0] - 2026-09-08
 
 ### TL;DR
