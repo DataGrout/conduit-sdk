@@ -28,11 +28,15 @@ defmodule DatagroutConduit.MixProject do
 
   defp deps do
     [
-      {:req, "~> 0.5"},
+      # Floors, not preferences: the whole 0.5 line of req carries a
+      # decompression-bomb advisory, and plug below 1.20 carries four. A lock
+      # file protects this repo but never reaches a consumer — they resolve
+      # from these requirements — so the bound has to live here.
+      {:req, "~> 0.7"},
       {:jason, "~> 1.4"},
       {:castore, "~> 1.0"},
       {:websockex, "~> 0.4"},
-      {:plug, "~> 1.0", only: :test},
+      {:plug, "~> 1.20", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]

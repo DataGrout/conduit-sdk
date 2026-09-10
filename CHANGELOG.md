@@ -50,6 +50,22 @@ sent a malformed bearer; Ruby resolves synchronously and was always correct.
 Same symptom in four of them, three different causes. Each language section
 below says which applied.
 
+### Security — Elixir dependency floors raised
+
+Advisories landed against the whole `req` 0.5 line (a decompression-bomb denial
+of service) and against `plug` below 1.20 (four, including quadratic-time
+decoding of nested parameters), with more reaching `req` transitively through
+`mint` and `hpax`. The Elixir requirements now floor `req` at `~> 0.7` and the
+test-only `plug` at `~> 1.20`, which brings patched `mint`, `hpax` and `finch`
+along with them. No SDK code needed changing for the `req` jump.
+
+**This can conflict for you.** A project pinning `req ~> 0.5` cannot also take
+this version, and that is the deliberate cost: a lock file keeps this repo clean
+but never reaches a consumer, who resolves from these requirements, so a
+permissive bound would leave every fresh install free to pick a vulnerable
+`req`. `plug` is a test dependency here and optional within `req` itself, so it
+does not enter a consumer's tree unless they ask for it.
+
 ### Fixed — OAuth tokens now authenticate the WebSocket handshake
 
 `WsTransport::connect` resolves an asynchronously-fetched bearer **before**
