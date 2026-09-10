@@ -30,6 +30,7 @@ import type { MCPTool, MCPResource, MCPPrompt, AuthConfig } from "../types";
 import type { ConduitIdentity } from "../identity";
 import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
 import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
+import type { DelegatedProvider } from "../delegation";
 import { Transport } from "./base";
 
 export const SUBPROTOCOL = "datagrout-jsonrpc.v1";
@@ -175,11 +176,13 @@ export class WsTransport extends Transport {
   /**
    * Resolved OAuth providers, built once so a token survives reconnects.
    *
-   * Both are consulted in {@link _resolveBearer} before the upgrade request is
+   * All are consulted in {@link _resolveBearer} before the upgrade request is
    * built — see the note there on why that has to happen up front.
    */
   private readonly _oauthProvider?: OAuthTokenProvider;
   private readonly _authCodeProvider?: AuthCodeProvider;
+  /** RFC 8693 delegation, when `auth.delegation` is set. */
+  private readonly _delegatedProvider?: DelegatedProvider;
 
   private _ws: WebSocket | null = null;
   private _nextId = 0;
@@ -235,6 +238,7 @@ export class WsTransport extends Transport {
     }
 
     this._authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
+    this._delegatedProvider = auth?.delegation;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -249,6 +253,8 @@ export class WsTransport extends Transport {
    * if it also happened to present an mTLS identity.
    */
   private async _resolveBearer(): Promise<string | undefined> {
+    // Delegation first: the most specific credential, naming both principals.
+    if (this._delegatedProvider) return this._delegatedProvider.getToken();
     if (this._oauthProvider) return this._oauthProvider.getToken();
     if (this._authCodeProvider) return this._authCodeProvider.getToken();
     return undefined;

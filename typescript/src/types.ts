@@ -254,6 +254,19 @@ export interface AuthConfig {
   authorizationCode?:
     | import("./authcode").Grant
     | import("./authcode").AuthCodeProvider;
+  /**
+   * RFC 8693 **delegation** — an agent acting *for* a user, so the issued token
+   * names the user as `sub` and the agent in `act`.
+   *
+   * `clientCredentials` says which machine is calling and `authorizationCode`
+   * says which person consented; a delegated token says both. Build a
+   * `DelegatedProvider` (see `./delegation`) and pass it here: the transports
+   * exchange on the way out and re-exchange on a 401, exactly as they do for the
+   * other two grants.
+   *
+   * Set alongside another option it wins, being the most specific choice.
+   */
+  delegation?: import("./delegation").DelegatedProvider;
   custom?: Record<string, string>;
 }
 

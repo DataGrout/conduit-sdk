@@ -28,6 +28,31 @@ export type {
   PendingAuthorization,
   RegisteredClient,
 } from "./authcode";
+// RFC 8693 delegation — an agent acting *for* a user. Named "delegation" and
+// "exchange" throughout: "token exchange" already means the client-credentials
+// grant here (`AuthCodeError`'s `token_exchange` kind, the onramp's
+// `token_exchange` stage), and one label cannot mean two grants.
+export {
+  DelegatedProvider,
+  DelegationError,
+  DelegationRequest,
+  TokenSource,
+  GRANT_TYPE as DELEGATION_GRANT_TYPE,
+  SERVER_ERROR_CODES as DELEGATION_SERVER_ERROR_CODES,
+  TOKEN_TYPES,
+  isDelegatedTokenExpired,
+  tokenTypeName,
+} from "./delegation";
+export type {
+  ClientAuth,
+  DelegatedToken,
+  DelegationErrorKind,
+  NamedTokenTypeUrn,
+  ServerErrorCode,
+  TokenSourceKind,
+  TokenType,
+  TokenTypeName,
+} from "./delegation";
 // The loopback listener is its own module so a headless caller can import the
 // flow without an HTTP server; it is re-exported here for convenience.
 export { LoopbackListener } from "./loopback";

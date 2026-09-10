@@ -8,6 +8,7 @@ import type { AuthConfig, MCPTool, MCPResource, MCPPrompt } from "../types";
 import type { ConduitIdentity } from "../identity";
 import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
 import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
+import type { DelegatedProvider } from "../delegation";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -21,6 +22,8 @@ export class MCPTransport extends Transport {
   private oauthProvider?: OAuthTokenProvider;
   /** Present only when `auth.authorizationCode` is set. */
   private authCodeProvider?: AuthCodeProvider;
+  /** Present only when `auth.delegation` is set (RFC 8693). */
+  private delegatedProvider?: DelegatedProvider;
 
   constructor(url: string, auth?: AuthConfig, identity?: ConduitIdentity) {
     super();
@@ -40,12 +43,18 @@ export class MCPTransport extends Transport {
     }
 
     this.authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
+    this.delegatedProvider = auth?.delegation;
   }
 
   private async buildHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {};
 
-    if (this.oauthProvider) {
+    // A delegated token wins: it names both the user and the agent, where the
+    // other grants name only one principal.
+    if (this.delegatedProvider) {
+      const token = await this.delegatedProvider.getToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } else if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
       headers["Authorization"] = `Bearer ${token}`;
     } else if (this.authCodeProvider) {

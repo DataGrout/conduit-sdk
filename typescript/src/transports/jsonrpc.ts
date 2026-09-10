@@ -6,6 +6,7 @@ import { Transport } from "./base";
 import { ConduitIdentity, fetchWithIdentity } from "../identity";
 import { OAuthTokenProvider } from "../oauth";
 import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
+import type { DelegatedProvider } from "../delegation";
 import type {
   AuthConfig,
   MCPTool,
@@ -83,6 +84,8 @@ export class JSONRPCTransport extends Transport {
   private oauthProvider?: OAuthTokenProvider;
   /** Present only when `auth.authorizationCode` is set. */
   private authCodeProvider?: AuthCodeProvider;
+  /** Present only when `auth.delegation` is set (RFC 8693). */
+  private delegatedProvider?: DelegatedProvider;
 
   constructor(
     url: string,
@@ -120,6 +123,7 @@ export class JSONRPCTransport extends Transport {
     }
 
     this.authCodeProvider = authCodeProviderFrom(auth?.authorizationCode);
+    this.delegatedProvider = auth?.delegation;
   }
 
   async connect(): Promise<void> {
@@ -143,8 +147,13 @@ export class JSONRPCTransport extends Transport {
       "Content-Type": "application/json",
     };
 
-    // Handle auth — OAuth token fetched asynchronously.
-    if (this.oauthProvider) {
+    // Handle auth — OAuth token fetched asynchronously. A delegated token is
+    // checked first: it is the most specific credential, naming both the user
+    // and the agent, so it wins over either single-principal grant.
+    if (this.delegatedProvider) {
+      const token = await this.delegatedProvider.getToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    } else if (this.oauthProvider) {
       const token = await this.oauthProvider.getToken();
       headers["Authorization"] = `Bearer ${token}`;
     } else if (this.authCodeProvider) {
@@ -187,10 +196,15 @@ export class JSONRPCTransport extends Transport {
         throw parseRateLimitError(response);
       }
 
-      // On 401, invalidate the cached OAuth token and retry once. Both grant
-      // types go through the same choke point, so an expired authorization-code
-      // access token recovers by refreshing rather than surfacing to the caller.
+      // On 401, invalidate the cached OAuth token and retry once. All three
+      // grant types go through the same choke point, so an expired
+      // authorization-code access token recovers by refreshing — and a stale
+      // delegated one by re-exchanging — rather than surfacing to the caller.
       if (response.status === 401 && !isRetry) {
+        if (this.delegatedProvider) {
+          this.delegatedProvider.invalidate();
+          return this._callWithRetry(method, params, true);
+        }
         if (this.oauthProvider) {
           this.oauthProvider.invalidate();
           return this._callWithRetry(method, params, true);
