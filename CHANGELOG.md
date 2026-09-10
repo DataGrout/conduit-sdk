@@ -6,7 +6,92 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.8.0] - 2026-09-08
+
+### TL;DR
+
+Four themes:
+
+1. **The SDKs can authenticate a person, not just a machine.** OAuth 2.1
+   authorization code + PKCE lands in all five languages. Until now every
+   conduit SDK could authenticate a *machine* — `client_credentials`, or the
+   onramp handshake that ends in one — which left
+   `https://gateway.datagrout.ai/connect` unreachable, because the server
+   binding there is chosen at consent time and lives in the token rather than
+   the URL. Desktop and CLI applications can now sign a user in.
+2. **The WebSocket handshake actually authenticates.** Four of the five sent no
+   usable credential on the upgrade, for three different underlying reasons,
+   and two of them dropped an mTLS identity they had been handed. Elixir also
+   performed no server verification at all without an identity.
+3. **An agent can act for a user without becoming the user.** RFC 8693 token
+   exchange produces a token naming the person as `sub` and the agent in `act`,
+   so a resource server can tell the two apart and audit, rate-limit or revoke
+   them separately. An actor is required unless impersonation is asked for by
+   name, so the accountable mode is the one you get by default.
+4. **The cross-language contract is enforced rather than described.**
+   `testdata/contract.json` pins the grant shapes, the persisted client, the
+   default scope and the error taxonomies, and every language's suite loads it.
+
+**Behaviour changes for existing users**, none of them tied to the new grant:
+WebSocket upgrades now carry an `Authorization` header for `client_credentials`
+in Rust, TypeScript, Python and Elixir; Elixir `wss://` now refuses a server
+certificate it cannot verify, where it previously accepted anything; and an
+Elixir HTTP 401 now refreshes and retries once instead of surfacing
+immediately. Details in the sections below.
+
+Everything above is in all five languages. Rust is the reference implementation
+and the other four are written from it, so a behaviour described here is a
+behaviour you can rely on whichever SDK you use.
+
+The WebSocket fix was not one bug in five places. Rust, TypeScript and Python
+built the upgrade headers synchronously and so could never attach an
+asynchronously-fetched token; Elixir interpolated the `{:ok, token}` tuple and
+sent a malformed bearer; Ruby resolves synchronously and was always correct.
+Same symptom in four of them, three different causes. Each language section
+below says which applied.
+
+### Fixed — OAuth tokens now authenticate the WebSocket handshake
+
+`WsTransport::connect` resolves an asynchronously-fetched bearer **before**
+building the handshake request. `build_handshake_request` is synchronous, so
+previously a provider-backed token could never reach the upgrade — an OAuth
+client authenticated over WS only if it also happened to present an mTLS
+identity. This affected `client_credentials` from the start; it is fixed for
+both grants.
+
+Behaviour change for existing `client_credentials` users: WS upgrades now carry
+an `Authorization: Bearer` header. Servers that were relying on the absence of
+that header will see it.
+
+### Fixed — mTLS identities now present a client certificate on the WebSocket handshake
+
+Two WebSocket transports accepted a `ConduitIdentity` and silently dropped it,
+so a `wss://` connection presented no client certificate even though the HTTP
+transports in the same language did. Rust (`build_connector`), Python
+(`_build_ssl_context`) and Ruby (`build_ssl_context`) already presented the
+cert and were not changed.
+
+- **TypeScript** — `WsTransport` now passes the identity's PEMs to the `ws`
+  client as `cert`, `key` and (when set) `ca`, which flow to `tls.connect` —
+  the same options `fetchWithIdentity` hands to `https.request`. Outside Node
+  it warns and connects without the cert, as `fetchWithIdentity` does. Applied
+  to `wss://` only; a plain `ws://` connection never carries one.
+- **Elixir** — `Transport.Ws.Conn` now builds `:ssl_options` for WebSockex from
+  the identity: `cert`/`key` from PEM or `certfile`/`keyfile` from paths,
+  `verify: :verify_peer`, SNI, and a trust store that is the identity's CA
+  (`cacerts` from PEM, `cacertfile` from a path) or the CAStore bundle the
+  Finch-backed transports already verify against. Applied to `wss://` only.
+
+### Fixed — Elixir `wss://` connections verify the server without an identity
+
+WebSockex defaults to `insecure: true`, so an Elixir WebSocket connection that
+carried no mTLS identity performed no peer verification at all — unlike the
+Finch-backed HTTP transports and the Rust reference, which always verify
+against a real trust store. `Transport.Ws.Conn` now sets `verify: :verify_peer`,
+SNI, the `:https` hostname check and the CAStore bundle on every `wss://`
+connection, identity or not. Behaviour change: a `wss://` endpoint with a
+self-signed or otherwise untrusted server certificate that used to connect will
+now be refused, as it already was over HTTP.
 
 ### Added — RFC 8693 token exchange (delegation)
 
@@ -87,127 +172,6 @@ server does, and answers `unauthorized_client` when they differ.
 `client_credentials` or authorization-code grant. This module says
 *delegation* and *exchange* and never reuses that label.
 
-### Porting brief — TypeScript, Python, Ruby, Elixir
-
-Semantics port, signatures do not. Invariants that must hold in every language,
-numbered on from the authorization-code brief below:
-
-13. **The form body is exactly `contract.json` → `delegation.request_form`**,
-    field for field, for the fixture request — including order. `resource`
-    is sent whenever set. `client_secret` is in the body under the default
-    client auth and absent from it under Basic.
-14. **An actor is required unless impersonation is explicit.** A request with
-    no actor fails `missing_actor` *before any HTTP*; a request with no subject
-    fails `missing_subject` likewise. The opt-out is a named call on the
-    builder, never a default or an `Option` that quietly reads as "none".
-15. **`DelegatedToken` is `{access_token, issued_token_type, token_type,
-    expires_at?, scope?}`**, `issued_token_type` a URN string, `expires_at`
-    Unix seconds computed at receipt, absent optionals omitted rather than
-    null. `contract.json` → `delegation.token`, `token_minimal` and
-    `wire_response` pin all three halves.
-16. **Error taxonomy:** `missing_subject`, `missing_actor`, `http`, `server`
-    (status + RFC 6749 `error` + `error_description?`), `invalid_response`. A
-    non-2xx without an RFC 6749 body is `invalid_response`. A 2xx missing
-    `issued_token_type` or `token_type` is `invalid_response`.
-17. **The provider is the third of its kind, not a new kind.** `get_token` and
-    `invalidate`, same 60-second buffer, single-flighted exchange, cached
-    token dropped on 401 and re-exchanged once. It reaches the transports
-    through whatever choke point the other two grants already use — and so
-    reaches the WebSocket upgrade (invariant 11) for free.
-18. **Token sources are consulted on every exchange**, so a provider-backed
-    subject or actor is refreshed by the provider that owns it, and a 401 on
-    the resource server drops only the delegated token, never the sources.
-19. **The client-must-be-the-actor rule is documented, not enforced.**
-
-## [0.8.0] - 2026-09-08
-
-### TL;DR
-
-Three themes:
-
-1. **The SDKs can authenticate a person, not just a machine.** OAuth 2.1
-   authorization code + PKCE lands in all five languages. Until now every
-   conduit SDK could authenticate a *machine* — `client_credentials`, or the
-   onramp handshake that ends in one — which left
-   `https://gateway.datagrout.ai/connect` unreachable, because the server
-   binding there is chosen at consent time and lives in the token rather than
-   the URL. Desktop and CLI applications can now sign a user in.
-2. **The WebSocket handshake actually authenticates.** Four of the five sent no
-   usable credential on the upgrade, for three different underlying reasons,
-   and two of them dropped an mTLS identity they had been handed. Elixir also
-   performed no server verification at all without an identity.
-3. **The cross-language contract is enforced rather than described.**
-   `testdata/contract.json` pins the grant shape, the persisted client, the
-   default scope and the error taxonomy, and every language's suite loads it.
-
-**Behaviour changes for existing users**, none of them tied to the new grant:
-WebSocket upgrades now carry an `Authorization` header for `client_credentials`
-in Rust, TypeScript, Python and Elixir; Elixir `wss://` now refuses a server
-certificate it cannot verify, where it previously accepted anything; and an
-Elixir HTTP 401 now refreshes and retries once instead of surfacing
-immediately. Details in the sections below.
-
-> **Release gate: met.** This version was not to be tagged until every language
-> had shipped the changes below. Parity is the promise; a one-language release
-> is how a temporary gap becomes a permanent one. All five are in.
->
-> | language | authcode | WS OAuth handshake fix | WS mTLS handshake fix |
-> |---|---|---|---|
-> | Rust (reference) | ✅ | ✅ | n/a — never broken |
-> | TypeScript | ✅ | ✅ | ✅ |
-> | Python | ✅ | ✅ | n/a — never broken |
-> | Ruby | ✅ | n/a — never broken, see below | n/a — never broken |
-> | Elixir | ✅ | ✅ | ✅ |
->
-> The WS column is not one bug in five places. Rust, TypeScript and Python built
-> the upgrade headers synchronously and so could never attach an
-> asynchronously-fetched token; Elixir interpolated the `{:ok, token}` tuple and
-> sent a malformed bearer; Ruby resolves synchronously and was always correct.
-> Same symptom in four of them, three different causes. Each language section
-> below says which applied.
-
-### Fixed — OAuth tokens now authenticate the WebSocket handshake
-
-`WsTransport::connect` resolves an asynchronously-fetched bearer **before**
-building the handshake request. `build_handshake_request` is synchronous, so
-previously a provider-backed token could never reach the upgrade — an OAuth
-client authenticated over WS only if it also happened to present an mTLS
-identity. This affected `client_credentials` from the start; it is fixed for
-both grants.
-
-Behaviour change for existing `client_credentials` users: WS upgrades now carry
-an `Authorization: Bearer` header. Servers that were relying on the absence of
-that header will see it.
-
-### Fixed — mTLS identities now present a client certificate on the WebSocket handshake
-
-Two WebSocket transports accepted a `ConduitIdentity` and silently dropped it,
-so a `wss://` connection presented no client certificate even though the HTTP
-transports in the same language did. Rust (`build_connector`), Python
-(`_build_ssl_context`) and Ruby (`build_ssl_context`) already presented the
-cert and were not changed.
-
-- **TypeScript** — `WsTransport` now passes the identity's PEMs to the `ws`
-  client as `cert`, `key` and (when set) `ca`, which flow to `tls.connect` —
-  the same options `fetchWithIdentity` hands to `https.request`. Outside Node
-  it warns and connects without the cert, as `fetchWithIdentity` does. Applied
-  to `wss://` only; a plain `ws://` connection never carries one.
-- **Elixir** — `Transport.Ws.Conn` now builds `:ssl_options` for WebSockex from
-  the identity: `cert`/`key` from PEM or `certfile`/`keyfile` from paths,
-  `verify: :verify_peer`, SNI, and a trust store that is the identity's CA
-  (`cacerts` from PEM, `cacertfile` from a path) or the CAStore bundle the
-  Finch-backed transports already verify against. Applied to `wss://` only.
-
-### Fixed — Elixir `wss://` connections verify the server without an identity
-
-WebSockex defaults to `insecure: true`, so an Elixir WebSocket connection that
-carried no mTLS identity performed no peer verification at all — unlike the
-Finch-backed HTTP transports and the Rust reference, which always verify
-against a real trust store. `Transport.Ws.Conn` now sets `verify: :verify_peer`,
-SNI, the `:https` hostname check and the CAStore bundle on every `wss://`
-connection, identity or not. Behaviour change: a `wss://` endpoint with a
-self-signed or otherwise untrusted server certificate that used to connect will
-now be refused, as it already was over HTTP.
 
 ### Added — OAuth 2.1 authorization code + PKCE
 
@@ -401,10 +365,13 @@ binds real sockets and drives them with raw HTTP requests, the flow suite runs
 against `Req.Test` so the real request building is exercised, and the transport
 suite drives both HTTP transports plus the WS upgrade headers.
 
-### Porting brief — TypeScript, Python, Ruby, Elixir
+### The cross-language contract
 
-Rust is the reference. Idiomatic parity means the semantics port, not the
-signatures. Invariants that must hold in every language:
+Rust is the reference implementation and the other four SDKs are written from
+it. Signatures follow each language's own idiom, but the semantics below hold
+everywhere, so anything relying on them behaves the same whichever SDK you
+reach for. `testdata/contract.json` pins the parts a test can check, and every
+language's suite loads it.
 
 1. **The `Grant` JSON shape is identical**, so a grant written by one SDK is
    readable by another: `access_token`, `refresh_token?`, `expires_at?`,
@@ -444,6 +411,36 @@ signatures. Invariants that must hold in every language:
     provider. Refreshes are single-flighted: concurrent callers make one
     request and share its outcome, failure included, so a dead endpoint costs
     one round trip rather than one per waiter.
+13. **The form body is exactly `contract.json` → `delegation.request_form`**,
+    field for field, for the fixture request — including order. `resource`
+    is sent whenever set. `client_secret` is in the body under the default
+    client auth and absent from it under Basic.
+14. **An actor is required unless impersonation is explicit.** A request with
+    no actor fails `missing_actor` *before any HTTP*; a request with no subject
+    fails `missing_subject` likewise. The opt-out is a named call on the
+    builder, never a default or an `Option` that quietly reads as "none".
+15. **`DelegatedToken` is `{access_token, issued_token_type, token_type,
+    expires_at?, scope?}`**, `issued_token_type` a URN string, `expires_at`
+    Unix seconds computed at receipt, absent optionals omitted rather than
+    null. `contract.json` → `delegation.token`, `token_minimal` and
+    `wire_response` pin all three halves.
+16. **Error taxonomy:** `missing_subject`, `missing_actor`, `http`, `server`
+    (status + RFC 6749 `error` + `error_description?`), `invalid_response`. A
+    non-2xx without an RFC 6749 body is `invalid_response`. A 2xx missing
+    `issued_token_type` or `token_type` is `invalid_response`.
+17. **The delegated provider behaves like the other two.** `get_token` and
+    `invalidate`, the same 60-second refresh buffer, single-flighted exchange,
+    and a cached token dropped on a 401 then re-exchanged once. It resolves
+    through the same path the other grants use, so every HTTP transport, the
+    401 retry and the WebSocket upgrade (invariant 11) all carry the delegated
+    bearer.
+18. **Token sources are consulted on every exchange**, so a provider-backed
+    subject or actor is refreshed by the provider that owns it, and a 401 on
+    the resource server drops only the delegated token, never the sources.
+19. **The client must be the actor, and the server is what enforces it.** The
+    SDK cannot verify the pairing without decoding the actor token, so it does
+    not try.
+
 
 #### Fixed — a refresh no longer freezes the provider
 
