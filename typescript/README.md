@@ -315,7 +315,7 @@ new Client(options: {
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22.12+ (the oldest line still receiving security patches; tested on 22 and 24)
 - TypeScript 5.0+ (for TypeScript users)
 
 ## License
