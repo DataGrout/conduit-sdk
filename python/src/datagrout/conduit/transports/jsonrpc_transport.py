@@ -14,6 +14,10 @@ from ..errors import (
 )
 from ..oauth import OAuthTokenProvider, derive_token_endpoint
 from ..authcode import AuthCodeProvider, provider_from_auth
+from ..delegation import (
+    DelegatedProvider,
+    provider_from_auth as delegated_provider_from_auth,
+)
 from ..types import RateLimitPerHour, RateLimitStatus
 
 logger = logging.getLogger(__name__)
@@ -81,6 +85,13 @@ class JSONRPCTransport(Transport):
             self.auth.get("authorization_code")
         )
 
+        # RFC 8693 delegation: this agent acting for a user. Deliberately
+        # *not* called "token exchange" — that name already means the
+        # client-credentials grant here. See datagrout.conduit.delegation.
+        self._delegation: Optional[DelegatedProvider] = delegated_provider_from_auth(
+            self.auth.get("delegation")
+        )
+
         if identity is not None and identity.needs_rotation(30):
             logger.warning("conduit: mTLS certificate expires within 30 days — consider rotating")
 
@@ -106,7 +117,17 @@ class JSONRPCTransport(Transport):
             await self._client.aclose()
 
     async def _build_auth_headers(self) -> Dict[str, str]:
-        """Build per-request auth headers (async to support OAuth token fetch)."""
+        """Build per-request auth headers (async to support OAuth token fetch).
+
+        A delegated token wins over the two plain grants: it is the most
+        specific credential the caller configured, and falling back to the
+        agent's own machine token would silently drop the user's identity from
+        every request.
+        """
+        if self._delegation is not None:
+            assert self._client is not None
+            token = await self._delegation.get_token(self._client)
+            return {"Authorization": f"Bearer {token}"}
         if self._oauth is not None:
             assert self._client is not None
             token = await self._oauth.get_token(self._client)
@@ -165,8 +186,11 @@ class JSONRPCTransport(Transport):
             raise RateLimitError(_parse_rate_limit_status(response))
 
         if response.status_code == 401 and not is_retry:
-            # Either grant recovers by refreshing; an expired access token
+            # Every grant recovers by fetching again; an expired access token
             # should not surface to the caller as an auth failure.
+            if self._delegation is not None:
+                self._delegation.invalidate()
+                return await self._call_with_retry(method, params, is_retry=True)
             if self._oauth is not None:
                 self._oauth.invalidate()
                 return await self._call_with_retry(method, params, is_retry=True)

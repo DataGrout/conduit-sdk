@@ -45,6 +45,10 @@ from typing import Any, AsyncIterator, Dict, Optional, Tuple
 import httpx
 
 from ..authcode import AuthCodeProvider, provider_from_auth
+from ..delegation import (
+    DelegatedProvider,
+    provider_from_auth as delegated_provider_from_auth,
+)
 from ..oauth import OAuthTokenProvider, derive_token_endpoint
 
 try:
@@ -190,6 +194,15 @@ class WsTransport(Transport):
 
         self._authcode: Optional[AuthCodeProvider] = provider_from_auth(
             self._auth.get("authorization_code")
+        )
+
+        # RFC 8693 delegation: this agent acting for a user. Deliberately
+        # *not* called "token exchange" — that name already means the
+        # client-credentials grant here. See datagrout.conduit.delegation.
+        # Its bearer is resolved in _resolve_bearer(), before the upgrade
+        # request is built, for the reason documented there.
+        self._delegation: Optional[DelegatedProvider] = delegated_provider_from_auth(
+            self._auth.get("delegation")
         )
         #: HTTP client for token fetches, created lazily on first use.
         self._token_http: Optional[httpx.AsyncClient] = None
@@ -413,12 +426,17 @@ class WsTransport(Transport):
         which is exactly the bug this replaced: an OAuth client authenticated
         over WS only if it also happened to present an mTLS identity.
         """
-        if self._oauth is None and self._authcode is None:
+        if self._oauth is None and self._authcode is None and self._delegation is None:
             return None
 
         if self._token_http is None:
             self._token_http = httpx.AsyncClient()
 
+        # Same precedence as the HTTP transports: a delegated token is the most
+        # specific credential, and falling back to the agent's own machine
+        # token would silently drop the user's identity from the connection.
+        if self._delegation is not None:
+            return await self._delegation.get_token(self._token_http)
         if self._oauth is not None:
             return await self._oauth.get_token(self._token_http)
         assert self._authcode is not None

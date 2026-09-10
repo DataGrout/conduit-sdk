@@ -110,6 +110,16 @@ class Client:
                 - ``{"basic": {"username": "...", "password": "..."}}`` — Basic auth.
                 - ``{"client_credentials": {"client_id": "...", "client_secret": "..."}}``
                   — OAuth 2.1 client credentials (see also *client_id* / *client_secret*).
+                - ``{"authorization_code": grant}`` — a signed-in person's grant
+                  (a :class:`~datagrout.conduit.authcode.Grant`, its dict form, or an
+                  :class:`~datagrout.conduit.authcode.AuthCodeProvider`).
+                - ``{"delegation": provider}`` — a
+                  :class:`~datagrout.conduit.delegation.DelegatedProvider`: this agent
+                  acting *for* a user, with an RFC 8693 delegated token (the user is
+                  ``sub``, the agent is ``act``).  The provider exchanges the two
+                  upstream tokens, re-exchanges before the delegated one expires and
+                  again on a 401, over HTTP and on the WebSocket upgrade.  It wins over
+                  the two plain grants when several are configured.
             use_intelligent_interface: When ``True``, ``list_tools()`` returns only the
                 DataGrout semantic discovery / execution tools instead of the raw MCP tool
                 list.  Defaults to ``True`` for DataGrout URLs, ``False`` otherwise.

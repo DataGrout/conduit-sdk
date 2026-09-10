@@ -25,6 +25,23 @@ from .authcode import (
     generate_verifier,
 )
 
+# RFC 8693 delegation — an agent acting for a user. Named "delegation", never
+# "token exchange": that label already means the client-credentials grant here.
+from .delegation import (
+    GRANT_TYPE as DELEGATION_GRANT_TYPE,
+    SERVER_ERROR_CODES,
+    ClientAuth,
+    DelegatedProvider,
+    DelegatedToken,
+    DelegationError,
+    DelegationErrorKind,
+    DelegationRequest,
+    ServerErrorCode,
+    TokenSource,
+    TokenSourceKind,
+    TokenType,
+)
+
 # The loopback listener lives in its own module so a headless caller can take
 # the flow without one, but it is re-exported here — the same surface every
 # conduit SDK presents — and it needs nothing beyond asyncio.
@@ -125,6 +142,19 @@ __all__ = [
     "challenge_s256",
     "generate_verifier",
     "derive_token_endpoint",
+    # RFC 8693 delegation — an agent acting for a user
+    "DELEGATION_GRANT_TYPE",
+    "SERVER_ERROR_CODES",
+    "ClientAuth",
+    "DelegatedProvider",
+    "DelegatedToken",
+    "DelegationError",
+    "DelegationErrorKind",
+    "DelegationRequest",
+    "ServerErrorCode",
+    "TokenSource",
+    "TokenSourceKind",
+    "TokenType",
     # Rate limiting
     "RateLimitError",
     "RateLimit",
