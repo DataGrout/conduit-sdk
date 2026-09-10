@@ -157,7 +157,7 @@ server does, and answers `unauthorized_client` when they differ.
   401 retry, exchanges are single-flighted. `AuthConfig::Delegation` resolves
   through the same `inject_oauth_token` and `resolve_async_token` choke points,
   so every HTTP transport, the 401-retry path and the **WebSocket upgrade**
-  (invariant 11) carry the delegated bearer unchanged.
+  carry the delegated bearer unchanged.
 - `ClientBuilder::auth_delegation(provider)`.
 - `delegation::codes` — the seven RFC 6749 error codes as named constants.
 - `testdata/contract.json` gains a `delegation` object: grant type, token-type
@@ -511,7 +511,7 @@ client, default scope and error taxonomy as bytes, and every language's suite
 loads that one file. Before it, each suite round-tripped a grant through its
 *own* serializer — which passes even when a language has a field name wrong, so
 long as it is wrong consistently. Nothing actually checked that a grant written
-by Python could be read by Ruby, which is the property invariant 1 promises.
+by Python could be read by Ruby, which is what one persisted shape is for.
 
 Every row is checked in all five. They differ only in whether an *added* kind is
 caught as well as a renamed one: Rust and TypeScript catch it at compile time

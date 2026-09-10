@@ -6,23 +6,23 @@ Every language SDK's test suite loads this one file and asserts its own types
 agree with it. That is the point: before this existed, each suite round-tripped
 a grant through *its own* serializer, which passes even when a language has a
 field name wrong — as long as it is consistently wrong. Nothing checked that
-Python and Ruby would actually read each other's saved grant, which is the
-property invariant #1 in `CHANGELOG.md` promises.
+Python and Ruby would actually read each other's saved grant, which is the whole
+promise of having one persisted shape.
 
 ## What it pins
 
-| key | invariant | what a failure means |
-|---|---|---|
-| `grant` | #1 | a field was renamed, added, or dropped from the persisted shape |
-| `grant_minimal` | #1 | absent optionals are being written as nulls instead of omitted |
-| `registered_client` | #9 | the id/redirect-URI pair no longer persists as one unit |
-| `default_scope` | #10 | someone "improved" the scope string |
-| `error_kinds` | #2 | the error taxonomy drifted in one language |
-| `delegation.grant_type`, `delegation.token_types` | #13 | a URN was mistyped in one language |
-| `delegation.request` → `delegation.request_form` | #13 | the fixture request no longer posts exactly this body, in this order |
-| `delegation.token`, `delegation.token_minimal`, `delegation.wire_response` | #15 | the issued-token shape drifted, or `expires_in` is not becoming absolute `expires_at` |
-| `delegation.error_kinds` | #16 | the delegation error taxonomy drifted |
-| `delegation.server_error_codes` | #16 | the RFC 6749 code list a `server` error can carry drifted |
+| key | what a failure means |
+|---|---|
+| `grant` | a field was renamed, added, or dropped from the persisted shape |
+| `grant_minimal` | absent optionals are being written as nulls instead of omitted |
+| `registered_client` | the id/redirect-URI pair no longer persists as one unit |
+| `default_scope` | someone "improved" the scope string |
+| `error_kinds` | the error taxonomy drifted in one language |
+| `delegation.grant_type`, `delegation.token_types` | a URN was mistyped in one language |
+| `delegation.request` → `delegation.request_form` | the fixture request no longer posts exactly this body, in this order |
+| `delegation.token`, `delegation.token_minimal`, `delegation.wire_response` | the issued-token shape drifted, or `expires_in` is not becoming absolute `expires_at` |
+| `delegation.error_kinds` | the delegation error taxonomy drifted |
+| `delegation.server_error_codes` | the RFC 6749 code list a `server` error can carry drifted |
 
 ## Where the tests live
 
@@ -51,6 +51,6 @@ them. The other three would fail, which is enough to stop the drift.
 
 ## Adding a sixth language
 
-Load this file, assert the same five rows, and add it to the table above. If a
+Load this file, assert every row above, and add the language to the table. If a
 new field ever joins the grant, it changes here first and every suite fails
 until it is ported — which is the whole idea.
