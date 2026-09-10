@@ -29,8 +29,16 @@ jobs:
       - run: cargo test
 
   typescript:
-    name: TypeScript
+    name: TypeScript (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      # Both ends of the supported range, so `engines.node` is a tested claim
+      # rather than an assumed one. 22 is the floor the package declares; 24 is
+      # the newest LTS. Node 20 is absent deliberately: it reached end of life
+      # in April 2026 and vitest 5 refuses to run on it.
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     defaults:
       run:
         working-directory: typescript
@@ -38,11 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Vitest 5 declares `^22.12.0 || ^24.0.0 || >=26.0.0`, so Node 20 can
-          # no longer run the suite. This is a dev-tooling floor only: the
-          # library's own `engines.node` stays at >=18 for consumers, who never
-          # install vitest.
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
       - run: npm install
       - run: npm run build
       - run: npx vitest run
