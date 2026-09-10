@@ -111,6 +111,7 @@ export class JSONRPCTransport extends Transport {
         cc.tokenEndpoint ??
         (() => {
           const { deriveTokenEndpoint } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             require("../oauth") as typeof import("../oauth");
           return deriveTokenEndpoint(url);
         })();

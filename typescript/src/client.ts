@@ -469,7 +469,7 @@ export class Client {
   async listTools(options?: any): Promise<MCPTool[]> {
     this.ensureInitialized();
     return this.sendWithRetry(async () => {
-      let allTools: MCPTool[] = [];
+      const allTools: MCPTool[] = [];
       let cursor: string | undefined;
 
       do {

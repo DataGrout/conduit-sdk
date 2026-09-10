@@ -102,6 +102,7 @@ export class MCPTransport extends Transport {
           init?: RequestInit,
         ) => {
           const { fetchWithIdentity } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             require("../identity") as typeof import("../identity");
           return fetchWithIdentity(
             typeof url === "string"
