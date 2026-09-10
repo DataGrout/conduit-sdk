@@ -152,10 +152,14 @@ export class MCPTransport extends Transport {
     }));
   }
 
+  // `_options` on this and the four methods below: accepted for signature
+  // parity with the other conduit SDKs, not yet consulted here. The leading
+  // underscore is the codebase's marker for a deliberately unused parameter,
+  // and what tsconfig's `noUnusedParameters` exempts.
   async callTool(
     name: string,
     args: Record<string, any>,
-    options?: any,
+    _options?: any,
   ): Promise<any> {
     if (!this.client) {
       throw new Error("Not connected. Call connect() first.");
@@ -183,7 +187,7 @@ export class MCPTransport extends Transport {
     return result;
   }
 
-  async listResources(options?: any): Promise<MCPResource[]> {
+  async listResources(_options?: any): Promise<MCPResource[]> {
     if (!this.client) {
       throw new Error("Not connected. Call connect() first.");
     }
@@ -197,7 +201,7 @@ export class MCPTransport extends Transport {
     }));
   }
 
-  async readResource(uri: string, options?: any): Promise<any> {
+  async readResource(uri: string, _options?: any): Promise<any> {
     if (!this.client) {
       throw new Error("Not connected. Call connect() first.");
     }
@@ -206,7 +210,7 @@ export class MCPTransport extends Transport {
     return result.contents;
   }
 
-  async listPrompts(options?: any): Promise<MCPPrompt[]> {
+  async listPrompts(_options?: any): Promise<MCPPrompt[]> {
     if (!this.client) {
       throw new Error("Not connected. Call connect() first.");
     }
@@ -222,7 +226,7 @@ export class MCPTransport extends Transport {
   async getPrompt(
     name: string,
     args?: Record<string, any>,
-    options?: any,
+    _options?: any,
   ): Promise<any> {
     if (!this.client) {
       throw new Error("Not connected. Call connect() first.");

@@ -13,7 +13,6 @@ import type {
   MCPResource,
   MCPPrompt,
   RateLimit,
-  RateLimitStatus,
 } from "../types";
 import { RateLimitError } from "../errors";
 
