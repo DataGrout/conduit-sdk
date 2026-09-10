@@ -30,6 +30,13 @@ Gem::Specification.new do |spec|
   spec.add_dependency "faraday-multipart", "~> 1.0"
   spec.add_dependency "base64"
   spec.add_dependency "websocket-driver", "~> 0.7"
+  # Upper bound on a gem we never require directly, because faraday's JSON
+  # response middleware — which every transport here goes through — calls
+  # `JSON.parse(body, opts)`, and json 3.0 dropped the second positional
+  # argument. faraday declares `json >= 0`, so without this a fresh install
+  # resolves json 3 and every request raises `Faraday::ParsingError`. Drop the
+  # bound once faraday supports json 3.
+  spec.add_dependency "json", "< 3.0"
 
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
