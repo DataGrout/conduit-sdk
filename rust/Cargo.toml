@@ -26,7 +26,10 @@ serde_json = "1.0"
 
 # Error handling
 thiserror = "1.0"
-anyhow = "1.0"
+# Floored past RUSTSEC-2026-0190, an unsoundness in `Error::downcast_mut()`
+# fixed in 1.0.103. A bare "1.0" already reaches the fix on a fresh resolve;
+# the explicit floor is so a stale or pinned lock cannot select below it.
+anyhow = "1.0.103"
 
 # Async traits
 async-trait = "0.1"
