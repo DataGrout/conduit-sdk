@@ -619,6 +619,10 @@ mod tests {
     // for either grant. The other four SDKs grew transport-level auth tests when
     // the authorization-code grant landed; this closes the gap in the reference.
 
+    // Gated to match their callers. Every use sits behind `authcode` or
+    // `delegation`, so on default features these are dead code — and CI builds
+    // with `-Dwarnings`, which makes dead code a hard error rather than a note.
+    #[cfg(any(feature = "authcode", feature = "delegation"))]
     fn unix_secs() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -648,6 +652,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "authcode", feature = "delegation"))]
     fn header_value(headers: &header::HeaderMap, name: header::HeaderName) -> Option<String> {
         headers
             .get(name)
