@@ -35,9 +35,10 @@ Four themes:
 **Behaviour changes for existing users**, none of them tied to the new grant:
 WebSocket upgrades now carry an `Authorization` header for `client_credentials`
 in Rust, TypeScript, Python and Elixir; Elixir `wss://` now refuses a server
-certificate it cannot verify, where it previously accepted anything; and an
+certificate it cannot verify, where it previously accepted anything; an
 Elixir HTTP 401 now refreshes and retries once instead of surfacing
-immediately. Details in the sections below.
+immediately; and the TypeScript package now requires Node 22.12 or newer.
+Details in the sections below.
 
 Everything above is in all five languages. Rust is the reference implementation
 and the other four are written from it, so a behaviour described here is a
@@ -65,6 +66,23 @@ but never reaches a consumer, who resolves from these requirements, so a
 permissive bound would leave every fresh install free to pick a vulnerable
 `req`. `plug` is a test dependency here and optional within `req` itself, so it
 does not enter a consumer's tree unless they ask for it.
+
+### Security — TypeScript now requires Node 22.12 or newer
+
+`engines.node` was `>=18`. That was true about capability and false about
+support: Node 18's last release was March 2025 and Node 20's was March 2026, so
+neither line receives security patches. The floor is now `>=22.12.0`, the oldest
+line still maintained.
+
+**This can conflict for you.** An application still on 18 or 20 cannot take this
+version. The source uses no runtime API newer than Node 18, so an older
+interpreter would in fact execute it — but the claim had also become untestable,
+because the test toolchain refuses to install below 22.12. A floor nobody can
+exercise is a guess, and pointing consumers at unpatched interpreters is the
+wrong guess to make.
+
+CI runs the TypeScript suite on both 22 and 24, so the declared floor and the
+newest LTS are each exercised on every change.
 
 ### Fixed — OAuth tokens now authenticate the WebSocket handshake
 
