@@ -19,7 +19,9 @@ defmodule DatagroutConduit.Client do
   ## Options
 
     * `:url` - Remote server URL (required)
-    * `:auth` - Authentication: `{:bearer, token}`, `{:api_key, key}`, `{:basic, user, pass}`, or `{:oauth, pid}`
+    * `:auth` - Authentication: `{:bearer, token}`, `{:api_key, key}`, `{:basic, user, pass}`,
+      `{:oauth, pid}`, `{:authorization_code, grant_or_provider}`, or
+      `{:delegation, provider}` (RFC 8693; see `DatagroutConduit.Delegation`)
     * `:transport` - `:mcp` (default) or `:jsonrpc`
     * `:transport_mod` - Override transport module directly (e.g. for testing)
     * `:identity` - `%DatagroutConduit.Identity{}` for mTLS (auto-discovered for DG URLs)
@@ -39,6 +41,8 @@ defmodule DatagroutConduit.Client do
           | {:api_key, String.t()}
           | {:basic, String.t(), String.t()}
           | {:oauth, GenServer.server()}
+          | {:authorization_code, GenServer.server()}
+          | {:delegation, GenServer.server()}
           | nil
 
   defstruct [

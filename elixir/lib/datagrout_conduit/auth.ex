@@ -2,10 +2,11 @@ defmodule DatagroutConduit.Auth do
   @moduledoc """
   One place where an `:auth` option becomes a request header.
 
-  Every transport resolves auth on the way out and, for the two provider-backed
+  Every transport resolves auth on the way out and, for the provider-backed
   grants, invalidates it on a 401 so the next attempt refreshes. Keeping that in
-  one module is what lets `client_credentials` and the authorization-code grant
-  travel the same path: they differ only in which provider answers `get_token`.
+  one module is what lets `client_credentials`, the authorization-code grant and
+  a delegated token travel the same path: they differ only in which provider
+  answers `get_token`.
 
   ## Shapes
 
@@ -14,9 +15,11 @@ defmodule DatagroutConduit.Auth do
     * `{:basic, user, pass}`
     * `{:oauth, provider}` — a `DatagroutConduit.OAuth` server
     * `{:authorization_code, provider}` — a `DatagroutConduit.AuthCode.Provider`
+    * `{:delegation, provider}` — a `DatagroutConduit.Delegation.Provider`, whose
+      RFC 8693 exchange names the user as `sub` and the agent in `act`
   """
 
-  alias DatagroutConduit.AuthCode
+  alias DatagroutConduit.{AuthCode, Delegation}
 
   @typedoc "Auth as the caller configured it, before any token is fetched."
   @type t ::
@@ -26,6 +29,7 @@ defmodule DatagroutConduit.Auth do
           | {:basic, String.t(), String.t()}
           | {:oauth, GenServer.server()}
           | {:authorization_code, GenServer.server()}
+          | {:delegation, GenServer.server()}
 
   @typedoc """
   Auth with any token already fetched. No provider variants: by this point a
@@ -39,7 +43,8 @@ defmodule DatagroutConduit.Auth do
 
   @doc """
   Normalize the `:auth` option, starting a provider for an
-  authorization-code grant given as a `Grant` or a plain map.
+  authorization-code grant given as a `Grant` or a plain map, or for a
+  delegation given as `DatagroutConduit.Delegation.Provider` options.
 
   A caller who passes a running provider keeps it, which is what they want when
   a rotated refresh token has to be written back.
@@ -53,6 +58,14 @@ defmodule DatagroutConduit.Auth do
   def normalize({:authorization_code, value}) do
     case AuthCode.Provider.from_auth(value) do
       {:ok, provider} -> {:authorization_code, provider}
+      :none -> nil
+      {:error, reason} -> raise ArgumentError, to_string(reason)
+    end
+  end
+
+  def normalize({:delegation, value}) do
+    case Delegation.Provider.from_auth(value) do
+      {:ok, provider} -> {:delegation, provider}
       :none -> nil
       {:error, reason} -> raise ArgumentError, to_string(reason)
     end
@@ -78,6 +91,10 @@ defmodule DatagroutConduit.Auth do
     to_bearer(AuthCode.Provider.get_token(provider))
   end
 
+  def resolve({:delegation, provider}) do
+    to_bearer(Delegation.Provider.get_token(provider))
+  end
+
   def resolve(other), do: {:ok, other}
 
   defp to_bearer({:ok, token}), do: {:ok, {:bearer, token}}
@@ -87,6 +104,7 @@ defmodule DatagroutConduit.Auth do
   @spec invalidate(t()) :: :ok
   def invalidate({:oauth, provider}), do: DatagroutConduit.OAuth.invalidate(provider)
   def invalidate({:authorization_code, provider}), do: AuthCode.Provider.invalidate(provider)
+  def invalidate({:delegation, provider}), do: Delegation.Provider.invalidate(provider)
   def invalidate(_), do: :ok
 
   @doc """
@@ -97,6 +115,7 @@ defmodule DatagroutConduit.Auth do
   @spec provider_backed?(t()) :: boolean()
   def provider_backed?({:oauth, _}), do: true
   def provider_backed?({:authorization_code, _}), do: true
+  def provider_backed?({:delegation, _}), do: true
   def provider_backed?(_), do: false
 
   @doc "Headers for already-resolved auth."
