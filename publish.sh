@@ -97,14 +97,14 @@ sed -i '' "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" rust/Cargo.tom
 # TypeScript — package.json
 sed -i '' "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" typescript/package.json
 
-# TypeScript — src/index.ts
-sed -i '' "s/export const version = '$CURRENT'/export const version = '$NEW_VERSION'/" typescript/src/index.ts
+# TypeScript — src/version.ts (index.ts re-exports it since 0.8.0)
+sed -i '' "s/export const version = \"$CURRENT\"/export const version = \"$NEW_VERSION\"/" typescript/src/version.ts
 
 # Python — pyproject.toml
 sed -i '' "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" python/pyproject.toml
 
-# Python — __init__.py
-sed -i '' "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" python/src/datagrout/conduit/__init__.py
+# Python — _version.py (__init__.py re-exports it since 0.8.0)
+sed -i '' "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" python/src/datagrout/conduit/_version.py
 
 # Elixir — mix.exs
 sed -i '' "s/@version \"$CURRENT\"/@version \"$NEW_VERSION\"/" elixir/mix.exs
@@ -117,9 +117,9 @@ sed -i '' "s/VERSION = \"$CURRENT\"/VERSION = \"$NEW_VERSION\"/" ruby/lib/datagr
 
 echo "  rust/Cargo.toml                          → $NEW_VERSION"
 echo "  typescript/package.json                  → $NEW_VERSION"
-echo "  typescript/src/index.ts                  → $NEW_VERSION"
+echo "  typescript/src/version.ts                → $NEW_VERSION"
 echo "  python/pyproject.toml                    → $NEW_VERSION"
-echo "  python/src/.../\__init__.py              → $NEW_VERSION"
+echo "  python/src/.../_version.py               → $NEW_VERSION"
 echo "  elixir/mix.exs                           → $NEW_VERSION"
 echo "  elixir/lib/datagrout_conduit.ex          → $NEW_VERSION"
 echo "  ruby/lib/datagrout_conduit/version.rb    → $NEW_VERSION"

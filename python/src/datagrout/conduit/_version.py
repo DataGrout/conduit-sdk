@@ -6,4 +6,4 @@ without a cycle. The MCP handshake reports this to the server, and it used to
 be a separate hardcoded literal that had drifted six minor versions behind.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"

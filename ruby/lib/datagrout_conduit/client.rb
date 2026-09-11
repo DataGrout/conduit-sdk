@@ -173,6 +173,20 @@ module DatagroutConduit
     # Standard MCP Methods
     # ================================================================
 
+    # Whether a tool name is one of DataGrout's own (the semantic discovery
+    # and execution tools) rather than a third-party integration tool.
+    #
+    # Third-party tools are named +integration@version/tool@version+. DataGrout's
+    # own tools reach a client in two spellings depending on the transport: the
+    # canonical +data-grout@1/discovery.perform@1+ over WebSocket, the short
+    # +discovery.perform+ over HTTP MCP. Treating "contains @" as "third party"
+    # kept only the short form, so a WebSocket client with the intelligent
+    # interface on saw zero tools.
+    def self.dg_native_tool?(name)
+      name = name.to_s
+      !name.include?("@") || name.start_with?("data-grout@", "data-grout/")
+    end
+
     def list_tools
       ensure_initialized!
 
@@ -194,7 +208,7 @@ module DatagroutConduit
       end
 
       if @use_intelligent_interface
-        all_tools.reject! { |t| t.name.include?("@") }
+        all_tools.select! { |t| self.class.dg_native_tool?(t.name) }
       end
 
       all_tools

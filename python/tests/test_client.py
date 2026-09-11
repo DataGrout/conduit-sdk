@@ -241,7 +241,10 @@ async def test_list_tools_no_filter_by_default():
 
 @pytest.mark.asyncio
 async def test_list_tools_filters_integration_tools_when_intelligent_interface():
-    """use_intelligent_interface=True removes tools whose name contains '@'."""
+    """use_intelligent_interface=True drops third-party integration tools and
+    keeps DataGrout's own in either spelling — the short ``discovery.perform``
+    the HTTP MCP path sends and the canonical ``data-grout@1/…`` the WebSocket
+    path sends (the old ``'@' not in name`` rule dropped the latter)."""
     with patch("datagrout.conduit.client.MCPTransport") as mock_cls:
         mock_transport = AsyncMock()
         mock_transport.connect = AsyncMock()
@@ -251,6 +254,7 @@ async def test_list_tools_filters_integration_tools_when_intelligent_interface()
                 {"name": "salesforce@v1/get_lead@v1", "description": "Integration tool"},
                 {"name": "arbiter_check_policy", "description": "DG tool"},
                 {"name": "governor_enable", "description": "DG tool"},
+                {"name": "data-grout@1/discovery.perform@1", "description": "DG tool, canonical"},
                 {"name": "hubspot@v1/create_contact@v1", "description": "Integration tool"},
             ]
         )
@@ -268,6 +272,18 @@ async def test_list_tools_filters_integration_tools_when_intelligent_interface()
     assert "hubspot@v1/create_contact@v1" not in names
     assert "arbiter_check_policy" in names
     assert "governor_enable" in names
+    assert "data-grout@1/discovery.perform@1" in names
+
+
+def test_is_dg_native_tool_rule():
+    from datagrout.conduit import is_dg_native_tool
+
+    assert is_dg_native_tool("discovery.perform")
+    assert is_dg_native_tool("data-grout@1/tasks.wait@1")
+    assert is_dg_native_tool("data-grout/discover")
+    assert not is_dg_native_tool("quickbooks@v1/qboql@v1")
+    assert not is_dg_native_tool("@datagrout/discover")
+    assert is_dg_native_tool("")
 
 
 # ─── call_tool uses standard MCP path ────────────────────────────────────────

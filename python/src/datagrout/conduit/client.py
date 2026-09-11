@@ -30,6 +30,21 @@ def is_dg_url(url: str) -> bool:
     )
 
 
+
+def is_dg_native_tool(name: str) -> bool:
+    """Whether a tool name is one of DataGrout's own rather than a third-party
+    integration tool.
+
+    Third-party tools are named ``integration@version/tool@version``. DataGrout's
+    own tools reach a client in two spellings depending on the transport: the
+    canonical ``data-grout@1/discovery.perform@1`` over WebSocket, the short
+    ``discovery.perform`` over HTTP MCP. Treating "contains ``@``" as "third
+    party" kept only the short form, so a WebSocket client with the intelligent
+    interface on saw zero tools.
+    """
+    name = name or ""
+    return "@" not in name or name.startswith(("data-grout@", "data-grout/"))
+
 class GuidedSession:
     """Stateful guided workflow session."""
 
@@ -498,7 +513,7 @@ class Client:
                 if not cursor:
                     break
             if self.use_intelligent_interface:
-                all_tools = [t for t in all_tools if "@" not in t.get("name", "")]
+                all_tools = [t for t in all_tools if is_dg_native_tool(t.get("name", ""))]
             return all_tools
 
         return await self._send_with_retry(_do)

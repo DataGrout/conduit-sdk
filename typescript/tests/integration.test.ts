@@ -29,7 +29,7 @@ import {
   generateKeypair,
   saveIdentity,
 } from '../src/registration';
-import { Client } from '../src/client';
+import { Client, isDgNativeTool } from '../src/client';
 import { deriveTokenEndpoint } from '../src/oauth';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -358,9 +358,10 @@ describe('JSONRPC with Bearer Token', () => {
       const iiTools = await iiClient.listTools();
 
       expect(iiTools.length).toBeLessThanOrEqual(allTools.length);
+      expect(iiTools.length).toBeGreaterThan(0);
 
       for (const tool of iiTools) {
-        expect(tool.name).toContain('@');
+        expect(isDgNativeTool(tool.name)).toBe(true);
       }
 
       await regularClient.disconnect();
@@ -644,7 +645,7 @@ describe('Conduit URL integration (CONDUIT_TEST_URL)', () => {
   }, 30_000);
 
   test.skipIf(!TEST_URL)(
-    'intelligent interface: useIntelligentInterface=true returns only non-@ tools',
+    'intelligent interface: useIntelligentInterface=true returns only DG-native tools',
     async () => {
       const iiClient = new Client({
         url: TEST_URL!,
@@ -656,8 +657,9 @@ describe('Conduit URL integration (CONDUIT_TEST_URL)', () => {
       const iiTools = await iiClient.listTools();
 
       expect(Array.isArray(iiTools)).toBe(true);
+      expect(iiTools.length).toBeGreaterThan(0);
       for (const tool of iiTools) {
-        expect(tool.name).not.toMatch(/@/);
+        expect(isDgNativeTool(tool.name)).toBe(true);
       }
 
       await iiClient.disconnect();

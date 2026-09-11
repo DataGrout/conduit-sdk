@@ -6,6 +6,25 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.1] - 2026-09-11
+
+### Fixed — the intelligent interface returned no tools over WebSocket
+
+With `use_intelligent_interface` on (the default for DataGrout URLs),
+`list_tools` kept only names without `@`, on the assumption that DataGrout's
+own tools never carry one. They do over WebSocket: the gateway names them
+canonically there (`data-grout@1/discovery.perform@1`) and only the HTTP MCP
+path shortens them to `discovery.perform`. A WebSocket client therefore saw
+zero tools while the same account over HTTP saw five (2026-09-11, observed
+through Manifold's `ping`).
+
+All five SDKs now keep a tool when its name has no `@` **or** starts with
+`data-grout@` / `data-grout/`, and expose the rule — `is_dg_native_tool`
+(Rust, Python), `isDgNativeTool` (TypeScript), `Client.dg_native_tool?`
+(Ruby, Elixir) — so tests and hosts can apply it too. The live tests now also
+assert that the filtered list is non-empty, which is the assertion that would
+have caught this.
+
 ## [0.8.0] - 2026-09-08
 
 ### TL;DR

@@ -139,7 +139,8 @@ async fn test_list_tools() {
 }
 
 /// When intelligent interface is enabled, `list_tools` filters out third-party
-/// integration tools (names containing `@`) and returns only DG-native tools.
+/// integration tools and returns only DG-native tools — in either spelling
+/// the gateway uses (`discovery.perform` over HTTP, `data-grout@1/…` over WS).
 #[tokio::test]
 async fn test_intelligent_interface_filters_tools() {
     let url = skip_without_url!();
@@ -158,10 +159,14 @@ async fn test_intelligent_interface_filters_tools() {
 
     let tools = assert_ok_or_skip!(client.list_tools().await);
 
-    // None of the returned tools should contain "@" in their name
+    // Every returned tool is DataGrout's own, whichever spelling it came in.
+    assert!(
+        !tools.is_empty(),
+        "intelligent interface returned no tools at all — the filter dropped DG's own"
+    );
     for t in &tools {
         assert!(
-            !t.name.contains('@'),
+            datagrout_conduit::is_dg_native_tool(&t.name),
             "intelligent interface leaked a third-party tool: {}",
             t.name
         );

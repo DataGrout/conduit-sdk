@@ -1,6 +1,6 @@
 """DataGrout Conduit SDK for Python."""
 
-from .client import Client, GuidedSession, is_dg_url
+from .client import Client, GuidedSession, is_dg_url, is_dg_native_tool
 from .identity import ConduitIdentity
 from .namespaces import (
     PrismNamespace,
@@ -90,6 +90,7 @@ from .types import (
 from ._version import __version__ as __version__  # re-export
 
 __all__ = [
+    "is_dg_native_tool",
     # Client
     "Client",
     "GuidedSession",

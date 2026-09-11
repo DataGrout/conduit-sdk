@@ -163,7 +163,7 @@ pub mod delegation;
 pub use client::{
     is_dg_url, ChartBuilder, Client, ClientBuilder, DiscoverBuilder, FlowIntoBuilder, GuideBuilder,
     GuidedSession, PerformBuilder, PlanBuilder, PrismFocusBuilder, RefractBuilder,
-};
+ is_dg_native_tool};
 pub use error::{Error, RateLimit, Result};
 pub use identity::ConduitIdentity;
 pub use namespaces::{Deliverables, Ephemerals, Flow, Logic, Prism, Warden};

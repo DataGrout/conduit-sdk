@@ -16,7 +16,7 @@ defmodule DatagroutConduit do
       {:ok, result} = DatagroutConduit.Client.call_tool(client, "my-tool", %{key: "value"})
   """
 
-  @version "0.8.0"
+  @version "0.8.1"
 
   @dg_hosts ["datagrout.ai", "datagrout.dev"]
   @dg_ca_url "https://ca.datagrout.ai/ca.pem"

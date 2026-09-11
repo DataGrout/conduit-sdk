@@ -2,7 +2,7 @@
  * DataGrout Conduit SDK for TypeScript/JavaScript
  */
 
-export { Client, GuidedSession, isDgUrl } from "./client";
+export { Client, GuidedSession, isDgUrl, isDgNativeTool } from "./client";
 export type { Subscription, SubscriptionEvent } from "./transports/ws";
 export { WsTransport, SUBPROTOCOL as WS_SUBPROTOCOL } from "./transports/ws";
 export { ConduitIdentity, fetchWithIdentity } from "./identity";

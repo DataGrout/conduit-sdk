@@ -25,6 +25,19 @@ pub fn is_dg_url(url: &str) -> bool {
         || std::env::var("CONDUIT_IS_DG").is_ok()
 }
 
+/// Whether a tool name is one of DataGrout's own (the semantic discovery and
+/// execution tools) rather than a third-party integration tool.
+///
+/// Third-party tools are named `integration@version/tool@version`. DataGrout's
+/// own tools reach a client in two spellings depending on the transport: the
+/// canonical `data-grout@1/discovery.perform@1` over WebSocket, the short
+/// `discovery.perform` over HTTP MCP. Treating "contains `@`" as "third
+/// party" kept only the short form, so a WebSocket client with the
+/// intelligent interface on saw zero tools (2026-09-11).
+pub fn is_dg_native_tool(name: &str) -> bool {
+    !name.contains('@') || name.starts_with("data-grout@") || name.starts_with("data-grout/")
+}
+
 /// Rewrite an HTTP-style DG URL (`/mcp` or `/rpc` suffix) into a `wss://…/ws`
 /// URL suitable for the WebSocket transport. Already-`ws[s]://` URLs are
 /// returned untouched.
@@ -253,12 +266,10 @@ impl Client {
 
         // When the intelligent interface is active, keep only DataGrout's own semantic
         // tools (discover, perform, guide) and drop all third-party integration tools.
-        // Third-party tools use the "integration@version/tool@version" naming scheme; DG's
-        // own tools do not contain "@".
         let all_tools = if self.use_intelligent_interface {
             all_tools
                 .into_iter()
-                .filter(|t| !t.name.contains('@'))
+                .filter(|t| is_dg_native_tool(&t.name))
                 .collect()
         } else {
             all_tools
@@ -2231,5 +2242,25 @@ impl<'a> PrismFocusBuilder<'a> {
         self.client
             .call_dg_tool("data-grout/prism.focus", params)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tool_filter_tests {
+    use super::is_dg_native_tool;
+
+    #[test]
+    fn dg_tools_pass_in_both_spellings_and_integrations_do_not() {
+        // short names (HTTP MCP)
+        assert!(is_dg_native_tool("discovery.perform"));
+        assert!(is_dg_native_tool("logic.query"));
+        // canonical names (WebSocket)
+        assert!(is_dg_native_tool("data-grout@1/discovery.perform@1"));
+        assert!(is_dg_native_tool("data-grout@1/tasks.wait@1"));
+        assert!(is_dg_native_tool("data-grout/discover"));
+        // third-party integrations, either spelling
+        assert!(!is_dg_native_tool("salesforce@1/get_lead@1"));
+        assert!(!is_dg_native_tool("quickbooks@v1/qboql@v1"));
+        assert!(!is_dg_native_tool("@datagrout/discover"));
     }
 }

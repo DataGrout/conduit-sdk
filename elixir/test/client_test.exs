@@ -74,19 +74,27 @@ defmodule DatagroutConduit.ClientTest do
   end
 
   describe "intelligent interface filtering" do
-    test "filters tools with @ anywhere in name when enabled" do
+    # DG's own tools arrive as `discovery.perform` over HTTP MCP and as
+    # `data-grout@1/discovery.perform@1` over WebSocket; both must survive.
+    test "keeps DataGrout's own tools in either spelling and drops integrations" do
       tools = [
         %DatagroutConduit.Types.Tool{name: "get_users", description: "Get users"},
         %DatagroutConduit.Types.Tool{name: "@datagrout/discover", description: "Discover"},
-        %DatagroutConduit.Types.Tool{name: "create_invoice", description: "Create invoice"},
+        %DatagroutConduit.Types.Tool{name: "data-grout@1/discovery.perform@1", description: "Perform"},
         %DatagroutConduit.Types.Tool{name: "salesforce@1/get_lead@1", description: "Get lead"}
       ]
 
-      filtered = Enum.reject(tools, fn t -> String.contains?(t.name || "", "@") end)
+      filtered = Enum.filter(tools, fn t -> Client.dg_native_tool?(t.name) end)
 
-      assert length(filtered) == 2
-      assert Enum.all?(filtered, fn t -> not String.contains?(t.name, "@") end)
-      assert Enum.map(filtered, & &1.name) == ["get_users", "create_invoice"]
+      assert Enum.map(filtered, & &1.name) == ["get_users", "data-grout@1/discovery.perform@1"]
+    end
+
+    test "dg_native_tool? on bare names" do
+      assert Client.dg_native_tool?("discovery.perform")
+      assert Client.dg_native_tool?("data-grout@1/tasks.wait@1")
+      assert Client.dg_native_tool?("data-grout/discover")
+      refute Client.dg_native_tool?("quickbooks@v1/qboql@v1")
+      refute Client.dg_native_tool?(nil)
     end
   end
 

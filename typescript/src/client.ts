@@ -130,6 +130,25 @@ export function isDgUrl(url: string): boolean {
  * await client.disconnect();
  * ```
  */
+/**
+ * Whether a tool name is one of DataGrout's own (the semantic discovery and
+ * execution tools) rather than a third-party integration tool.
+ *
+ * Third-party tools are named `integration@version/tool@version`. DataGrout's
+ * own tools reach a client in two spellings depending on the transport: the
+ * canonical `data-grout@1/discovery.perform@1` over WebSocket, the short
+ * `discovery.perform` over HTTP MCP. Treating "contains `@`" as "third party"
+ * kept only the short form, so a WebSocket client with the intelligent
+ * interface on saw zero tools.
+ */
+export function isDgNativeTool(name: string): boolean {
+  return (
+    !name.includes("@") ||
+    name.startsWith("data-grout@") ||
+    name.startsWith("data-grout/")
+  );
+}
+
 export class Client {
   private url: string;
   private auth?: ClientOptions["auth"];
@@ -484,7 +503,7 @@ export class Client {
       } while (cursor);
 
       if (this.useIntelligentInterface) {
-        return allTools.filter((t) => !t.name.includes("@"));
+        return allTools.filter((t) => isDgNativeTool(t.name));
       }
       return allTools;
     });

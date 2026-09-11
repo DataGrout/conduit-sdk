@@ -6,4 +6,4 @@
  * cycle. The MCP handshake reports this to the server, and it used to be a
  * separate hardcoded literal that had drifted six minor versions behind.
  */
-export const version = "0.8.0";
+export const version = "0.8.1";

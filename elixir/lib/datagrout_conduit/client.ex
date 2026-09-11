@@ -871,10 +871,28 @@ defmodule DatagroutConduit.Client do
   defp update_auth_header(req, _), do: req
 
   defp maybe_filter_intelligent(tools, true) do
-    Enum.reject(tools, fn tool -> String.contains?(tool.name || "", "@") end)
+    Enum.filter(tools, fn tool -> dg_native_tool?(tool.name || "") end)
   end
 
   defp maybe_filter_intelligent(tools, _), do: tools
+
+  @doc """
+  Whether a tool name is one of DataGrout's own (the semantic discovery and
+  execution tools) rather than a third-party integration tool.
+
+  Third-party tools are named `integration@version/tool@version`. DataGrout's
+  own tools reach a client in two spellings depending on the transport: the
+  canonical `data-grout@1/discovery.perform@1` over WebSocket, the short
+  `discovery.perform` over HTTP MCP. Treating "contains `@`" as "third party"
+  kept only the short form, so a WebSocket client with the intelligent
+  interface on saw zero tools.
+  """
+  @spec dg_native_tool?(String.t()) :: boolean()
+  def dg_native_tool?(name) when is_binary(name) do
+    not String.contains?(name, "@") or String.starts_with?(name, ["data-grout@", "data-grout/"])
+  end
+
+  def dg_native_tool?(_), do: false
 
   defp maybe_warn_non_dg(%{dg_warned: true} = state, _method), do: state
 

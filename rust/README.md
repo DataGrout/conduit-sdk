@@ -22,7 +22,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-datagrout-conduit = "0.8.0"
+datagrout-conduit = "0.8.1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 ```
