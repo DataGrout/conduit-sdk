@@ -25,9 +25,22 @@ defmodule DatagroutConduit.Transport.Ws do
       receive do
         {:subscription_event, ^sub_id, event} ->
           IO.inspect(event)
+
+        {:subscription_closed, ^sub_id} ->
+          :connection_closed
       end
 
       :ok = DatagroutConduit.Transport.Ws.unsubscribe(ws, sub_id)
+
+  When the connection closes, each subscriber receives
+  `{:subscription_closed, subscription_id}` once, so a `receive` loop can stop
+  instead of waiting on a stream that will never deliver again (the Rust
+  transport ends its subscribers' channels at the same point). Subscriptions do
+  not survive a reconnect; subscribe again on the new connection.
+
+  A ping still unanswered when the next is due counts as a close too: a peer
+  that vanished without a close frame (a dropped NAT mapping, a host that went
+  away) is otherwise invisible until the OS gives up on the TCP connection.
 
   ## Wire protocol
 
@@ -68,7 +81,9 @@ defmodule DatagroutConduit.Transport.Ws do
     # ms between ping frames; overridable via :ping_interval_ms init opt
     ping_interval_ms: @ping_interval_ms,
     # bumped each time a ping frame is sent (exposed via pings_sent/1 for tests)
-    pings_sent: 0
+    pings_sent: 0,
+    # set when a ping goes out, cleared by its pong
+    awaiting_pong: false
   ]
 
   @doc "Returns how many ping frames this transport has sent. For tests."
@@ -99,7 +114,8 @@ defmodule DatagroutConduit.Transport.Ws do
 
   Events are delivered as `{:subscription_event, subscription_id, event}` messages
   to the calling process's mailbox, where `event` is a map with `:event` and
-  `:data` keys.
+  `:data` keys. `{:subscription_closed, subscription_id}` follows when the
+  connection closes.
 
   Returns `{:ok, subscription_id}` on success.
   """
@@ -240,10 +256,17 @@ defmodule DatagroutConduit.Transport.Ws do
   # Wraps the send in try/catch because WebSockex.send_frame `exit`s rather
   # than returning when the Conn process has died — without this, every
   # disconnect would crash the Ws GenServer along with it.
+  def handle_info(:ping_tick, %{awaiting_pong: true} = state) do
+    # The last ping was never answered: the peer is gone without closing.
+    Logger.warning("[Ws] WebSocket peer stopped answering pings — closing")
+    stop_conn(state.conn_pid)
+    {:noreply, release_waiters(%{state | awaiting_pong: false}, :ping_timeout)}
+  end
+
   def handle_info(:ping_tick, state) do
     state =
       case safe_send_ping(state.conn_pid) do
-        :ok -> %{state | pings_sent: state.pings_sent + 1}
+        :ok -> %{state | pings_sent: state.pings_sent + 1, awaiting_pong: true}
         _ -> state
       end
 
@@ -251,19 +274,11 @@ defmodule DatagroutConduit.Transport.Ws do
     {:noreply, state}
   end
 
+  def handle_info(:ws_pong, state), do: {:noreply, %{state | awaiting_pong: false}}
+
   def handle_info(:ws_disconnected, state) do
     Logger.warning("[Ws] WebSocket disconnected — failing pending requests")
-    reason = :disconnected
-
-    for {_id, from} <- state.pending do
-      GenServer.reply(from, {:error, reason})
-    end
-
-    for {_id, {_topic, _caller, from}} <- state.pending_subscribe do
-      GenServer.reply(from, {:error, reason})
-    end
-
-    {:noreply, %{state | pending: %{}, pending_subscribe: %{}, subscriptions: %{}}}
+    {:noreply, release_waiters(state, :disconnected)}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
@@ -366,6 +381,32 @@ defmodule DatagroutConduit.Transport.Ws do
   # a vanished Conn process — `WebSockex.send_frame/2` exits the caller when
   # the target client has gone away, which would otherwise take down this
   # GenServer alongside the dead connection.
+  # Every way the connection ends lands here: pending calls fail with `reason`
+  # and each subscriber is told its subscription closed.
+  defp release_waiters(state, reason) do
+    for {_id, from} <- state.pending do
+      GenServer.reply(from, {:error, reason})
+    end
+
+    for {_id, {_topic, _caller, from}} <- state.pending_subscribe do
+      GenServer.reply(from, {:error, reason})
+    end
+
+    for {sub_id, pids} <- state.subscriptions, pid <- Enum.uniq(pids) do
+      send(pid, {:subscription_closed, sub_id})
+    end
+
+    %{state | pending: %{}, pending_subscribe: %{}, subscriptions: %{}}
+  end
+
+  # The Conn is linked to us; unlink first so its end does not end us.
+  defp stop_conn(conn_pid) when is_pid(conn_pid) do
+    Process.unlink(conn_pid)
+    Process.exit(conn_pid, :kill)
+  end
+
+  defp stop_conn(_), do: :ok
+
   defp safe_send_ping(conn_pid) do
     try do
       Conn.send_frame(conn_pid, {:ping, ""})

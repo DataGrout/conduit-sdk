@@ -234,7 +234,7 @@ event = await sub.recv()
 print(event.event, event.data)
 ```
 
-**Reconnection**: after a disconnect, `send_request` raises `RuntimeError("WS transport not connected")`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4.
+**Reconnection**: after a disconnect, `send_request` raises `RuntimeError("WS transport not connected")`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4. A connection ends when the server closes it, a read fails, or a keepalive ping goes unanswered for a whole interval; in-flight calls then fail and every `async for event in sub` loop ends.
 
 ## API Reference
 

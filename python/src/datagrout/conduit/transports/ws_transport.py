@@ -24,10 +24,11 @@ Wire protocol
 
 Reconnection
 ------------
-Reconnect is caller-driven.  After a disconnect,
-:meth:`WsTransport.send_request` raises :class:`RuntimeError` with the
-message *"WS transport not connected"*.  Active subscriptions do not survive
-reconnects; callers must re-subscribe after calling :meth:`connect` again.
+Reconnect is caller-driven.  When the connection closes, from either end,
+in-flight calls fail with :class:`RuntimeError`, every subscription's
+iteration ends, and :meth:`WsTransport.send_request` raises
+*"WS transport not connected"* until :meth:`connect` is called again.
+Subscriptions do not survive reconnects; callers must re-subscribe.
 """
 
 from __future__ import annotations
@@ -128,16 +129,22 @@ class Subscription:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _enqueue(self, event: SubscriptionEvent) -> None:
-        try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            pass  # drop on overflow
+        # A slow consumer loses the oldest events, not the newest, as a lagging
+        # receiver on the Rust broadcast channel does.
+        self._put_dropping_oldest(event)
 
     def _close(self) -> None:
-        try:
-            self._queue.put_nowait(None)
-        except asyncio.QueueFull:
-            pass
+        # The end-of-stream marker must land even on a full queue, or a
+        # consumer waiting on recv() never learns the subscription ended.
+        self._put_dropping_oldest(None)
+
+    def _put_dropping_oldest(self, item: Optional[SubscriptionEvent]) -> None:
+        while True:
+            try:
+                self._queue.put_nowait(item)
+                return
+            except asyncio.QueueFull:
+                self._queue.get_nowait()
 
 
 # ── WsTransport ───────────────────────────────────────────────────────────────
@@ -279,21 +286,7 @@ class WsTransport(Transport):
                 pass
             self._token_http = None
 
-        # Propagate closure to all pending callers.
-        err = RuntimeError("WS connection closed")
-        for fut in self._pending.values():
-            if not fut.done():
-                fut.set_exception(err)
-        self._pending.clear()
-
-        for _topic, fut in self._pending_subscribe.values():
-            if not fut.done():
-                fut.set_exception(err)
-        self._pending_subscribe.clear()
-
-        for sub in self._subscriptions.values():
-            sub._close()
-        self._subscriptions.clear()
+        self._fail_all("WS connection closed")
 
     # ── Subscriptions ─────────────────────────────────────────────────────────
 
@@ -539,9 +532,33 @@ class WsTransport(Transport):
                         fut.set_result(msg.get("result"))
 
         except asyncio.CancelledError:
-            pass
+            return  # disconnect() cancelled us and owns the teardown
         except Exception:
-            pass
+            pass  # a read error ends the connection the same way a close does
+
+        # The socket closed under us (server close, deploy, network loss, a
+        # missed ping). As in the Rust transport, the connection is marked down
+        # and everything waiting on it is released: pending calls fail and
+        # subscriptions end, so `async for event in sub` stops instead of
+        # waiting on a stream that will never deliver again.
+        self._ws = None
+        self._fail_all("WS connection closed")
+
+    def _fail_all(self, reason: str) -> None:
+        err = RuntimeError(reason)
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_exception(err)
+        self._pending.clear()
+
+        for _topic, fut in self._pending_subscribe.values():
+            if not fut.done():
+                fut.set_exception(err)
+        self._pending_subscribe.clear()
+
+        for sub in self._subscriptions.values():
+            sub._close()
+        self._subscriptions.clear()
 
     def _route_notification(self, params: Dict[str, Any]) -> None:
         sub_id = params.get("subscription")

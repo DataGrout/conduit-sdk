@@ -191,6 +191,7 @@ Supported topic namespaces:
 - Subscriptions survive concurrent tool calls on the same socket
 - Server-initiated notifications arrive via Tokio `broadcast` channel — multiple consumers supported
 - Reconnection is caller-driven in v0.4; a supervised auto-reconnect wrapper is on the roadmap
+- A connection ends when the server closes it, a read fails, or a keepalive ping goes unanswered for a whole interval (`with_ping_interval`, default 25 s); in-flight calls then fail and every subscription's channel closes (`RecvError::Closed`)
 
 #### Wire protocol
 

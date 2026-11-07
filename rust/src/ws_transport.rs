@@ -27,6 +27,13 @@
 //! subscriptions do **not** survive reconnects (the server clears them on
 //! disconnect); callers must re-issue `subscribe` after reconnecting. A
 //! supervised auto-reconnecting wrapper is on the roadmap.
+//!
+//! A connection counts as closed when the server closes it, when a read
+//! fails, and when a keepalive ping goes unanswered for a whole ping
+//! interval: a peer that vanished without a close frame (a dropped NAT
+//! mapping, a host that went away) is otherwise invisible until the OS gives
+//! up on the TCP connection, many minutes later. Every way of closing fails
+//! in-flight calls and ends every subscription's channel.
 
 use crate::error::{Error, Result};
 use crate::identity::ConduitIdentity;
@@ -148,6 +155,7 @@ pub struct WsTransport {
     next_id: Arc<std::sync::atomic::AtomicU64>,
     control_tx: Mutex<Option<mpsc::Sender<Control>>>,
     task_handle: Mutex<Option<JoinHandle<()>>>,
+    ping_interval: Duration,
 }
 
 impl WsTransport {
@@ -183,7 +191,19 @@ impl WsTransport {
             next_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             control_tx: Mutex::new(None),
             task_handle: Mutex::new(None),
+            ping_interval: PING_INTERVAL,
         })
+    }
+
+    /// Set the keepalive interval (default [`PING_INTERVAL`], 25 seconds).
+    ///
+    /// A ping is sent every interval, and a ping still unanswered when the
+    /// next one is due closes the connection. `Duration::ZERO` turns the
+    /// keepalive off. Takes effect on the next
+    /// [`connect`](TransportTrait::connect).
+    pub fn with_ping_interval(mut self, interval: Duration) -> Self {
+        self.ping_interval = interval;
+        self
     }
 
     /// Subscribe to a dotted-namespace topic.
@@ -264,7 +284,12 @@ impl TransportTrait for WsTransport {
         let connected = Arc::clone(&self.connected);
         connected.store(true, Ordering::Release);
 
-        let task = tokio::spawn(run_connection(ws_stream, control_rx, connected));
+        let task = tokio::spawn(run_connection(
+            ws_stream,
+            control_rx,
+            connected,
+            self.ping_interval,
+        ));
 
         {
             let mut tx_slot = self.control_tx.lock().await;
@@ -360,20 +385,25 @@ type WsStream<S> = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTl
 /// Many load balancers and reverse proxies (nginx, AWS ALB) close idle WS
 /// connections after 60–120 seconds. Sending a ping every 25 seconds keeps
 /// the connection alive well within the tightest common timeout window.
-const PING_INTERVAL: Duration = Duration::from_secs(25);
+pub const PING_INTERVAL: Duration = Duration::from_secs(25);
 
 async fn run_connection(
     ws_stream: WsStream<tokio::net::TcpStream>,
     mut control_rx: mpsc::Receiver<Control>,
     connected: Arc<AtomicBool>,
+    ping_interval: Duration,
 ) {
     let (mut sink, mut stream) = ws_stream.split();
     let mut state = ConnectionState::new();
 
     // Consume the immediate first tick so the first ping fires after the
-    // interval, not instantly on connect.
-    let mut ping_timer = tokio::time::interval(PING_INTERVAL);
-    ping_timer.tick().await;
+    // interval, not instantly on connect. A zero interval means no keepalive.
+    let mut ping_timer = (!ping_interval.is_zero()).then(|| tokio::time::interval(ping_interval));
+    if let Some(timer) = ping_timer.as_mut() {
+        timer.tick().await;
+    }
+    // Set when a ping goes out, cleared by its pong.
+    let mut awaiting_pong = false;
 
     loop {
         tokio::select! {
@@ -502,8 +532,7 @@ async fn run_connection(
                         let _ = sink.send(Message::Pong(payload)).await;
                     }
                     Ok(Message::Pong(_)) => {
-                        // Keepalive acknowledged — reset is implicit via the
-                        // interval; nothing to track.
+                        awaiting_pong = false;
                     }
                     Ok(Message::Close(_)) => {
                         break;
@@ -518,18 +547,33 @@ async fn run_connection(
                 }
             }
 
-            // Keepalive: send a ping every PING_INTERVAL to prevent idle
-            // timeout disconnects from load balancers and proxies.
-            _ = ping_timer.tick() => {
+            // Keepalive: send a ping every interval to prevent idle timeout
+            // disconnects from load balancers and proxies. The previous ping
+            // still unanswered means the peer is gone without having closed.
+            _ = next_ping(&mut ping_timer) => {
+                if awaiting_pong {
+                    fail_all(&mut state, "WS peer stopped answering pings");
+                    break;
+                }
                 if sink.send(Message::Ping(vec![])).await.is_err() {
                     break;
                 }
+                awaiting_pong = true;
             }
         }
     }
 
     connected.store(false, Ordering::Release);
     fail_all(&mut state, "WS connection closed");
+}
+
+async fn next_ping(timer: &mut Option<tokio::time::Interval>) {
+    match timer {
+        Some(timer) => {
+            timer.tick().await;
+        }
+        None => std::future::pending().await,
+    }
 }
 
 fn handle_inbound(text: &str, state: &mut ConnectionState) {

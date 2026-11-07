@@ -263,7 +263,7 @@ Supported topics:
 | `flows.<flow_id>.*` | `flow.into` progress and completion |
 | `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
 
-**Reconnection**: after a disconnect, calls raise `NotInitializedError`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4.
+**Reconnection**: after a disconnect, calls raise `NotInitializedError`. Re-call `connect()` and re-subscribe — subscriptions do not survive reconnects in v0.4. A connection ends when the server closes it or, under Node, when a keepalive ping goes unanswered for a whole interval; in-flight calls then reject and every `for await` over a subscription ends.
 
 ## API Reference
 

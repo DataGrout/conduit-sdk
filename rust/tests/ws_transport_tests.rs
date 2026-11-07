@@ -418,3 +418,76 @@ async fn connect_is_idempotent() {
     transport.connect().await.unwrap();
     assert!(transport.is_connected());
 }
+
+// ─── Closed connections release their waiters ──────────────────────────────
+//
+// The contract every port keeps: however the connection ends, in-flight calls
+// fail and every subscription's channel closes, so a subscriber never waits
+// on a stream that will not deliver again.
+
+#[tokio::test]
+async fn a_server_close_ends_subscriptions() {
+    let server = spawn_mock_server(default_handler()).await;
+    let transport = connect_client(&server.addr).await;
+    let mut subscription = transport.subscribe("connectors.x").await.unwrap();
+
+    server.push_tx.send(Message::Close(None)).unwrap();
+
+    let ended = tokio::time::timeout(Duration::from_secs(2), subscription.events.recv())
+        .await
+        .expect("subscription did not end");
+    assert!(matches!(
+        ended,
+        Err(tokio::sync::broadcast::error::RecvError::Closed)
+    ));
+    assert!(!transport.is_connected());
+}
+
+/// Accepts one client, answers its first request (a `subscribe`), then holds
+/// the socket without reading it again: a peer that vanished without closing.
+/// Not reading means its pings are never answered.
+async fn spawn_silent_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = format!(
+        "ws://127.0.0.1:{}/ws",
+        listener.local_addr().unwrap().port()
+    );
+
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+
+        if let Some(Ok(Message::Text(text))) = ws.next().await {
+            let req: Value = serde_json::from_str(&text).unwrap();
+            let reply =
+                json!({"jsonrpc": "2.0", "id": req["id"], "result": {"subscription": "sub_1"}});
+            ws.send(Message::Text(reply.to_string())).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        drop(ws);
+    });
+
+    addr
+}
+
+#[tokio::test]
+async fn an_unanswered_ping_closes_the_connection() {
+    let addr = spawn_silent_server().await;
+    let mut transport = WsTransport::new(addr, AuthConfig::None)
+        .unwrap()
+        .with_ping_interval(Duration::from_millis(100));
+    transport.connect().await.unwrap();
+
+    let mut subscription = transport.subscribe("connectors.x").await.unwrap();
+
+    // One interval to send the ping, a second to find it unanswered.
+    let ended = tokio::time::timeout(Duration::from_secs(2), subscription.events.recv())
+        .await
+        .expect("a silent peer went unnoticed");
+    assert!(matches!(
+        ended,
+        Err(tokio::sync::broadcast::error::RecvError::Closed)
+    ));
+    assert!(!transport.is_connected());
+}

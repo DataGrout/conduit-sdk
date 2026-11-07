@@ -123,10 +123,12 @@ export class Subscription {
       const resolve = this._waiters.shift()!;
       this._rejecters.shift();
       resolve(event);
-    } else if (this._queue.length < SUBSCRIPTION_BUFFER) {
+    } else {
+      // A slow consumer loses the oldest events, not the newest, as a lagging
+      // receiver on the Rust broadcast channel does.
+      if (this._queue.length >= SUBSCRIPTION_BUFFER) this._queue.shift();
       this._queue.push(event);
     }
-    // else: drop on overflow
   }
 
   _close(): void {
@@ -293,7 +295,18 @@ export class WsTransport extends Transport {
       this._ws = null;
     };
 
+    // The Node `ws` package reports pongs; the keepalive below watches them.
+    const pongs = ws as unknown as {
+      on?: (event: string, fn: () => void) => void;
+    };
+    if (typeof pongs.on === "function") {
+      pongs.on("pong", () => {
+        this._awaitingPong = false;
+      });
+    }
+
     this._ws = ws;
+    this._awaitingPong = false;
     this._startPingTimer();
   }
 
@@ -324,6 +337,29 @@ export class WsTransport extends Transport {
     this._pingIntervalMs = intervalMs;
   }
 
+  /** Set when a ping goes out, cleared by its pong. */
+  private _awaitingPong = false;
+
+  /**
+   * Close a connection whose peer stopped answering pings, releasing every
+   * waiter the way a close does: pending calls fail, subscriptions end.
+   */
+  private _peerGone(): void {
+    const ws = this._ws as unknown as {
+      terminate?: () => void;
+      close: () => void;
+    } | null;
+    this._stopPingTimer();
+    this._ws = null;
+    this._failAll("WS peer stopped answering pings");
+    try {
+      if (ws !== null && typeof ws.terminate === "function") ws.terminate();
+      else ws?.close();
+    } catch {
+      // already gone
+    }
+  }
+
   /** Tracks how many ping frames this transport has sent — for tests. */
   get pingsSent(): number {
     return this._pingsSent;
@@ -344,9 +380,17 @@ export class WsTransport extends Transport {
       // NOT expose ping, so we silently skip the keepalive there — proxies
       // would need longer idle timeouts in that case.
       if (typeof ws.ping === "function") {
+        // The previous ping still unanswered: the peer is gone without having
+        // closed (a dropped NAT mapping, a host that went away), which
+        // nothing else would notice until the OS gives up on the socket.
+        if (this._awaitingPong) {
+          this._peerGone();
+          return;
+        }
         try {
           ws.ping();
           this._pingsSent += 1;
+          this._awaitingPong = true;
         } catch {
           // Connection going away; the onclose handler will tidy up.
         }

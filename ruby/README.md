@@ -310,7 +310,7 @@ Supported topics:
 | `flows.<flow_id>.*` | `flow.into` progress and completion |
 | `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
 
-**Reconnection**: after a disconnect, `send_request` and `subscribe` raise `DatagroutConduit::NotInitializedError`. Call `client.connect` again and re-subscribe — subscriptions do not survive reconnects in v0.4.
+**Reconnection**: after a disconnect, `send_request` and `subscribe` raise `DatagroutConduit::NotInitializedError`. Call `client.connect` again and re-subscribe — subscriptions do not survive reconnects in v0.4. A connection ends when the server closes it, a read fails, or a keepalive ping goes unanswered for a whole interval; in-flight calls then fail and every subscription's `each` ends.
 
 ## Standard MCP Methods
 

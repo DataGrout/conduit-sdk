@@ -317,6 +317,29 @@ describe('Subscription', () => {
     // Queue should be empty — the event went straight to the waiter.
     expect((sub as any)._queue).toHaveLength(0);
   });
+
+  it('drops the oldest event on overflow, as the Rust transport does', async () => {
+    const sub = new Subscription('sub_1', 'topic.x');
+    for (let i = 0; i < 258; i++) {
+      sub._enqueue({ subscription: 'sub_1', event: `ev${i}`, data: i });
+    }
+    expect((sub as any)._queue).toHaveLength(256);
+    expect((await sub.recv()).event).toBe('ev2');
+  });
+
+  it('ends iteration when the socket closes under it', async () => {
+    const t = new WsTransport('wss://example.com/ws');
+    const sub = new Subscription('sub_1', 'connectors.x');
+    (t as any)._subscriptions.set('sub_1', sub);
+    const iterated = (async () => {
+      const seen: SubscriptionEvent[] = [];
+      for await (const ev of sub) seen.push(ev);
+      return seen;
+    })();
+
+    (t as any)._failAll('WS connection closed');
+    expect(await iterated).toEqual([]);
+  });
 });
 
 // ── Upgrade headers ───────────────────────────────────────────────────────────
@@ -417,6 +440,54 @@ describe('WsTransport ping keepalive', () => {
     const callsBefore = ping.mock.calls.length;
     await new Promise(resolve => setTimeout(resolve, 60));
     expect(ping.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('closes a connection whose pings go unanswered, releasing its waiters', async () => {
+    const t = new WsTransport('wss://example.com/ws');
+    t.setPingInterval(20);
+
+    const ws = createMockWs();
+    const terminate = vi.fn();
+    (ws as any).ping = vi.fn();
+    (ws as any).terminate = terminate;
+    (t as any)._ws = ws;
+
+    const sub = new Subscription('sub_1', 'connectors.x');
+    (t as any)._subscriptions.set('sub_1', sub);
+    const ended = (async () => {
+      for await (const _ev of sub) {
+        // nothing arrives
+      }
+      return 'ended';
+    })();
+
+    (t as any)._startPingTimer();
+
+    // one tick sends the ping, the next finds it unanswered
+    expect(await ended).toBe('ended');
+    expect(terminate).toHaveBeenCalled();
+    expect((t as any)._ws).toBeNull();
+  });
+
+  it('a pong keeps the connection open', async () => {
+    const t = new WsTransport('wss://example.com/ws');
+    t.setPingInterval(20);
+
+    const ws = createMockWs();
+    (ws as any).ping = vi.fn(() => {
+      // a live peer answers a moment later
+      setTimeout(() => {
+        (t as any)._awaitingPong = false;
+      }, 1);
+    });
+    (t as any)._ws = ws;
+    (t as any)._startPingTimer();
+
+    await new Promise(resolve => setTimeout(resolve, 90));
+    expect((t as any)._ws).toBe(ws);
+    expect(t.pingsSent).toBeGreaterThanOrEqual(3);
+
+    await t.disconnect();
   });
 
   it('silently skips ping when the underlying WebSocket lacks a ping method (browser)', async () => {

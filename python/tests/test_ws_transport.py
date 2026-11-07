@@ -26,8 +26,13 @@ from datagrout.conduit.transports.ws_transport import (
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-async def make_mock_ws(recv_messages: list[str] | None = None) -> Any:
-    """Return a mock WebSocket connection object."""
+async def make_mock_ws(recv_messages: list[str] | None = None, close_after: bool = False) -> Any:
+    """Return a mock WebSocket connection object.
+
+    The mock stays open after delivering its messages, as a live socket does;
+    ``close_after`` ends the stream instead, which is what the client sees when
+    the server closes the connection.
+    """
     ws = AsyncMock()
     ws.send = AsyncMock()
     ws.close = AsyncMock()
@@ -37,6 +42,8 @@ async def make_mock_ws(recv_messages: list[str] | None = None) -> Any:
     async def _aiter(self_):
         for m in _msgs:
             yield m
+        if not close_after:
+            await asyncio.Event().wait()
 
     ws.__aiter__ = _aiter
     return ws
@@ -311,6 +318,73 @@ async def test_receive_loop_ignores_malformed_json():
 
     # No panics, no state changes.
     assert len(t._pending) == 0
+
+
+@pytest.mark.asyncio
+async def test_server_close_ends_subscriptions_and_fails_pending():
+    # The Rust transport's contract: a connection that closes under the client
+    # releases everything waiting on it. Before this, a subscriber iterating
+    # `async for event in sub` waited forever on a dead socket.
+    t = WsTransport("wss://example.com/ws")
+    sub = Subscription("sub_1", "connectors.x")
+    t._subscriptions["sub_1"] = sub
+    pending = asyncio.get_event_loop().create_future()
+    t._pending["ws-1"] = pending
+
+    t._ws = await make_mock_ws([], close_after=True)
+    await asyncio.wait_for(t._receive_loop(), timeout=1)
+
+    events = [ev async for ev in sub]
+    assert events == []
+    with pytest.raises(RuntimeError, match="WS connection closed"):
+        await pending
+    assert t._subscriptions == {} and t._pending == {}
+    with pytest.raises(RuntimeError, match="not connected"):
+        await t.send_request("tools/list")
+
+
+@pytest.mark.asyncio
+async def test_a_read_error_ends_the_connection_like_a_close():
+    t = WsTransport("wss://example.com/ws")
+    sub = Subscription("sub_1", "connectors.x")
+    t._subscriptions["sub_1"] = sub
+
+    ws = AsyncMock()
+
+    async def _aiter(self_):
+        raise ConnectionResetError("peer went away")
+        yield  # pragma: no cover
+
+    ws.__aiter__ = _aiter
+    t._ws = ws
+    await asyncio.wait_for(t._receive_loop(), timeout=1)
+
+    assert [ev async for ev in sub] == []
+    assert t._ws is None
+
+
+@pytest.mark.asyncio
+async def test_a_full_subscription_still_learns_it_closed():
+    sub = Subscription("sub_1", "t")
+    for i in range(sub._queue.maxsize):
+        sub._enqueue(SubscriptionEvent(subscription="sub_1", event=f"e{i}", data=None))
+
+    sub._close()
+    events = [ev async for ev in sub]
+
+    # the oldest event made room for the end marker, as on overflow
+    assert len(events) == sub._queue.maxsize - 1
+    assert events[0].event == "e1"
+
+
+@pytest.mark.asyncio
+async def test_overflow_drops_the_oldest_event():
+    sub = Subscription("sub_1", "t")
+    for i in range(sub._queue.maxsize + 2):
+        sub._enqueue(SubscriptionEvent(subscription="sub_1", event=f"e{i}", data=None))
+
+    first = await sub.recv()
+    assert first.event == "e2"
 
 
 @pytest.mark.asyncio

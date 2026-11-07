@@ -442,6 +442,19 @@ module DatagroutConduit
         subs.each_value        { |list| list.each(&:_close) }
       end
 
+      # The peer stopped answering pings: release every waiter as a close
+      # does, then close the socket so the read thread stops too.
+      def peer_gone
+        was_connected = @mutex.synchronize do
+          old = @connected
+          @connected = false
+          old
+        end
+
+        fail_all_pending(:ping_timeout) if was_connected
+        @io&.close rescue nil
+      end
+
       def cleanup_socket
         stop_ping_thread
         @write_mutex.synchronize do
@@ -458,11 +471,17 @@ module DatagroutConduit
       # Start the background ping thread. Sends one WS ping frame every
       # @ping_interval seconds until the connection is torn down. No-op when
       # @ping_interval is non-positive (used by tests to disable pinging).
+      #
+      # A ping still unanswered when the next is due closes the connection: a
+      # peer that vanished without a close frame (a dropped NAT mapping, a
+      # host that went away) is otherwise invisible until the OS gives up on
+      # the TCP connection.
       def start_ping_thread
         return if @ping_thread
         return if @ping_interval <= 0
 
         interval = @ping_interval
+        @awaiting_pong = false
         @ping_thread = Thread.new do
           loop do
             sleep interval
@@ -471,15 +490,26 @@ module DatagroutConduit
             driver = @driver
             break unless driver
 
+            if @awaiting_pong
+              peer_gone
+              break
+            end
+
             begin
               # WebSocket::Driver#ping returns false if the connection is
-              # already closing; treat that as "stop the loop" too.
-              @write_mutex.synchronize { driver.ping } || break
+              # already closing; treat that as "stop the loop" too. Its block
+              # runs when the matching pong arrives.
+              @awaiting_pong = true
+              @write_mutex.synchronize { driver.ping { @awaiting_pong = false } } || break
               @pings_sent += 1
             rescue StandardError
               break
             end
           end
+        ensure
+          # A loop that ended on its own must not stop the next connect from
+          # starting a fresh one.
+          @ping_thread = nil if @ping_thread == Thread.current
         end
         @ping_thread.abort_on_exception = false
         @ping_thread.name = "conduit-ws-ping"

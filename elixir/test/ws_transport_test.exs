@@ -229,6 +229,30 @@ defmodule DatagroutConduit.Transport.WsTest do
 
       GenServer.stop(pid)
     end
+
+    test "each subscriber is told its subscription ended, once" do
+      {:ok, pid} =
+        GenServer.start_link(Ws, %Ws{
+          conn_pid: self(),
+          pending: %{},
+          pending_subscribe: %{},
+          subscriptions: %{"sub_1" => [self(), self()], "sub_2" => [self()]},
+          next_id: 0
+        })
+
+      send(pid, :ws_disconnected)
+
+      assert_receive {:subscription_closed, "sub_1"}
+      assert_receive {:subscription_closed, "sub_2"}
+      refute_receive {:subscription_closed, "sub_1"}, 50
+
+      # The Conn sends :ws_disconnected for both the close frame and the
+      # disconnect; the second finds nothing left to tell.
+      send(pid, :ws_disconnected)
+      refute_receive {:subscription_closed, _}, 50
+
+      GenServer.stop(pid)
+    end
   end
 
   # ── Header helpers ────────────────────────────────────────────────────────────
@@ -346,6 +370,40 @@ defmodule DatagroutConduit.Transport.WsTest do
       {:noreply, _state} = Ws.handle_info(:ping_tick, state)
 
       refute_receive :ping_tick, 100
+    end
+
+    test "a ping goes out awaiting its pong; the pong clears it" do
+      conn = spawn(fn -> Process.sleep(:infinity) end)
+      state = %Ws{conn_pid: conn, ping_interval_ms: 0}
+
+      # The dummy conn does not speak WebSockex, so the send fails and nothing
+      # is awaited; mark the ping sent by hand to exercise the pong.
+      {:noreply, state} = Ws.handle_info(:ws_pong, %{state | awaiting_pong: true})
+      refute state.awaiting_pong
+      Process.exit(conn, :kill)
+    end
+
+    test "a ping unanswered when the next is due closes the connection" do
+      conn = spawn(fn -> Process.sleep(:infinity) end)
+      ref = Process.monitor(conn)
+      caller = {self(), make_ref()}
+
+      state = %Ws{
+        conn_pid: conn,
+        ping_interval_ms: 0,
+        awaiting_pong: true,
+        pending: %{"ws-1" => caller},
+        subscriptions: %{"sub_1" => [self()]}
+      }
+
+      {:noreply, state} = Ws.handle_info(:ping_tick, state)
+
+      assert_receive {:DOWN, ^ref, :process, ^conn, :killed}
+      assert_receive {:subscription_closed, "sub_1"}
+      {_pid, tag} = caller
+      assert_receive {^tag, {:error, :ping_timeout}}
+      assert state.pending == %{} and state.subscriptions == %{}
+      refute state.awaiting_pong
     end
 
     test "pings_sent/1 returns the live counter through the GenServer API" do

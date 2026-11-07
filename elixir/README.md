@@ -272,7 +272,7 @@ Supported topics:
 | `flows.<flow_id>.*` | `flow.into` progress and completion |
 | `governor.<server_uuid>` | Governor percept events (file change, schedule, webhook) |
 
-**Reconnection**: after a disconnect, `subscribe/2` and `send_request/3` return `{:error, :not_connected}`. Restart the client GenServer and re-subscribe — subscriptions do not survive reconnects in v0.4.
+**Reconnection**: after a disconnect, `subscribe/2` and `send_request/3` return `{:error, :not_connected}`. Restart the client GenServer and re-subscribe — subscriptions do not survive reconnects in v0.4. A connection ends when the server closes it or a keepalive ping goes unanswered for a whole interval; in-flight calls then return an error and each subscriber receives `{:subscription_closed, subscription_id}`.
 
 ## MCP Protocol Methods
 

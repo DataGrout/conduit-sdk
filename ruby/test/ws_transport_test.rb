@@ -499,6 +499,42 @@ class WsTransportTest < Minitest::Test
     ws.instance_variable_set(:@connected, false)
   end
 
+  def test_an_unanswered_ping_closes_the_connection_and_ends_subscriptions
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
+    driver = Object.new
+    driver.define_singleton_method(:ping) { |*| true } # sent, never answered
+    ws.instance_variable_set(:@driver, driver)
+    ws.instance_variable_set(:@connected, true)
+
+    sub = DatagroutConduit::Transport::Ws::Subscription.new("sub_1", "connectors.x")
+    ws.instance_variable_get(:@subscriptions)["sub_1"] = [sub]
+
+    ws.send(:start_ping_thread)
+    events = Timeout.timeout(1) { sub.to_a }
+
+    assert_empty events
+    refute ws.connected?
+    refute ws.instance_variable_get(:@ping_thread), "the ended loop clears itself for the next connect"
+  end
+
+  def test_answered_pings_keep_the_connection
+    ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
+    driver = Object.new
+    driver.define_singleton_method(:ping) do |*, &on_pong|
+      on_pong&.call
+      true
+    end
+    ws.instance_variable_set(:@driver, driver)
+    ws.instance_variable_set(:@connected, true)
+
+    ws.send(:start_ping_thread)
+    sleep 0.1
+    assert ws.connected?
+    assert ws.pings_sent >= 3
+    ws.send(:stop_ping_thread)
+    ws.instance_variable_set(:@connected, false)
+  end
+
   def test_stop_ping_thread_is_idempotent
     ws = DatagroutConduit::Transport::Ws.new(url: "wss://example.com/ws", ping_interval: 0.02)
     ws.send(:stop_ping_thread)  # nothing to stop

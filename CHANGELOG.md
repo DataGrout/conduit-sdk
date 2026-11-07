@@ -6,6 +6,52 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed — a closed WebSocket left Python and Elixir subscribers waiting forever
+
+The Rust transport's contract is that a connection closing under the client,
+from either end, releases everything waiting on it: in-flight calls fail and
+every subscription's stream ends. Two ports did not keep it (2026-11-07,
+found when a DataGrout deploy restarted the server and a subscriber never
+noticed):
+
+- **Python**: the receive loop swallowed the close. Pending calls never
+  failed, `async for event in sub` never ended, and the transport still
+  reported itself connected. It now marks itself disconnected, fails pending
+  calls and pending subscribes with `"WS connection closed"`, and ends every
+  subscription, the same teardown `disconnect()` performs. The end-of-stream
+  marker also reaches a subscription whose buffer is full; before, it was
+  dropped with the overflow.
+- **Elixir**: pending calls already failed, but subscriber processes were
+  never told. Each now receives `{:subscription_closed, subscription_id}`
+  once, so a `receive` loop can stop.
+
+TypeScript and Ruby already kept the contract.
+
+### Fixed — a peer that vanished without closing went unnoticed
+
+Every transport pinged every 25 seconds to keep proxies from closing idle
+sockets, but only Python (through its WebSocket library) noticed when the
+pings stopped being answered. A peer that disappears without a close frame (a
+dropped NAT mapping, a host that went away) left Rust, TypeScript, Elixir and
+Ruby connected to nothing until the OS gave up on the TCP connection, often
+many minutes later. A ping still unanswered when the next one is due now
+closes the connection in all five, with the same release of waiters as any
+other close. TypeScript can only do this under Node: browsers expose neither
+pings nor pongs.
+
+Rust gains `WsTransport::with_ping_interval` (the other languages already
+took the interval as an option), and `PING_INTERVAL` is now public;
+`Duration::ZERO` turns the keepalive off, as `0` does elsewhere.
+
+### Changed — a full subscription buffer drops the oldest event
+
+Python and TypeScript dropped the newest event when a subscription's
+256-event buffer was full, although both documented dropping the oldest. They
+now drop the oldest, matching their own documentation and the Rust
+transport's lagging broadcast receiver.
+
 ## [0.8.1] - 2026-09-11
 
 ### Fixed — the intelligent interface returned no tools over WebSocket
