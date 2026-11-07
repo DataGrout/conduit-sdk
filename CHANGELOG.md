@@ -52,6 +52,23 @@ Python and TypeScript dropped the newest event when a subscription's
 now drop the oldest, matching their own documentation and the Rust
 transport's lagging broadcast receiver.
 
+### Security — dependency floors past their advisories
+
+`mint`, which `req` reaches through `finch`, is now required at 1.10.2 or
+later; earlier versions carry four advisories (CVE-2026-92103,
+CVE-2026-82672, CVE-2026-91043, CVE-2026-94194: HTTP/2 frame and header-list
+memory exhaustion, HTTP/1 response smuggling). The floor lives in `mix.exs`
+because consumers resolve from requirements, not from this repo's lock. The
+lock also takes `plug_crypto` 2.2.1 (CVE-2026-105963), a test-only
+dependency here.
+
+TypeScript now requires `@modelcontextprotocol/sdk` 1.32.0 or later (was
+`^1.0.0`). Earlier versions carry six advisories, among them one that hits
+conduit as a client: the SDK's HTTP transports followed cross-origin
+redirects and re-sent custom headers and request bodies
+(GHSA-6prh-2h8m-c8cw); the others cover its OAuth client, server-side
+request limits and token audience checks.
+
 ## [0.8.1] - 2026-09-11
 
 ### Fixed — the intelligent interface returned no tools over WebSocket

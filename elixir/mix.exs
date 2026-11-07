@@ -33,6 +33,10 @@ defmodule DatagroutConduit.MixProject do
       # file protects this repo but never reaches a consumer — they resolve
       # from these requirements — so the bound has to live here.
       {:req, "~> 0.7"},
+      # Not used directly: req reaches it through finch. Below 1.10.2 it carries
+      # four advisories (HTTP/2 frame and header-list memory exhaustion, HTTP/1
+      # response smuggling), and finch's own requirement would still admit them.
+      {:mint, "~> 1.10 and >= 1.10.2"},
       {:jason, "~> 1.4"},
       {:castore, "~> 1.0"},
       {:websockex, "~> 0.4"},
