@@ -115,6 +115,20 @@ sed -i '' "s/@version \"$CURRENT\"/@version \"$NEW_VERSION\"/" elixir/lib/datagr
 # Ruby — version.rb
 sed -i '' "s/VERSION = \"$CURRENT\"/VERSION = \"$NEW_VERSION\"/" ruby/lib/datagrout_conduit/version.rb
 
+# READMEs — the install lines registries show on each package page. Matched on
+# the package name, so no other version number in a README is touched.
+OLD_RE="${CURRENT//./\\.}"
+README_SED=(
+  -e "s#datagrout-conduit==$OLD_RE#datagrout-conduit==$NEW_VERSION#g"
+  -e "s#@datagrout/conduit@$OLD_RE#@datagrout/conduit@$NEW_VERSION#g"
+  -e "s#cargo add datagrout-conduit@$OLD_RE#cargo add datagrout-conduit@$NEW_VERSION#g"
+  -e "s#datagrout-conduit = \"$OLD_RE\"#datagrout-conduit = \"$NEW_VERSION\"#g"
+  -e "s#datagrout_conduit, \"~> $OLD_RE\"#datagrout_conduit, \"~> $NEW_VERSION\"#g"
+  -e "s#\"datagrout-conduit\", \"~> $OLD_RE\"#\"datagrout-conduit\", \"~> $NEW_VERSION\"#g"
+  -e "s#gem install datagrout-conduit -v $OLD_RE#gem install datagrout-conduit -v $NEW_VERSION#g"
+)
+sed -i '' "${README_SED[@]}" README.md rust/README.md typescript/README.md python/README.md elixir/README.md ruby/README.md
+
 echo "  rust/Cargo.toml                          → $NEW_VERSION"
 echo "  typescript/package.json                  → $NEW_VERSION"
 echo "  typescript/src/version.ts                → $NEW_VERSION"
@@ -123,6 +137,7 @@ echo "  python/src/.../_version.py               → $NEW_VERSION"
 echo "  elixir/mix.exs                           → $NEW_VERSION"
 echo "  elixir/lib/datagrout_conduit.ex          → $NEW_VERSION"
 echo "  ruby/lib/datagrout_conduit/version.rb    → $NEW_VERSION"
+echo "  README install lines (all six)           → $NEW_VERSION"
 echo ""
 
 # ─── Verify parity ───────────────────────────────────────────────────────────
@@ -241,7 +256,7 @@ if $DRY_RUN; then
   echo "Dry run complete. Review output above, then run without --dry-run to publish."
   echo ""
   echo "To revert the version bump:"
-  echo "  git checkout -- rust/Cargo.toml typescript/package.json typescript/src/index.ts python/pyproject.toml python/src/datagrout/conduit/__init__.py elixir/mix.exs elixir/lib/datagrout_conduit.ex ruby/lib/datagrout_conduit/version.rb"
+  echo "  git checkout -- rust/Cargo.toml typescript/package.json typescript/src/version.ts python/pyproject.toml python/src/datagrout/conduit/_version.py elixir/mix.exs elixir/lib/datagrout_conduit.ex ruby/lib/datagrout_conduit/version.rb README.md rust/README.md typescript/README.md python/README.md elixir/README.md ruby/README.md"
 else
   echo "─── PUBLISHING $NEW_VERSION ───"
   echo ""
