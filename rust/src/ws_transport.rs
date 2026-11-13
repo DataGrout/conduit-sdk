@@ -1242,4 +1242,134 @@ mod tests {
         assert!(state.pending.is_empty());
         assert!(state.pending_subscribe.is_empty());
     }
+
+    /// The transport against a real `wss://` server that demands a client
+    /// certificate, using the shared fixtures in `testdata/mtls`. Every SDK
+    /// runs the same loopback; this is the reference the ports are held to.
+    mod mtls_loopback {
+        use super::*;
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+        use rustls::server::WebPkiClientVerifier;
+        use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
+        use std::net::TcpListener;
+        use std::path::PathBuf;
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use tokio_tungstenite::tungstenite;
+
+        fn fixture(name: &str) -> Vec<u8> {
+            let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/mtls");
+            std::fs::read(dir.join(name)).unwrap()
+        }
+
+        fn certs(pem: &[u8]) -> Vec<CertificateDer<'static>> {
+            rustls_pemfile::certs(&mut &pem[..])
+                .collect::<std::result::Result<_, _>>()
+                .unwrap()
+        }
+
+        /// What the server saw: the client's certificate and its upgrade
+        /// `Authorization` header.
+        type Seen = (Vec<u8>, Option<String>);
+
+        /// A one-connection `wss://` server that refuses any client without a
+        /// certificate signed by the fixture CA.
+        // tungstenite's handshake callback fixes its error type, a full HTTP response.
+        #[allow(clippy::result_large_err)]
+        fn start_server() -> (u16, mpsc::Receiver<Seen>) {
+            let mut roots = RootCertStore::empty();
+            for ca in certs(&fixture("ca.pem")) {
+                roots.add(ca).unwrap();
+            }
+            let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+                .build()
+                .unwrap();
+            let key: PrivateKeyDer<'static> =
+                rustls_pemfile::private_key(&mut &fixture("server-key.pem")[..])
+                    .unwrap()
+                    .unwrap();
+            let config = Arc::new(
+                ServerConfig::builder()
+                    .with_client_cert_verifier(verifier)
+                    .with_single_cert(certs(&fixture("server.pem")), key)
+                    .unwrap(),
+            );
+
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (tx, rx) = mpsc::channel();
+
+            std::thread::spawn(move || {
+                let (tcp, _) = listener.accept().unwrap();
+                let tls = StreamOwned::new(ServerConnection::new(config).unwrap(), tcp);
+                let (auth_tx, auth_rx) = mpsc::channel();
+                let accepted = tungstenite::accept_hdr(
+                    tls,
+                    move |req: &tungstenite::handshake::server::Request,
+                          mut resp: tungstenite::handshake::server::Response| {
+                        let header = |name: &str| {
+                            req.headers()
+                                .get(name)
+                                .map(|v| v.to_str().unwrap().to_string())
+                        };
+                        auth_tx.send(header("authorization")).unwrap();
+                        if let Some(proto) = req.headers().get("sec-websocket-protocol") {
+                            resp.headers_mut()
+                                .insert("sec-websocket-protocol", proto.clone());
+                        }
+                        Ok(resp)
+                    },
+                );
+                // A refused client never reaches the upgrade.
+                let Ok(mut ws) = accepted else { return };
+                let peer = ws.get_ref().conn.peer_certificates().unwrap()[0].to_vec();
+                tx.send((peer, auth_rx.recv().unwrap())).unwrap();
+                // Hold the connection open until the client goes away.
+                while ws.read().is_ok() {}
+            });
+
+            (port, rx)
+        }
+
+        #[tokio::test]
+        async fn presents_the_client_certificate_and_the_upgrade_headers() {
+            let (port, seen) = start_server();
+            let identity = ConduitIdentity::from_pem(
+                fixture("client.pem"),
+                fixture("client-key.pem"),
+                Some(fixture("ca.pem")),
+            )
+            .unwrap();
+            let mut t = WsTransport::with_identity(
+                format!("wss://localhost:{port}/ws"),
+                AuthConfig::Bearer("loopback".into()),
+                Some(&identity),
+            )
+            .unwrap();
+
+            t.connect().await.unwrap();
+            let (peer, auth) = seen
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            t.disconnect().await.unwrap();
+
+            assert_eq!(peer, certs(&fixture("client.pem"))[0].to_vec());
+            assert_eq!(auth.as_deref(), Some("Bearer loopback"));
+        }
+
+        #[tokio::test]
+        async fn cannot_connect_without_an_identity_when_the_server_demands_one() {
+            let (port, seen) = start_server();
+            let mut t = WsTransport::new(
+                format!("wss://localhost:{port}/ws"),
+                AuthConfig::Bearer("loopback".into()),
+            )
+            .unwrap();
+
+            assert!(t.connect().await.is_err());
+            assert!(seen
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_err());
+        }
+    }
 }

@@ -321,11 +321,8 @@ module DatagroutConduit
         if @identity
           ctx.cert = @identity.openssl_cert
           ctx.key  = @identity.openssl_key
-          if @identity.ca_pem
-            store = OpenSSL::X509::Store.new
-            store.add_cert(@identity.openssl_ca)
-            ctx.cert_store = store
-          end
+          # The system roots plus the identity's CA, never the CA alone.
+          ctx.cert_store = @identity.cert_store if @identity.ca_pem
         end
 
         ctx

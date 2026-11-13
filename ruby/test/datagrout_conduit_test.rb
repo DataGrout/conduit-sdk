@@ -3,9 +3,13 @@
 require_relative "test_helper"
 
 class DatagroutConduitTest < Minitest::Test
-  def test_version
-    refute_nil DatagroutConduit::VERSION
-    assert_equal "0.8.2", DatagroutConduit::VERSION
+  # Every SDK ships the same version, and publish.sh reads Rust's as the
+  # source, so this checks parity instead of a literal bumped by hand.
+  def test_version_matches_the_other_sdks
+    cargo = File.expand_path("../../rust/Cargo.toml", __dir__)
+    skip "outside the conduit-sdk monorepo" unless File.exist?(cargo)
+
+    assert_equal File.read(cargo)[/^version = "(.+)"/, 1], DatagroutConduit::VERSION
   end
 
   def test_dg_url_recognizes_datagrout_ai

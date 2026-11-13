@@ -27,7 +27,7 @@
  */
 
 import type { MCPTool, MCPResource, MCPPrompt, AuthConfig } from "../types";
-import type { ConduitIdentity } from "../identity";
+import { trustedCas, type ConduitIdentity } from "../identity";
 import { OAuthTokenProvider, deriveTokenEndpoint } from "../oauth";
 import { authCodeProviderFrom, type AuthCodeProvider } from "../authcode";
 import type { DelegatedProvider } from "../delegation";
@@ -657,7 +657,7 @@ function buildUpgradeHeaders(
 export interface WsTlsOptions {
   cert?: string;
   key?: string;
-  ca?: string;
+  ca?: string[];
 }
 
 /**
@@ -669,8 +669,8 @@ export interface WsTlsOptions {
  * `fetchWithIdentity` does for the HTTP transports. Without an identity the
  * result is empty, so the `ws` client sees only `{ headers }` as before.
  *
- * The identity's CA, when present, is handed to `tls.connect` as `ca`, which
- * is how `fetchWithIdentity` trusts it for the HTTP transports.
+ * The identity's CA, when present, is trusted alongside Node's public roots
+ * (see `trustedCas`), as `fetchWithIdentity` does for the HTTP transports.
  */
 export function buildTlsOptions(
   url: string,
@@ -690,18 +690,22 @@ export function buildTlsOptions(
   return {
     cert: identity.certPem,
     key: identity.keyPem,
-    ...(identity.caPem ? { ca: identity.caPem } : {}),
+    ...(identity.caPem ? { ca: trustedCas(identity.caPem) } : {}),
   };
 }
 
 /**
  * Resolve the WebSocket implementation to use.
  *
- * Prefers the global `WebSocket` (available in Node ≥ 22, all browsers).
- * Falls back to the `ws` npm package for Node 18–21.
+ * Under Node this is always the `ws` package. Node's global `WebSocket`
+ * (undici) takes only `(url, protocols)` and silently ignores the options
+ * argument, so on Node 22+ it dropped the upgrade headers and the mTLS
+ * identity: the connection went out unauthenticated and without a client
+ * certificate. Browsers, which cannot set either, use the global.
  */
-async function resolveWebSocketImpl(): Promise<typeof WebSocket> {
-  if (typeof globalThis.WebSocket !== "undefined") {
+export async function resolveWebSocketImpl(): Promise<typeof WebSocket> {
+  const isNode = typeof process !== "undefined" && !!process.versions?.node;
+  if (!isNode && typeof globalThis.WebSocket !== "undefined") {
     return globalThis.WebSocket;
   }
   try {

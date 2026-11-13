@@ -13,6 +13,15 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { WsTransport } from "../src/transports/ws";
 import type { Grant } from "../src/authcode";
 
+// Under Node the transport always constructs the `ws` package (Node's global
+// WebSocket ignores headers and TLS options), so route that construction to
+// whichever capturing stub the test has installed on globalThis.
+vi.mock("ws", () => ({
+  default: function WsShim(...args: unknown[]) {
+    return new (globalThis as any).WebSocket(...args);
+  },
+}));
+
 /** Headers seen by the most recent WebSocket construction. */
 let captured: Record<string, string> | undefined;
 
