@@ -188,46 +188,8 @@ defmodule DatagroutConduit.Transport.MCP do
   defp build_connect_options(nil), do: []
 
   defp build_connect_options(%DatagroutConduit.Identity{} = identity) do
-    ssl_opts =
-      [
-        certfile: identity.cert_path,
-        keyfile: identity.key_path
-      ]
-      |> maybe_add(:cacertfile, identity.ca_path)
-      |> maybe_add_pem(:cert, identity.cert_pem)
-      |> maybe_add_pem(:key, identity.key_pem)
-      |> maybe_add_pem(:cacerts, identity.ca_pem)
-
-    [transport_opts: ssl_opts]
+    [transport_opts: DatagroutConduit.TLS.identity_opts(identity)]
   end
 
   defp build_connect_options(_), do: []
-
-  defp maybe_add(opts, _key, nil), do: opts
-  defp maybe_add(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp maybe_add_pem(opts, _key, nil), do: opts
-
-  defp maybe_add_pem(opts, :cert, pem) do
-    case :public_key.pem_decode(pem) do
-      [{:Certificate, der, _} | _] -> Keyword.put(opts, :cert, [{:Certificate, der}])
-      _ -> opts
-    end
-  end
-
-  defp maybe_add_pem(opts, :key, pem) do
-    case :public_key.pem_decode(pem) do
-      [{type, der, _} | _] -> Keyword.put(opts, :key, {type, der})
-      _ -> opts
-    end
-  end
-
-  defp maybe_add_pem(opts, :cacerts, pem) do
-    certs =
-      :public_key.pem_decode(pem)
-      |> Enum.filter(fn {type, _, _} -> type == :Certificate end)
-      |> Enum.map(fn {:Certificate, der, _} -> der end)
-
-    if certs != [], do: Keyword.put(opts, :cacerts, certs), else: opts
-  end
 end

@@ -127,15 +127,33 @@ module DatagroutConduit
       @ca_pem ? OpenSSL::X509::Certificate.new(@ca_pem) : nil
     end
 
+    # Every certificate in the CA bundle, which may hold more than one.
+    def ca_certificates
+      return [] unless @ca_pem
+
+      @ca_pem.scan(/-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----/m)
+             .map { |pem| OpenSSL::X509::Certificate.new(pem) }
+    end
+
+    # The trust store for a connection made with this identity: the system's
+    # default roots plus this identity's CA (every certificate in the bundle).
+    #
+    # A store holding only the identity's CA rejects every publicly-issued
+    # server certificate, and a DataGrout-issued identity carries the
+    # DataGrout CA while the gateway itself presents a public certificate.
+    # Rust's `build_connector` is the reference: webpki roots plus the CA.
+    def cert_store
+      store = OpenSSL::X509::Store.new
+      store.set_default_paths
+      ca_certificates.each { |cert| store.add_cert(cert) }
+      store
+    end
+
     # Configure Faraday SSL options with this identity's mTLS credentials.
     def configure_ssl(ssl)
       ssl.client_cert = openssl_cert
       ssl.client_key = openssl_key
-      if @ca_pem
-        store = OpenSSL::X509::Store.new
-        store.add_cert(openssl_ca)
-        ssl.cert_store = store
-      end
+      ssl.cert_store = cert_store if @ca_pem
     end
 
     class << self

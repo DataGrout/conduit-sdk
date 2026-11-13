@@ -270,6 +270,23 @@ export class ConduitIdentity {
 // ─── Node.js mTLS fetch helper ──────────────────────────────────────────────
 
 /**
+ * The trust store for a connection made with this identity: Node's bundled
+ * public roots plus the identity's own CA.
+ *
+ * `tls.connect`'s `ca` option replaces the bundled roots rather than adding to
+ * them, so passing the identity's CA alone stops every publicly-issued server
+ * certificate from verifying. A DataGrout-issued identity carries the DataGrout
+ * CA while the gateway itself presents a public certificate, so that is the
+ * common case, not an edge. Rust's `build_connector` is the reference: webpki
+ * roots plus the identity's CA.
+ */
+export function trustedCas(caPem: string): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const tls = require("node:tls") as typeof import("tls");
+  return [...tls.rootCertificates, caPem];
+}
+
+/**
  * Perform an HTTP/HTTPS request using Node.js built-in `https` with a client
  * certificate for mTLS.  Returns a `Response`-compatible object usable
  * everywhere the standard `fetch` response is expected.
@@ -304,7 +321,7 @@ export async function fetchWithIdentity(
     ),
     cert: identity.certPem,
     key: identity.keyPem,
-    ...(identity.caPem ? { ca: identity.caPem } : {}),
+    ...(identity.caPem ? { ca: trustedCas(identity.caPem) } : {}),
   };
 
   return new Promise<Response>((resolve, reject) => {

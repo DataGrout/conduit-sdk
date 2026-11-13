@@ -37,8 +37,6 @@ import asyncio
 import base64
 import json
 import ssl
-import tempfile
-import os
 import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Optional, Tuple
@@ -456,33 +454,17 @@ class WsTransport(Transport):
         return headers
 
     def _build_ssl_context(self) -> Optional[ssl.SSLContext]:
-        """Build an SSL context with mTLS if an identity is configured."""
+        """Build an SSL context with mTLS if an identity is configured.
+
+        The identity builds it, exactly as for the HTTP transports: its cert
+        and key, the system roots, plus its own CA. This used to assemble the
+        context itself from ``cert_pem_bytes()`` / ``key_pem_bytes()``, which
+        ``ConduitIdentity`` has never had, so every ``wss://`` connection with
+        an identity raised before the handshake.
+        """
         if self._identity is None:
             return None
-
-        ctx = ssl.create_default_context()
-
-        ca_bytes = getattr(self._identity, "ca_pem_bytes", lambda: None)()
-        if ca_bytes:
-            ctx.load_verify_locations(cadata=ca_bytes.decode())
-
-        cert_bytes = self._identity.cert_pem_bytes()
-        key_bytes = self._identity.key_pem_bytes()
-
-        # ssl.SSLContext.load_cert_chain accepts file paths only; write to tmp.
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as cf:
-            cf.write(cert_bytes)
-            cert_path = cf.name
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as kf:
-            kf.write(key_bytes)
-            key_path = kf.name
-        try:
-            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
-        finally:
-            os.unlink(cert_path)
-            os.unlink(key_path)
-
-        return ctx
+        return self._identity.build_ssl_context()
 
     # ── Receive loop ──────────────────────────────────────────────────────────
 

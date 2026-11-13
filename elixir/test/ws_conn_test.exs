@@ -55,8 +55,10 @@ defmodule DatagroutConduit.Transport.Ws.ConnTest do
       opts = Conn.build_ws_opts(@url, @headers, identity)
       ssl = opts[:ssl_options]
 
-      assert [{:Certificate, der}] = ssl[:cert]
-      assert [{:Certificate, ^der, :not_encrypted}] = :public_key.pem_decode(cert_pem)
+      # A bare DER binary: `:ssl` rejects `[{:Certificate, der}]` as an invalid
+      # option before connecting, which is how PEM identities used to fail.
+      assert [{:Certificate, der, :not_encrypted}] = :public_key.pem_decode(cert_pem)
+      assert ssl[:cert] == der
       assert {_type, _der} = ssl[:key]
 
       # Headers are untouched by the identity.
@@ -74,14 +76,18 @@ defmodule DatagroutConduit.Transport.Ws.ConnTest do
       assert ssl[:server_name_indication] == ~c"gateway.datagrout.ai"
     end
 
-    test "trusts the identity's CA when one is present", ctx do
+    test "trusts the identity's CA alongside the public roots", ctx do
       # A self-signed cert doubles as its own CA for the purpose of the option shape.
       {:ok, identity} = Identity.from_pem(ctx.cert_pem, ctx.key_pem, ctx.cert_pem)
 
       ssl = Conn.build_ws_opts(@url, @headers, identity)[:ssl_options]
 
-      assert [der] = ssl[:cacerts]
-      assert [{:Certificate, ^der, :not_encrypted}] = :public_key.pem_decode(ctx.cert_pem)
+      # Added, never substituted: `:cacerts` replaces the default store, and the
+      # gateway presents a public certificate while a DataGrout identity carries
+      # the DataGrout CA.
+      [{:Certificate, der, :not_encrypted}] = :public_key.pem_decode(ctx.cert_pem)
+      assert List.last(ssl[:cacerts]) == der
+      assert Enum.drop(ssl[:cacerts], -1) == public_roots()
       refute Keyword.has_key?(ssl, :cacertfile)
       assert ssl[:verify] == :verify_peer
     end
@@ -96,18 +102,21 @@ defmodule DatagroutConduit.Transport.Ws.ConnTest do
   end
 
   describe "build_ws_opts/3 with a path identity" do
-    test "points :ssl at the files, and at the CA file when given" do
-      identity = %Identity{
-        cert_path: "/etc/conduit/identity.pem",
-        key_path: "/etc/conduit/identity_key.pem",
-        ca_path: "/etc/conduit/ca.pem"
-      }
+    test "points :ssl at the cert and key files, and adds the CA file's cert to the roots" do
+      {:ok, identity} =
+        Identity.from_paths(fixture("client.pem"), fixture("client-key.pem"), fixture("ca.pem"))
 
       ssl = Conn.build_ws_opts(@url, @headers, identity)[:ssl_options]
 
-      assert ssl[:certfile] == "/etc/conduit/identity.pem"
-      assert ssl[:keyfile] == "/etc/conduit/identity_key.pem"
-      assert ssl[:cacertfile] == "/etc/conduit/ca.pem"
+      assert ssl[:certfile] == fixture("client.pem")
+      assert ssl[:keyfile] == fixture("client-key.pem")
+
+      [{:Certificate, ca_der, :not_encrypted}] =
+        :public_key.pem_decode(File.read!(fixture("ca.pem")))
+
+      assert List.last(ssl[:cacerts]) == ca_der
+      assert Enum.drop(ssl[:cacerts], -1) == public_roots()
+      refute Keyword.has_key?(ssl, :cacertfile)
       assert ssl[:verify] == :verify_peer
       refute Keyword.has_key?(ssl, :cert)
       refute Keyword.has_key?(ssl, :key)
@@ -115,6 +124,12 @@ defmodule DatagroutConduit.Transport.Ws.ConnTest do
   end
 
   # --- Test Helpers ---
+
+  defp fixture(name), do: Path.expand("../../testdata/mtls/#{name}", __DIR__)
+
+  defp public_roots do
+    for {:Certificate, der, _} <- :public_key.pem_decode(File.read!(CAStore.file_path())), do: der
+  end
 
   defp generate_test_pems do
     dir = Path.join(System.tmp_dir!(), "conduit_ws_conn_test_#{:rand.uniform(100_000)}")

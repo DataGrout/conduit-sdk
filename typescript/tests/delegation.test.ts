@@ -35,6 +35,14 @@ import { AuthCodeProvider, type FetchLike, type Grant } from "../src/authcode";
 import { WsTransport } from "../src/transports/ws";
 import { JSONRPCTransport } from "../src/transports/jsonrpc";
 
+// Under Node the WS transport always constructs the `ws` package, so route
+// that construction to the capturing stub installed on globalThis below.
+vi.mock("ws", () => ({
+  default: function WsShim(...args: unknown[]) {
+    return new (globalThis as any).WebSocket(...args);
+  },
+}));
+
 const ENDPOINT = "https://as.example.com/oauth/token";
 
 const SUCCESS_BODY = JSON.stringify({

@@ -6,6 +6,40 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed — WebSocket mTLS in every port but Rust
+
+Rust's `build_connector` is the contract: present the identity's certificate,
+and trust the public roots *plus* the identity's CA. Each port broke it
+somewhere (2026-11-12, found while wiring dg-node, which connects over `wss://`
+with a DataGrout-issued identity):
+
+- **TypeScript**: on Node 22+, every version the package supports, the WS
+  transport constructed Node's global `WebSocket`, which ignores the options
+  argument. Upgrade headers and the client certificate were both dropped, so
+  the connection went out unauthenticated. Under Node it now always uses the
+  `ws` package; browsers keep the global.
+- **Python**: `_build_ssl_context` called `cert_pem_bytes()` / `key_pem_bytes()`,
+  which `ConduitIdentity` has never had, so any `wss://` connection with an
+  identity raised before the handshake. It now uses the identity's own
+  `build_ssl_context()`, as the HTTP transports do. The `ws` extra now requires
+  `websockets>=13.0`, the first release with the `websockets.asyncio` client the
+  transport imports.
+- **Elixir**: a PEM identity's certificate reached `:ssl` as
+  `[{:Certificate, der}]`, which it rejects as an invalid option, so PEM
+  identities could not connect over WS or HTTP. Path identities were
+  unaffected. The cert, key and trust options now come from one module,
+  `DatagroutConduit.TLS`, shared by the WS, MCP and registration transports.
+- **TypeScript, Elixir, Ruby**: an identity with a CA *replaced* the trust store
+  with that CA instead of adding it to the public roots. A DataGrout identity
+  carries the DataGrout CA while the gateway presents a public certificate, so
+  server verification failed. WS and HTTP transports alike now trust both.
+
+`testdata/mtls/` adds a test-only CA with server and client certificates, and
+each language, Rust included, now runs the same loopback: a real `wss://`
+server that demands a client certificate signed by that CA.
+
 ## [0.8.2] - 2026-11-07
 
 ### Fixed — a closed WebSocket left Python and Elixir subscribers waiting forever

@@ -54,3 +54,24 @@ them. The other three would fail, which is enough to stop the drift.
 Load this file, assert every row above, and add the language to the table. If a
 new field ever joins the grant, it changes here first and every suite fails
 until it is ported — which is the whole idea.
+
+## `mtls/` — loopback mTLS fixtures
+
+A test-only CA (`ca.pem`), a server certificate for `localhost` / `127.0.0.1`
+(`server.pem`), and a client certificate (`client.pem`) both issued by it, with
+their keys. The keys are committed on purpose: nothing trusts this CA outside
+these tests. `gen.sh` regenerates the set.
+
+Each language's WebSocket suite starts a loopback `wss://` server that demands a
+client certificate signed by this CA, then connects the transport with an
+identity of `client.pem` + `client-key.pem` + `ca.pem`. A pass means the
+transport presented the certificate and trusted the identity's CA for the
+server. The other half of the trust rule — the identity's CA is *added* to the
+public roots, never substituted for them — cannot be exercised offline, so each
+suite asserts it on the TLS options it builds.
+
+- Rust — `rust/src/ws_transport.rs`, `mtls_loopback` tests
+- TypeScript — `typescript/tests/ws_mtls_loopback.test.ts`
+- Python — `python/tests/test_ws_mtls.py`
+- Elixir — `elixir/test/ws_mtls_loopback_test.exs`
+- Ruby — `ruby/test/ws_mtls_test.rb`

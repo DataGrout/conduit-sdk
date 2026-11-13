@@ -59,13 +59,7 @@ module DatagroutConduit
       end
 
       def configure_ssl(faraday)
-        faraday.ssl.client_cert = @identity.openssl_cert
-        faraday.ssl.client_key = @identity.openssl_key
-        if @identity.ca_pem
-          store = OpenSSL::X509::Store.new
-          store.add_cert(@identity.openssl_ca)
-          faraday.ssl.cert_store = store
-        end
+        @identity.configure_ssl(faraday.ssl)
       end
 
       def build_headers

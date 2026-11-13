@@ -6,6 +6,8 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
 
   use WebSockex
 
+  alias DatagroutConduit.TLS
+
   @doc false
   def start_link(url, opts) do
     parent = Keyword.fetch!(opts, :parent)
@@ -33,7 +35,7 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
   # roots) ever accept. Supplying `:ssl_options` replaces that default, so the
   # trust store, SNI and hostname check are named here for identity-less and
   # identity-carrying connections alike; an mTLS identity additionally presents
-  # its cert and key, and its CA becomes the trust store when it has one.
+  # its cert and key, and its CA joins the public roots (see `TLS`).
   @doc false
   def build_ws_opts(url, headers, identity) do
     base = [extra_headers: headers, handle_initial_conn_failure: true]
@@ -51,62 +53,19 @@ defmodule DatagroutConduit.Transport.Ws.Conn do
       server_name_indication: String.to_charlist(URI.parse(url).host),
       customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]
     ]
-    |> Keyword.merge(trust_store(identity))
-    |> client_identity(identity)
+    |> Keyword.merge(TLS.identity_opts(identity))
+    |> default_trust()
   end
 
   defp ssl_options(_url, _identity), do: []
 
-  defp client_identity(opts, %DatagroutConduit.Identity{} = identity) do
-    opts
-    |> maybe_add(:certfile, identity.cert_path)
-    |> maybe_add(:keyfile, identity.key_path)
-    |> maybe_add_pem(:cert, identity.cert_pem)
-    |> maybe_add_pem(:key, identity.key_pem)
-  end
-
-  defp client_identity(opts, _no_identity), do: opts
-
-  # Passing `:ssl_options` replaces WebSockex's own TLS defaults, so the trust
-  # store has to be named here: the identity's CA when it has one, otherwise the
-  # same CA bundle the Finch-backed transports verify against.
-  defp trust_store(%{ca_path: ca_path}) when is_binary(ca_path), do: [cacertfile: ca_path]
-
-  defp trust_store(%{ca_pem: ca_pem}) when is_binary(ca_pem) do
-    case maybe_add_pem([], :cacerts, ca_pem) do
-      [] -> [cacertfile: CAStore.file_path()]
-      opts -> opts
-    end
-  end
-
-  defp trust_store(_identity), do: [cacertfile: CAStore.file_path()]
-
-  defp maybe_add(opts, _key, nil), do: opts
-  defp maybe_add(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp maybe_add_pem(opts, _key, nil), do: opts
-
-  defp maybe_add_pem(opts, :cert, pem) do
-    case :public_key.pem_decode(pem) do
-      [{:Certificate, der, _} | _] -> Keyword.put(opts, :cert, [{:Certificate, der}])
-      _ -> opts
-    end
-  end
-
-  defp maybe_add_pem(opts, :key, pem) do
-    case :public_key.pem_decode(pem) do
-      [{type, der, _} | _] -> Keyword.put(opts, :key, {type, der})
-      _ -> opts
-    end
-  end
-
-  defp maybe_add_pem(opts, :cacerts, pem) do
-    certs =
-      :public_key.pem_decode(pem)
-      |> Enum.filter(fn {type, _, _} -> type == :Certificate end)
-      |> Enum.map(fn {:Certificate, der, _} -> der end)
-
-    if certs != [], do: Keyword.put(opts, :cacerts, certs), else: opts
+  # Passing `:ssl_options` replaces WebSockex's own TLS defaults, so without an
+  # identity CA the trust store still has to be named: the same CA bundle the
+  # Finch-backed transports verify against.
+  defp default_trust(opts) do
+    if Keyword.has_key?(opts, :cacerts),
+      do: opts,
+      else: Keyword.put(opts, :cacertfile, CAStore.file_path())
   end
 
   # ── WebSockex callbacks ────────────────────────────────────────────────────
