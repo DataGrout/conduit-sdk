@@ -6,7 +6,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.8.3] - 2026-11-12
 
 ### Fixed — WebSocket mTLS in every port but Rust
 
@@ -35,6 +35,8 @@ with a DataGrout-issued identity):
   with that CA instead of adding it to the public roots. A DataGrout identity
   carries the DataGrout CA while the gateway presents a public certificate, so
   server verification failed. WS and HTTP transports alike now trust both.
+
+- **Rust**: no change in behaviour; released in step with the other four.
 
 `testdata/mtls/` adds a test-only CA with server and client certificates, and
 each language, Rust included, now runs the same loopback: a real `wss://`

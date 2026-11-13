@@ -9,13 +9,13 @@ Connect to remote MCP and JSONRPC servers, invoke tools, discover capabilities w
 Add to your Gemfile:
 
 ```ruby
-gem "datagrout-conduit", "~> 0.8.2"
+gem "datagrout-conduit", "~> 0.8.3"
 ```
 
 Or install directly:
 
 ```sh
-gem install datagrout-conduit -v 0.8.2
+gem install datagrout-conduit -v 0.8.3
 ```
 
 ## Quick Start
